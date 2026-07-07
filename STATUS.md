@@ -1,16 +1,28 @@
 # STATUS
 
-CURRENT: EMBER | STEP: 4 | ATTEMPTS: 0 | LAST-ACTION: EMBER DSP core done — per-bin state machine + phase-vocoder tails PASS all 3 done-bar asserts first try (τ=10s tail +2s>-40dB & monotone; freeze flat; mix=0 null<-80dB). No escalation needed. Building params/GUI/presets next.
+CURRENT: (none) | STEP: - | ATTEMPTS: 0 | LAST-ACTION: EMBER SHIPPED (full, [x]) — ember.clap green on clap-validator + pluginval s8, installed. suite_core::stft added (all crates revalidated). No escalation, no descope.
 PUSH-PENDING: no
-DONE: BOOTSTRAP, GRIT
+DONE: BOOTSTRAP, GRIT, EMBER
 DESCOPED: GRIT Mode C (spectral STFT) → DEFERRED.md
 
 ## LOG (append-only: date | item | outcome | how-to-test-in-FL)
 2026-07-07 | PLANNING | PRD v2 hardened via 3-agent adversarial review; repo, specs, loop contract, allowlist committed | n/a
 2026-07-07 | BOOTSTRAP | GO: _template passes clap-validator + pluginval on windows-gnu | rescan plugins in FL, load "Qeynos Template"
 2026-07-07 | GRIT | SHIPPED (degraded, [x]*): sidechained distortion, Modes A (Env-Drive) + B (Waveshape); Mode C (spectral STFT) deferred to DEFERRED.md. 4x oversampling + presets module added to suite-core (all-crates revalidated: _template green). clap-validator 14/0, pluginval s8 PASS, CLAP installed. Done-bar met: THD rises during SC pulses, auto-gain holds post-RMS within ±1 dB of pre. 5 presets, renders in renders/GRIT/. | FL: Find more plugins → add "Qeynos GRIT", route a kick to its sidechain, load "Kick Bass Grit", confirm it pumps with the kick (SC Listen to audition the focus band)
+2026-07-07 | EMBER | SHIPPED (full, [x]): spectral fader / temporal smoother. Added alloc-free streaming STFT engine to suite-core (`suite_core::stft`, realfft 3.5) — all crates revalidated green (_template, grit). EMBER: per-bin state machine (coef=1-exp(-T/τ), 8-band log-freq attack/decay curves, decay to 60s), phase-vocoder tails (tonal ring), 1/3-oct fitting envelope, freeze (τ→∞), gate, tail gain, latency-aligned dry/wet. Reports 2048-sample latency. Done-bar met on FIRST attempt (no Fable escalation): τ=10s noise tail +2s > -40 dBFS & frame-RMS monotone↓; freeze tail flat ±1 dB over 5s; mix=0 nulls vs latency-delayed dry < -80 dB. clap-validator PASS, pluginval s8 SUCCESS (44.1/48/96k, blocks 64..1024), CLAP installed. 5 presets, renders in renders/EMBER/. | FL: Find more plugins → add "Qeynos EMBER", load "Bloom Pad" on a pad/vocal (notes bloom & sustain past release); play a sustained note, tick Freeze, stop input → spectrum holds as a drone. Host reports +2048-sample latency (auto delay-comp).
 
 ## NOTES
+- New suite-core API (EMBER, 2026-07-07): `stft::Stft` — streaming alloc-free STFT.
+  `Stft::new(fft_size, hop)` (periodic Hann, COLA-normalized WOLA); `process(x, &mut cb)`
+  where `cb: FnMut(&mut [Complex<f32>])` mutates the length-`num_bins()` complex spectrum
+  per frame (DC/Nyquist imag auto-zeroed for a valid real inverse); returns one output
+  sample delayed by `latency()` (== fft_size). Also `reset()`, `fft_size()`, `hop()`,
+  `num_bins()` (= fft_size/2+1), `bin_freq(k, sr)`. `Complex` is re-exported from
+  `suite_core::stft`. Backed by `realfft` (workspace dep, pure Rust, windows-gnu clean).
+  SMUDGE/SEANCE/CARVE/DRIFT reuse this. To build a spectral effect: keep per-bin state,
+  in the callback read mag=`b.norm()`/phase=`b.arg()`, rewrite `b = Complex::from_polar`.
+  Report `set_latency_samples(stft.latency())` and delay the dry path by the same for a
+  clean mix=0 null.
 - New suite-core APIs (GRIT, 2026-07-07): `dsp::Oversampler2x` / `dsp::Oversampler4x`
   (polyphase halfband FIR, alloc-free `process(x, |v| f(v))`; reset()); `presets`
   module (`Preset{name, values}`, `Preset::parse`, `load_all(&[&str])` — flat embedded

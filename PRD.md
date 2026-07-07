@@ -297,7 +297,7 @@ Phase 0
 - [x] BOOTSTRAP (toolchain, workspace, harness+testsig, validators, _template GO/NO-GO)
 
 Phase 1 — priority plugins
-- [x]* GRIT   - [ ] EMBER   - [ ] IMPACT   - [ ] TRACER   - [ ] OVERSEER
+- [x]* GRIT   - [x] EMBER   - [ ] IMPACT   - [ ] TRACER   - [ ] OVERSEER
 
 Quick wins (non-Rust, immediately usable)
 - [ ] W8-VITALGEN   - [ ] W4-SESSION-BOOTSTRAP
