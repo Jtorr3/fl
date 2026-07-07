@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>graphify - graphify-out\graph.html</title>
+<script src="https://unpkg.com/vis-network@9.1.6/standalone/umd/vis-network.min.js"
+        integrity="sha384-Ux6phic9PEHJ38YtrijhkzyJ8yQlH8i/+buBR8s3mAZOJrP1gwyvAcIYl3GWtpX1"
+        crossorigin="anonymous"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0f0f1a; color: #e0e0e0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; display: flex; height: 100vh; overflow: hidden; }
+  #graph { flex: 1; }
+  #sidebar { width: 280px; background: #1a1a2e; border-left: 1px solid #2a2a4e; display: flex; flex-direction: column; overflow: hidden; }
+  #search-wrap { padding: 12px; border-bottom: 1px solid #2a2a4e; }
+  #search { width: 100%; background: #0f0f1a; border: 1px solid #3a3a5e; color: #e0e0e0; padding: 7px 10px; border-radius: 6px; font-size: 13px; outline: none; }
+  #search:focus { border-color: #4E79A7; }
+  #search-results { max-height: 140px; overflow-y: auto; padding: 4px 12px; border-bottom: 1px solid #2a2a4e; display: none; }
+  .search-item { padding: 4px 6px; cursor: pointer; border-radius: 4px; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .search-item:hover { background: #2a2a4e; }
+  #info-panel { padding: 14px; border-bottom: 1px solid #2a2a4e; min-height: 140px; }
+  #info-panel h3 { font-size: 13px; color: #aaa; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.05em; }
+  #info-content { font-size: 13px; color: #ccc; line-height: 1.6; }
+  #info-content .field { margin-bottom: 5px; }
+  #info-content .field b { color: #e0e0e0; }
+  #info-content .empty { color: #555; font-style: italic; }
+  .neighbor-link { display: block; padding: 2px 6px; margin: 2px 0; border-radius: 3px; cursor: pointer; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-left: 3px solid #333; }
+  .neighbor-link:hover { background: #2a2a4e; }
+  #neighbors-list { max-height: 160px; overflow-y: auto; margin-top: 4px; }
+  #legend-wrap { flex: 1; overflow-y: auto; padding: 12px; }
+  #legend-wrap h3 { font-size: 13px; color: #aaa; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.05em; }
+  .legend-item { display: flex; align-items: center; gap: 8px; padding: 4px 0; cursor: pointer; border-radius: 4px; font-size: 12px; }
+  .legend-item:hover { background: #2a2a4e; padding-left: 4px; }
+  .legend-item.dimmed { opacity: 0.35; }
+  .legend-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+  .legend-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .legend-count { color: #666; font-size: 11px; }
+  #stats { padding: 10px 14px; border-top: 1px solid #2a2a4e; font-size: 11px; color: #555; }
+  #legend-controls { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; padding: 4px 0; }
+  #legend-controls label { display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 12px; color: #aaa; user-select: none; }
+  #legend-controls label:hover { color: #e0e0e0; }
+  .legend-cb, #select-all-cb { appearance: none; -webkit-appearance: none; width: 14px; height: 14px; border: 1.5px solid #3a3a5e; border-radius: 3px; background: #0f0f1a; cursor: pointer; position: relative; flex-shrink: 0; }
+  .legend-cb:checked, #select-all-cb:checked { background: #4E79A7; border-color: #4E79A7; }
+  .legend-cb:checked::after, #select-all-cb:checked::after { content: ''; position: absolute; left: 3.5px; top: 1px; width: 4px; height: 7px; border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg); }
+  #select-all-cb:indeterminate { background: #4E79A7; border-color: #4E79A7; }
+  #select-all-cb:indeterminate::after { content: ''; position: absolute; left: 2px; top: 5px; width: 8px; height: 2px; background: #fff; border: none; transform: none; }
+</style>
+</head>
+<body>
+<div id="graph"></div>
+<div id="sidebar">
+  <div id="search-wrap">
+    <input id="search" type="text" placeholder="Search nodes..." autocomplete="off">
+    <div id="search-results"></div>
+  </div>
+  <div id="info-panel">
+    <h3>Node Info</h3>
+    <div id="info-content"><span class="empty">Click a node to inspect it</span></div>
+  </div>
+  <div id="legend-wrap">
+    <h3>Communities</h3>
+    <div id="legend-controls">
+      <label><input type="checkbox" id="select-all-cb" checked onchange="toggleAllCommunities(!this.checked)">Select All</label>
+    </div>
+    <div id="legend"></div>
+  </div>
+  <div id="stats">57 nodes &middot; 58 edges &middot; 13 communities</div>
+</div>
+<script>
+const RAW_NODES = [{"id": "prd_qeynos_audio_suite", "label": "Qeynos Audio Suite", "color": {"background": "#4E79A7", "border": "#4E79A7", "highlight": {"background": "#ffffff", "border": "#4E79A7"}}, "size": 40.0, "font": {"size": 12, "color": "#ffffff"}, "title": "Qeynos Audio Suite", "community": 0, "community_name": "Standalone FX Plugins", "source_file": "PRD.md", "file_type": "concept", "degree": 11}, {"id": "prd_execution_protocol", "label": "Execution Protocol (one plugin at a time)", "color": {"background": "#4E79A7", "border": "#4E79A7", "highlight": {"background": "#ffffff", "border": "#4E79A7"}}, "size": 12.7, "font": {"size": 0, "color": "#ffffff"}, "title": "Execution Protocol (one plugin at a time)", "community": 0, "community_name": "Standalone FX Plugins", "source_file": "PRD.md", "file_type": "rationale", "degree": 1}, {"id": "prd_suite_core", "label": "suite-core (shared lib crate)", "color": {"background": "#F28E2B", "border": "#F28E2B", "highlight": {"background": "#ffffff", "border": "#F28E2B"}}, "size": 26.4, "font": {"size": 12, "color": "#ffffff"}, "title": "suite-core (shared lib crate)", "community": 1, "community_name": "Reverb & Suite Core", "source_file": "PRD.md", "file_type": "concept", "degree": 6}, {"id": "prd_the_bus", "label": "The Bus (cross-plugin shared state)", "color": {"background": "#EDC948", "border": "#EDC948", "highlight": {"background": "#ffffff", "border": "#EDC948"}}, "size": 20.9, "font": {"size": 12, "color": "#ffffff"}, "title": "The Bus (cross-plugin shared state)", "community": 5, "community_name": "Shared Bus Architecture", "source_file": "PRD.md", "file_type": "concept", "degree": 4}, {"id": "prd_build_ps1", "label": "build.ps1 (build/bundle/validate/install script)", "color": {"background": "#E15759", "border": "#E15759", "highlight": {"background": "#ffffff", "border": "#E15759"}}, "size": 15.5, "font": {"size": 12, "color": "#ffffff"}, "title": "build.ps1 (build/bundle/validate/install script)", "community": 2, "community_name": "Build Pipeline & Tooling", "source_file": "PRD.md", "file_type": "code", "degree": 2}, {"id": "prd_nih_plug", "label": "nih-plug (Rust plugin framework)", "color": {"background": "#F28E2B", "border": "#F28E2B", "highlight": {"background": "#ffffff", "border": "#F28E2B"}}, "size": 15.5, "font": {"size": 12, "color": "#ffffff"}, "title": "nih-plug (Rust plugin framework)", "community": 1, "community_name": "Reverb & Suite Core", "source_file": "PRD.md", "file_type": "concept", "degree": 2}, {"id": "prd_pluginval", "label": "pluginval (headless VST3 validator)", "color": {"background": "#E15759", "border": "#E15759", "highlight": {"background": "#ffffff", "border": "#E15759"}}, "size": 15.5, "font": {"size": 12, "color": "#ffffff"}, "title": "pluginval (headless VST3 validator)", "community": 2, "community_name": "Build Pipeline & Tooling", "source_file": "PRD.md", "file_type": "concept", "degree": 2}, {"id": "prd_template", "label": "_template (hello-gain reference crate)", "color": {"background": "#E15759", "border": "#E15759", "highlight": {"background": "#ffffff", "border": "#E15759"}}, "size": 12.7, "font": {"size": 0, "color": "#ffffff"}, "title": "_template (hello-gain reference crate)", "community": 2, "community_name": "Build Pipeline & Tooling", "source_file": "PRD.md", "file_type": "concept", "degree": 1}, {"id": "prd_shaper_bank", "label": "Waveshaper bank (suite-core DSP)", "color": {"background": "#76B7B2", "border": "#76B7B2", "highlight": {"background": "#ffffff", "border": "#76B7B2"}}, "size": 20.9, "font": {"size": 12, "color": "#ffffff"}, "title": "Waveshaper bank (suite-core DSP)", "community": 3, "community_name": "Distortion Family", "source_file": "PRD.md", "file_type": "concept", "degree": 4}, {"id": "prd_stft_engine", "label": "STFT engine (realfft, OLA, Hann)", "color": {"background": "#59A14F", "border": "#59A14F", "highlight": {"background": "#ffffff", "border": "#59A14F"}}, "size": 23.6, "font": {"size": 12, "color": "#ffffff"}, "title": "STFT engine (realfft, OLA, Hann)", "community": 4, "community_name": "Spectral Engine Family", "source_file": "PRD.md", "file_type": "concept", "degree": 5}, {"id": "prd_fdn_reverb_core", "label": "FDN reverb core (suite-core DSP)", "color": {"background": "#F28E2B", "border": "#F28E2B", "highlight": {"background": "#ffffff", "border": "#F28E2B"}}, "size": 20.9, "font": {"size": 12, "color": "#ffffff"}, "title": "FDN reverb core (suite-core DSP)", "community": 1, "community_name": "Reverb & Suite Core", "source_file": "PRD.md", "file_type": "concept", "degree": 4}, {"id": "prd_grit", "label": "GRIT \u2014 sidechained distortion", "color": {"background": "#76B7B2", "border": "#76B7B2", "highlight": {"background": "#ffffff", "border": "#76B7B2"}}, "size": 23.6, "font": {"size": 12, "color": "#ffffff"}, "title": "GRIT \u2014 sidechained distortion", "community": 3, "community_name": "Distortion Family", "source_file": "PRD.md", "file_type": "concept", "degree": 5}, {"id": "prd_ember", "label": "EMBER \u2014 spectral fader / temporal smoother", "color": {"background": "#59A14F", "border": "#59A14F", "highlight": {"background": "#ffffff", "border": "#59A14F"}}, "size": 20.9, "font": {"size": 12, "color": "#ffffff"}, "title": "EMBER \u2014 spectral fader / temporal smoother", "community": 4, "community_name": "Spectral Engine Family", "source_file": "PRD.md", "file_type": "concept", "degree": 4}, {"id": "prd_impact", "label": "IMPACT \u2014 kick synth (MIDI instrument)", "color": {"background": "#F28E2B", "border": "#F28E2B", "highlight": {"background": "#ffffff", "border": "#F28E2B"}}, "size": 15.5, "font": {"size": 12, "color": "#ffffff"}, "title": "IMPACT \u2014 kick synth (MIDI instrument)", "community": 1, "community_name": "Reverb & Suite Core", "source_file": "PRD.md", "file_type": "concept", "degree": 2}, {"id": "prd_tracer", "label": "TRACER \u2014 pitch-tracking multiband saturation", "color": {"background": "#76B7B2", "border": "#76B7B2", "highlight": {"background": "#ffffff", "border": "#76B7B2"}}, "size": 15.5, "font": {"size": 12, "color": "#ffffff"}, "title": "TRACER \u2014 pitch-tracking multiband saturation", "community": 3, "community_name": "Distortion Family", "source_file": "PRD.md", "file_type": "concept", "degree": 2}, {"id": "prd_overseer", "label": "OVERSEER \u2014 mastering system (Node + Master)", "color": {"background": "#EDC948", "border": "#EDC948", "highlight": {"background": "#ffffff", "border": "#EDC948"}}, "size": 18.2, "font": {"size": 12, "color": "#ffffff"}, "title": "OVERSEER \u2014 mastering system (Node + Master)", "community": 5, "community_name": "Shared Bus Architecture", "source_file": "PRD.md", "file_type": "concept", "degree": 3}, {"id": "prd_drift", "label": "DRIFT \u2014 infinity filter (Sweep clone)", "color": {"background": "#4E79A7", "border": "#4E79A7", "highlight": {"background": "#ffffff", "border": "#4E79A7"}}, "size": 12.7, "font": {"size": 0, "color": "#ffffff"}, "title": "DRIFT \u2014 infinity filter (Sweep clone)", "community": 0, "community_name": "Standalone FX Plugins", "source_file": "PRD.md", "file_type": "concept", "degree": 1}, {"id": "prd_wire", "label": "WIRE \u2014 codec degradation (Codec clone)", "color": {"background": "#59A14F", "border": "#59A14F", "highlight": {"background": "#ffffff", "border": "#59A14F"}}, "size": 12.7, "font": {"size": 0, "color": "#ffffff"}, "title": "WIRE \u2014 codec degradation (Codec clone)", "community": 4, "community_name": "Spectral Engine Family", "source_file": "PRD.md", "file_type": "concept", "degree": 1}, {"id": "prd_ouroboros", "label": "OUROBOROS \u2014 recursive processor (Recurse clone)", "color": {"background": "#4E79A7", "border": "#4E79A7", "highlight": {"background": "#ffffff", "border": "#4E79A7"}}, "size": 12.7, "font": {"size": 0, "color": "#ffffff"}, "title": "OUROBOROS \u2014 recursive processor (Recurse clone)", "community": 0, "community_name": "Standalone FX Plugins", "source_file": "PRD.md", "file_type": "concept", "degree": 1}, {"id": "prd_swarm", "label": "SWARM \u2014 mass granulator (Glow clone)", "color": {"background": "#4E79A7", "border": "#4E79A7", "highlight": {"background": "#ffffff", "border": "#4E79A7"}}, "size": 15.5, "font": {"size": 12, "color": "#ffffff"}, "title": "SWARM \u2014 mass granulator (Glow clone)", "community": 0, "community_name": "Standalone FX Plugins", "source_file": "PRD.md", "file_type": "concept", "degree": 2}, {"id": "prd_smudge", "label": "SMUDGE \u2014 spectral chaos (Smear clone)", "color": {"background": "#59A14F", "border": "#59A14F", "highlight": {"background": "#ffffff", "border": "#59A14F"}}, "size": 18.2, "font": {"size": 12, "color": "#ffffff"}, "title": "SMUDGE \u2014 spectral chaos (Smear clone)", "community": 4, "community_name": "Spectral Engine Family", "source_file": "PRD.md", "file_type": "concept", "degree": 3}, {"id": "prd_murmur", "label": "MURMUR \u2014 stochastic reverb (Hikari clone)", "color": {"background": "#F28E2B", "border": "#F28E2B", "highlight": {"background": "#ffffff", "border": "#F28E2B"}}, "size": 12.7, "font": {"size": 0, "color": "#ffffff"}, "title": "MURMUR \u2014 stochastic reverb (Hikari clone)", "community": 1, "community_name": "Reverb & Suite Core", "source_file": "PRD.md", "file_type": "concept", "degree": 1}, {"id": "prd_flyby", "label": "FLYBY \u2014 doppler spatializer (Transfer clone)", "color": {"background": "#4E79A7", "border": "#4E79A7", "highlight": {"background": "#ffffff", "border": "#4E79A7"}}, "size": 12.7, "font": {"size": 0, "color": "#ffffff"}, "title": "FLYBY \u2014 doppler spatializer (Transfer clone)", "community": 0, "community_name": "Standalone FX Plugins", "source_file": "PRD.md", "file_type": "concept", "degree": 1}, {"id": "prd_cleave", "label": "CLEAVE \u2014 multi slicer (Slice clone)", "color": {"background": "#4E79A7", "border": "#4E79A7", "highlight": {"background": "#ffffff", "border": "#4E79A7"}}, "size": 15.5, "font": {"size": 12, "color": "#ffffff"}, "title": "CLEAVE \u2014 multi slicer (Slice clone)", "community": 0, "community_name": "Standalone FX Plugins", "source_file": "PRD.md", "file_type": "concept", "degree": 2}, {"id": "prd_pluck", "label": "PLUCK \u2014 strummer (Strum clone)", "color": {"background": "#FF9DA7", "border": "#FF9DA7", "highlight": {"background": "#ffffff", "border": "#FF9DA7"}}, "size": 12.7, "font": {"size": 0, "color": "#ffffff"}, "title": "PLUCK \u2014 strummer (Strum clone)", "community": 7, "community_name": "Karplus-Strong Instruments", "source_file": "PRD.md", "file_type": "concept", "degree": 1}, {"id": "prd_shapeshift", "label": "SHAPESHIFT \u2014 morphing distortion (Teuri clone)", "color": {"background": "#76B7B2", "border": "#76B7B2", "highlight": {"background": "#ffffff", "border": "#76B7B2"}}, "size": 15.5, "font": {"size": 12, "color": "#ffffff"}, "title": "SHAPESHIFT \u2014 morphing distortion (Teuri clone)", "community": 3, "community_name": "Distortion Family", "source_file": "PRD.md", "file_type": "concept", "degree": 2}, {"id": "prd_chamber", "label": "CHAMBER \u2014 space simulator (Eigen clone)", "color": {"background": "#F28E2B", "border": "#F28E2B", "highlight": {"background": "#ffffff", "border": "#F28E2B"}}, "size": 12.7, "font": {"size": 0, "color": "#ffffff"}, "title": "CHAMBER \u2014 space simulator (Eigen clone)", "community": 1, "community_name": "Reverb & Suite Core", "source_file": "PRD.md", "file_type": "concept", "degree": 1}, {"id": "prd_carve", "label": "CARVE \u2014 spectral ducker", "color": {"background": "#76B7B2", "border": "#76B7B2", "highlight": {"background": "#ffffff", "border": "#76B7B2"}}, "size": 15.5, "font": {"size": 12, "color": "#ffffff"}, "title": "CARVE \u2014 spectral ducker", "community": 3, "community_name": "Distortion Family", "source_file": "PRD.md", "file_type": "concept", "degree": 2}, {"id": "prd_nerve", "label": "NERVE \u2014 suite modulation bus", "color": {"background": "#EDC948", "border": "#EDC948", "highlight": {"background": "#ffffff", "border": "#EDC948"}}, "size": 15.5, "font": {"size": 12, "color": "#ffffff"}, "title": "NERVE \u2014 suite modulation bus", "community": 5, "community_name": "Shared Bus Architecture", "source_file": "PRD.md", "file_type": "concept", "degree": 2}, {"id": "prd_halt", "label": "HALT \u2014 performance buffer FX", "color": {"background": "#4E79A7", "border": "#4E79A7", "highlight": {"background": "#ffffff", "border": "#4E79A7"}}, "size": 15.5, "font": {"size": 12, "color": "#ffffff"}, "title": "HALT \u2014 performance buffer FX", "community": 0, "community_name": "Standalone FX Plugins", "source_file": "PRD.md", "file_type": "concept", "degree": 2}, {"id": "prd_bandaid", "label": "BANDAID \u2014 multiband transient designer", "color": {"background": "#4E79A7", "border": "#4E79A7", "highlight": {"background": "#ffffff", "border": "#4E79A7"}}, "size": 12.7, "font": {"size": 0, "color": "#ffffff"}, "title": "BANDAID \u2014 multiband transient designer", "community": 0, "community_name": "Standalone FX Plugins", "source_file": "PRD.md", "file_type": "concept", "degree": 1}, {"id": "prd_patina", "label": "PATINA \u2014 analog lo-fi character", "color": {"background": "#59A14F", "border": "#59A14F", "highlight": {"background": "#ffffff", "border": "#59A14F"}}, "size": 15.5, "font": {"size": 12, "color": "#ffffff"}, "title": "PATINA \u2014 analog lo-fi character", "community": 4, "community_name": "Spectral Engine Family", "source_file": "PRD.md", "file_type": "concept", "degree": 2}, {"id": "prd_x_ray", "label": "X-RAY \u2014 shared analyzer", "color": {"background": "#EDC948", "border": "#EDC948", "highlight": {"background": "#ffffff", "border": "#EDC948"}}, "size": 12.7, "font": {"size": 0, "color": "#ffffff"}, "title": "X-RAY \u2014 shared analyzer", "community": 5, "community_name": "Shared Bus Architecture", "source_file": "PRD.md", "file_type": "concept", "degree": 1}, {"id": "prd_chorale", "label": "CHORALE \u2014 resonator bank", "color": {"background": "#FF9DA7", "border": "#FF9DA7", "highlight": {"background": "#ffffff", "border": "#FF9DA7"}}, "size": 12.7, "font": {"size": 0, "color": "#ffffff"}, "title": "CHORALE \u2014 resonator bank", "community": 7, "community_name": "Karplus-Strong Instruments", "source_file": "PRD.md", "file_type": "concept", "degree": 1}, {"id": "prd_undertow", "label": "UNDERTOW \u2014 kick-to-rumble generator", "color": {"background": "#F28E2B", "border": "#F28E2B", "highlight": {"background": "#ffffff", "border": "#F28E2B"}}, "size": 15.5, "font": {"size": 12, "color": "#ffffff"}, "title": "UNDERTOW \u2014 kick-to-rumble generator", "community": 1, "community_name": "Reverb & Suite Core", "source_file": "PRD.md", "file_type": "concept", "degree": 2}, {"id": "prd_seance", "label": "SEANCE \u2014 ethereal vocal machine", "color": {"background": "#59A14F", "border": "#59A14F", "highlight": {"background": "#ffffff", "border": "#59A14F"}}, "size": 20.9, "font": {"size": 12, "color": "#ffffff"}, "title": "SEANCE \u2014 ethereal vocal machine", "community": 4, "community_name": "Spectral Engine Family", "source_file": "PRD.md", "file_type": "concept", "degree": 4}, {"id": "prd_ascend", "label": "ASCEND \u2014 tension generator", "color": {"background": "#4E79A7", "border": "#4E79A7", "highlight": {"background": "#ffffff", "border": "#4E79A7"}}, "size": 12.7, "font": {"size": 0, "color": "#ffffff"}, "title": "ASCEND \u2014 tension generator", "community": 0, "community_name": "Standalone FX Plugins", "source_file": "PRD.md", "file_type": "concept", "degree": 1}, {"id": "prd_rumble_bassline", "label": "W1 RumbleBassline.pyscript", "color": {"background": "#9C755F", "border": "#9C755F", "highlight": {"background": "#ffffff", "border": "#9C755F"}}, "size": 12.7, "font": {"size": 0, "color": "#ffffff"}, "title": "W1 RumbleBassline.pyscript", "community": 8, "community_name": "Piano Roll Generators", "source_file": "PRD.md", "file_type": "code", "degree": 1}, {"id": "prd_break_chop", "label": "W2 BreakChop.pyscript", "color": {"background": "#4E79A7", "border": "#4E79A7", "highlight": {"background": "#ffffff", "border": "#4E79A7"}}, "size": 10.0, "font": {"size": 0, "color": "#ffffff"}, "title": "W2 BreakChop.pyscript", "community": 10, "community_name": "Break Chop Script", "source_file": "PRD.md", "file_type": "code", "degree": 0}, {"id": "prd_dark_progression", "label": "W3 DarkProgression.pyscript", "color": {"background": "#9C755F", "border": "#9C755F", "highlight": {"background": "#ffffff", "border": "#9C755F"}}, "size": 12.7, "font": {"size": 0, "color": "#ffffff"}, "title": "W3 DarkProgression.pyscript", "community": 8, "community_name": "Piano Roll Generators", "source_file": "PRD.md", "file_type": "code", "degree": 1}, {"id": "prd_session_bootstrap", "label": "W4 session_bootstrap.py", "color": {"background": "#B07AA1", "border": "#B07AA1", "highlight": {"background": "#ffffff", "border": "#B07AA1"}}, "size": 12.7, "font": {"size": 0, "color": "#ffffff"}, "title": "W4 session_bootstrap.py", "community": 6, "community_name": "FL Studio Automations", "source_file": "PRD.md", "file_type": "code", "degree": 1}, {"id": "prd_project_janitor", "label": "W5 project_janitor.py", "color": {"background": "#B07AA1", "border": "#B07AA1", "highlight": {"background": "#ffffff", "border": "#B07AA1"}}, "size": 12.7, "font": {"size": 0, "color": "#ffffff"}, "title": "W5 project_janitor.py", "community": 6, "community_name": "FL Studio Automations", "source_file": "PRD.md", "file_type": "code", "degree": 1}, {"id": "prd_sample_librarian", "label": "W6 sample_librarian.py", "color": {"background": "#E15759", "border": "#E15759", "highlight": {"background": "#ffffff", "border": "#E15759"}}, "size": 10.0, "font": {"size": 0, "color": "#ffffff"}, "title": "W6 sample_librarian.py", "community": 12, "community_name": "Sample Librarian Tool", "source_file": "PRD.md", "file_type": "code", "degree": 0}, {"id": "prd_reference_gap", "label": "W7 reference_gap.py", "color": {"background": "#F28E2B", "border": "#F28E2B", "highlight": {"background": "#ffffff", "border": "#F28E2B"}}, "size": 10.0, "font": {"size": 0, "color": "#ffffff"}, "title": "W7 reference_gap.py", "community": 11, "community_name": "Reference Analysis Tool", "source_file": "PRD.md", "file_type": "code", "degree": 0}, {"id": "prd_vitalgen", "label": "W8 vitalgen \u2014 Claude-powered Vital preset generator", "color": {"background": "#BAB0AC", "border": "#BAB0AC", "highlight": {"background": "#ffffff", "border": "#BAB0AC"}}, "size": 12.7, "font": {"size": 0, "color": "#ffffff"}, "title": "W8 vitalgen \u2014 Claude-powered Vital preset generator", "community": 9, "community_name": "Vital Preset Generator", "source_file": "PRD.md", "file_type": "code", "degree": 1}, {"id": "prd_fl_studio_mcp_server", "label": "FL Studio MCP server", "color": {"background": "#B07AA1", "border": "#B07AA1", "highlight": {"background": "#ffffff", "border": "#B07AA1"}}, "size": 18.2, "font": {"size": 12, "color": "#ffffff"}, "title": "FL Studio MCP server", "community": 6, "community_name": "FL Studio Automations", "source_file": "PRD.md", "file_type": "concept", "degree": 3}, {"id": "work_order_qeynos_audio_suite", "label": "Qeynos Audio Suite Work Order", "color": {"background": "#E15759", "border": "#E15759", "highlight": {"background": "#ffffff", "border": "#E15759"}}, "size": 20.9, "font": {"size": 12, "color": "#ffffff"}, "title": "Qeynos Audio Suite Work Order", "community": 2, "community_name": "Build Pipeline & Tooling", "source_file": "WORK_ORDER.md", "file_type": "document", "degree": 4}, {"id": "work_order_tech_stack", "label": "Tech stack decisions (nih-plug / rustup-gnu / egui / pluginval)", "color": {"background": "#E15759", "border": "#E15759", "highlight": {"background": "#ffffff", "border": "#E15759"}}, "size": 18.2, "font": {"size": 12, "color": "#ffffff"}, "title": "Tech stack decisions (nih-plug / rustup-gnu / egui / pluginval)", "community": 2, "community_name": "Build Pipeline & Tooling", "source_file": "WORK_ORDER.md", "file_type": "rationale", "degree": 3}, {"id": "work_order_grit", "label": "GRIT (work order ask)", "color": {"background": "#76B7B2", "border": "#76B7B2", "highlight": {"background": "#ffffff", "border": "#76B7B2"}}, "size": 12.7, "font": {"size": 0, "color": "#ffffff"}, "title": "GRIT (work order ask)", "community": 3, "community_name": "Distortion Family", "source_file": "WORK_ORDER.md", "file_type": "concept", "degree": 1}, {"id": "work_order_ember", "label": "EMBER (work order ask)", "color": {"background": "#59A14F", "border": "#59A14F", "highlight": {"background": "#ffffff", "border": "#59A14F"}}, "size": 12.7, "font": {"size": 0, "color": "#ffffff"}, "title": "EMBER (work order ask)", "community": 4, "community_name": "Spectral Engine Family", "source_file": "WORK_ORDER.md", "file_type": "concept", "degree": 1}, {"id": "work_order_impact", "label": "IMPACT (work order ask)", "color": {"background": "#F28E2B", "border": "#F28E2B", "highlight": {"background": "#ffffff", "border": "#F28E2B"}}, "size": 12.7, "font": {"size": 0, "color": "#ffffff"}, "title": "IMPACT (work order ask)", "community": 1, "community_name": "Reverb & Suite Core", "source_file": "WORK_ORDER.md", "file_type": "concept", "degree": 1}, {"id": "work_order_tracer", "label": "TRACER (work order ask)", "color": {"background": "#76B7B2", "border": "#76B7B2", "highlight": {"background": "#ffffff", "border": "#76B7B2"}}, "size": 12.7, "font": {"size": 0, "color": "#ffffff"}, "title": "TRACER (work order ask)", "community": 3, "community_name": "Distortion Family", "source_file": "WORK_ORDER.md", "file_type": "concept", "degree": 1}, {"id": "work_order_overseer", "label": "OVERSEER (work order ask)", "color": {"background": "#EDC948", "border": "#EDC948", "highlight": {"background": "#ffffff", "border": "#EDC948"}}, "size": 12.7, "font": {"size": 0, "color": "#ffffff"}, "title": "OVERSEER (work order ask)", "community": 5, "community_name": "Shared Bus Architecture", "source_file": "WORK_ORDER.md", "file_type": "concept", "degree": 1}, {"id": "work_order_lese_catalog_clones", "label": "Phase 2 \u2014 Lese catalog clones", "color": {"background": "#E15759", "border": "#E15759", "highlight": {"background": "#ffffff", "border": "#E15759"}}, "size": 12.7, "font": {"size": 0, "color": "#ffffff"}, "title": "Phase 2 \u2014 Lese catalog clones", "community": 2, "community_name": "Build Pipeline & Tooling", "source_file": "WORK_ORDER.md", "file_type": "concept", "degree": 1}, {"id": "work_order_definition_of_done", "label": "Definition of done (every plugin)", "color": {"background": "#E15759", "border": "#E15759", "highlight": {"background": "#ffffff", "border": "#E15759"}}, "size": 12.7, "font": {"size": 0, "color": "#ffffff"}, "title": "Definition of done (every plugin)", "community": 2, "community_name": "Build Pipeline & Tooling", "source_file": "WORK_ORDER.md", "file_type": "concept", "degree": 1}, {"id": "work_order_vitalgen", "label": "W8 Vital preset generator (work order)", "color": {"background": "#BAB0AC", "border": "#BAB0AC", "highlight": {"background": "#ffffff", "border": "#BAB0AC"}}, "size": 12.7, "font": {"size": 0, "color": "#ffffff"}, "title": "W8 Vital preset generator (work order)", "community": 9, "community_name": "Vital Preset Generator", "source_file": "WORK_ORDER.md", "file_type": "concept", "degree": 1}, {"id": "work_order_fl_studio_mcp_server", "label": "FL Studio MCP server (work order)", "color": {"background": "#B07AA1", "border": "#B07AA1", "highlight": {"background": "#ffffff", "border": "#B07AA1"}}, "size": 12.7, "font": {"size": 0, "color": "#ffffff"}, "title": "FL Studio MCP server (work order)", "community": 6, "community_name": "FL Studio Automations", "source_file": "WORK_ORDER.md", "file_type": "concept", "degree": 1}];
+const RAW_EDGES = [{"from": "prd_qeynos_audio_suite", "to": "prd_execution_protocol", "label": "rationale_for", "title": "rationale_for [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "prd_qeynos_audio_suite", "to": "prd_ascend", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "prd_qeynos_audio_suite", "to": "prd_bandaid", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "prd_qeynos_audio_suite", "to": "prd_cleave", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "prd_qeynos_audio_suite", "to": "prd_drift", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "prd_qeynos_audio_suite", "to": "prd_flyby", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "prd_qeynos_audio_suite", "to": "prd_halt", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "prd_qeynos_audio_suite", "to": "prd_ouroboros", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "prd_qeynos_audio_suite", "to": "prd_suite_core", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "prd_qeynos_audio_suite", "to": "prd_swarm", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "prd_qeynos_audio_suite", "to": "work_order_qeynos_audio_suite", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "prd_suite_core", "to": "prd_fdn_reverb_core", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "prd_suite_core", "to": "prd_shaper_bank", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "prd_suite_core", "to": "prd_stft_engine", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "prd_suite_core", "to": "prd_nih_plug", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "prd_suite_core", "to": "prd_the_bus", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "prd_the_bus", "to": "prd_nerve", "label": "shares_data_with", "title": "shares_data_with [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "prd_the_bus", "to": "prd_overseer", "label": "shares_data_with", "title": "shares_data_with [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "prd_the_bus", "to": "prd_x_ray", "label": "shares_data_with", "title": "shares_data_with [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "prd_build_ps1", "to": "prd_pluginval", "label": "calls", "title": "calls [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "prd_build_ps1", "to": "prd_template", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "prd_nih_plug", "to": "work_order_tech_stack", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "prd_pluginval", "to": "work_order_tech_stack", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "prd_shaper_bank", "to": "prd_grit", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "prd_shaper_bank", "to": "prd_shapeshift", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "prd_shaper_bank", "to": "prd_tracer", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "prd_stft_engine", "to": "prd_carve", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "prd_stft_engine", "to": "prd_ember", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "prd_stft_engine", "to": "prd_grit", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "prd_stft_engine", "to": "prd_smudge", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "prd_fdn_reverb_core", "to": "prd_chamber", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "prd_fdn_reverb_core", "to": "prd_murmur", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "prd_fdn_reverb_core", "to": "prd_undertow", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "prd_grit", "to": "prd_carve", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "prd_grit", "to": "work_order_grit", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "prd_grit", "to": "prd_shapeshift", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "prd_ember", "to": "work_order_ember", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "prd_ember", "to": "prd_seance", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "prd_ember", "to": "prd_smudge", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "prd_impact", "to": "work_order_impact", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "prd_impact", "to": "prd_undertow", "label": "conceptually_related_to", "title": "conceptually_related_to [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "prd_tracer", "to": "work_order_tracer", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "prd_overseer", "to": "prd_nerve", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "prd_overseer", "to": "work_order_overseer", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "prd_wire", "to": "prd_patina", "label": "conceptually_related_to", "title": "conceptually_related_to [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "prd_swarm", "to": "prd_seance", "label": "semantically_similar_to", "title": "semantically_similar_to [INFERRED]", "dashes": true, "width": 1, "color": {"opacity": 0.35}, "confidence": "INFERRED"}, {"from": "prd_smudge", "to": "prd_seance", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "prd_cleave", "to": "prd_halt", "label": "semantically_similar_to", "title": "semantically_similar_to [INFERRED]", "dashes": true, "width": 1, "color": {"opacity": 0.35}, "confidence": "INFERRED"}, {"from": "prd_pluck", "to": "prd_chorale", "label": "semantically_similar_to", "title": "semantically_similar_to [INFERRED]", "dashes": true, "width": 1, "color": {"opacity": 0.35}, "confidence": "INFERRED"}, {"from": "prd_patina", "to": "prd_seance", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "prd_rumble_bassline", "to": "prd_dark_progression", "label": "conceptually_related_to", "title": "conceptually_related_to [INFERRED]", "dashes": true, "width": 1, "color": {"opacity": 0.35}, "confidence": "INFERRED"}, {"from": "prd_session_bootstrap", "to": "prd_fl_studio_mcp_server", "label": "calls", "title": "calls [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "prd_project_janitor", "to": "prd_fl_studio_mcp_server", "label": "calls", "title": "calls [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "prd_vitalgen", "to": "work_order_vitalgen", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "prd_fl_studio_mcp_server", "to": "work_order_fl_studio_mcp_server", "label": "semantically_similar_to", "title": "semantically_similar_to [INFERRED]", "dashes": true, "width": 1, "color": {"opacity": 0.35}, "confidence": "INFERRED"}, {"from": "work_order_qeynos_audio_suite", "to": "work_order_definition_of_done", "label": "conceptually_related_to", "title": "conceptually_related_to [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "work_order_qeynos_audio_suite", "to": "work_order_lese_catalog_clones", "label": "conceptually_related_to", "title": "conceptually_related_to [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "work_order_qeynos_audio_suite", "to": "work_order_tech_stack", "label": "rationale_for", "title": "rationale_for [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}];
+const LEGEND = [{"cid": 0, "color": "#4E79A7", "label": "Standalone FX Plugins", "count": 10}, {"cid": 1, "color": "#F28E2B", "label": "Reverb &amp; Suite Core", "count": 8}, {"cid": 2, "color": "#E15759", "label": "Build Pipeline &amp; Tooling", "count": 7}, {"cid": 3, "color": "#76B7B2", "label": "Distortion Family", "count": 7}, {"cid": 4, "color": "#59A14F", "label": "Spectral Engine Family", "count": 7}, {"cid": 5, "color": "#EDC948", "label": "Shared Bus Architecture", "count": 5}, {"cid": 6, "color": "#B07AA1", "label": "FL Studio Automations", "count": 4}, {"cid": 7, "color": "#FF9DA7", "label": "Karplus-Strong Instruments", "count": 2}, {"cid": 8, "color": "#9C755F", "label": "Piano Roll Generators", "count": 2}, {"cid": 9, "color": "#BAB0AC", "label": "Vital Preset Generator", "count": 2}, {"cid": 10, "color": "#4E79A7", "label": "Break Chop Script", "count": 1}, {"cid": 11, "color": "#F28E2B", "label": "Reference Analysis Tool", "count": 1}, {"cid": 12, "color": "#E15759", "label": "Sample Librarian Tool", "count": 1}];
+
+// HTML-escape helper — prevents XSS when injecting graph data into innerHTML
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+// Build vis datasets
+const nodesDS = new vis.DataSet(RAW_NODES.map(n => ({
+  id: n.id, label: n.label, color: n.color, size: n.size,
+  font: n.font, title: n.title,
+  _community: n.community, _community_name: n.community_name,
+  _source_file: n.source_file, _file_type: n.file_type, _degree: n.degree,
+})));
+
+const edgesDS = new vis.DataSet(RAW_EDGES.map((e, i) => ({
+  id: i, from: e.from, to: e.to,
+  label: '',
+  title: e.title,
+  dashes: e.dashes,
+  width: e.width,
+  color: e.color,
+  arrows: { to: { enabled: true, scaleFactor: 0.5 } },
+})));
+
+const container = document.getElementById('graph');
+const network = new vis.Network(container, { nodes: nodesDS, edges: edgesDS }, {
+  physics: {
+    enabled: true,
+    solver: 'forceAtlas2Based',
+    forceAtlas2Based: {
+      gravitationalConstant: -60,
+      centralGravity: 0.005,
+      springLength: 120,
+      springConstant: 0.08,
+      damping: 0.4,
+      avoidOverlap: 0.8,
+    },
+    stabilization: { iterations: 200, fit: true },
+  },
+  interaction: {
+    hover: true,
+    tooltipDelay: 100,
+    hideEdgesOnDrag: true,
+    navigationButtons: false,
+    keyboard: false,
+  },
+  nodes: { shape: 'dot', borderWidth: 1.5 },
+  edges: { smooth: { type: 'continuous', roundness: 0.2 }, selectionWidth: 3 },
+});
+
+network.once('stabilizationIterationsDone', () => {
+  network.setOptions({ physics: { enabled: false } });
+});
+
+function showInfo(nodeId) {
+  const n = nodesDS.get(nodeId);
+  if (!n) return;
+  const neighborIds = network.getConnectedNodes(nodeId);
+  const neighborItems = neighborIds.map(nid => {
+    const nb = nodesDS.get(nid);
+    const color = nb ? nb.color.background : '#555';
+    return `<span class="neighbor-link" style="border-left-color:${esc(color)}" onclick="focusNode(${JSON.stringify(nid)})">${esc(nb ? nb.label : nid)}</span>`;
+  }).join('');
+  document.getElementById('info-content').innerHTML = `
+    <div class="field"><b>${esc(n.label)}</b></div>
+    <div class="field">Type: ${esc(n._file_type || 'unknown')}</div>
+    <div class="field">Community: ${esc(n._community_name)}</div>
+    <div class="field">Source: ${esc(n._source_file || '-')}</div>
+    <div class="field">Degree: ${n._degree}</div>
+    ${neighborIds.length ? `<div class="field" style="margin-top:8px;color:#aaa;font-size:11px">Neighbors (${neighborIds.length})</div><div id="neighbors-list">${neighborItems}</div>` : ''}
+  `;
+}
+
+function focusNode(nodeId) {
+  network.focus(nodeId, { scale: 1.4, animation: true });
+  network.selectNodes([nodeId]);
+  showInfo(nodeId);
+}
+
+// Track hovered node — hover detection is more reliable than click params
+let hoveredNodeId = null;
+network.on('hoverNode', params => {
+  hoveredNodeId = params.node;
+  container.style.cursor = 'pointer';
+});
+network.on('blurNode', () => {
+  hoveredNodeId = null;
+  container.style.cursor = 'default';
+});
+container.addEventListener('click', () => {
+  if (hoveredNodeId !== null) {
+    showInfo(hoveredNodeId);
+    network.selectNodes([hoveredNodeId]);
+  }
+});
+network.on('click', params => {
+  if (params.nodes.length > 0) {
+    showInfo(params.nodes[0]);
+  } else if (hoveredNodeId === null) {
+    document.getElementById('info-content').innerHTML = '<span class="empty">Click a node to inspect it</span>';
+  }
+});
+
+const searchInput = document.getElementById('search');
+const searchResults = document.getElementById('search-results');
+searchInput.addEventListener('input', () => {
+  const q = searchInput.value.toLowerCase().trim();
+  searchResults.innerHTML = '';
+  if (!q) { searchResults.style.display = 'none'; return; }
+  const matches = RAW_NODES.filter(n => n.label.toLowerCase().includes(q)).slice(0, 20);
+  if (!matches.length) { searchResults.style.display = 'none'; return; }
+  searchResults.style.display = 'block';
+  matches.forEach(n => {
+    const el = document.createElement('div');
+    el.className = 'search-item';
+    el.textContent = n.label;
+    el.style.borderLeft = `3px solid ${n.color.background}`;
+    el.style.paddingLeft = '8px';
+    el.onclick = () => {
+      network.focus(n.id, { scale: 1.5, animation: true });
+      network.selectNodes([n.id]);
+      showInfo(n.id);
+      searchResults.style.display = 'none';
+      searchInput.value = '';
+    };
+    searchResults.appendChild(el);
+  });
+});
+document.addEventListener('click', e => {
+  if (!searchResults.contains(e.target) && e.target !== searchInput)
+    searchResults.style.display = 'none';
+});
+
+const hiddenCommunities = new Set();
+
+const selectAllCb = document.getElementById('select-all-cb');
+
+function updateSelectAllState() {
+  const total = LEGEND.length;
+  const hidden = hiddenCommunities.size;
+  selectAllCb.checked = hidden === 0;
+  selectAllCb.indeterminate = hidden > 0 && hidden < total;
+}
+
+function toggleAllCommunities(hide) {
+  document.querySelectorAll('.legend-item').forEach(item => {
+    hide ? item.classList.add('dimmed') : item.classList.remove('dimmed');
+  });
+  document.querySelectorAll('.legend-cb').forEach(cb => {
+    cb.checked = !hide;
+  });
+  LEGEND.forEach(c => {
+    if (hide) hiddenCommunities.add(c.cid); else hiddenCommunities.delete(c.cid);
+  });
+  const updates = RAW_NODES.map(n => ({ id: n.id, hidden: hide }));
+  nodesDS.update(updates);
+  updateSelectAllState();
+}
+
+const legendEl = document.getElementById('legend');
+LEGEND.forEach(c => {
+  const item = document.createElement('div');
+  item.className = 'legend-item';
+  const cb = document.createElement('input');
+  cb.type = 'checkbox';
+  cb.className = 'legend-cb';
+  cb.checked = true;
+  cb.addEventListener('change', (e) => {
+    e.stopPropagation();
+    if (cb.checked) {
+      hiddenCommunities.delete(c.cid);
+      item.classList.remove('dimmed');
+    } else {
+      hiddenCommunities.add(c.cid);
+      item.classList.add('dimmed');
+    }
+    const updates = RAW_NODES
+      .filter(n => n.community === c.cid)
+      .map(n => ({ id: n.id, hidden: !cb.checked }));
+    nodesDS.update(updates);
+    updateSelectAllState();
+  });
+  item.innerHTML = `<div class="legend-dot" style="background:${c.color}"></div>
+    <span class="legend-label">${c.label}</span>
+    <span class="legend-count">${c.count}</span>`;
+  item.prepend(cb);
+  item.onclick = (e) => {
+    if (e.target === cb) return;
+    cb.checked = !cb.checked;
+    cb.dispatchEvent(new Event('change'));
+  };
+  legendEl.appendChild(item);
+});
+</script>
+<script>
+// Render hyperedges as shaded regions
+const hyperedges = [{"id": "bus_participants", "label": "Cross-plugin Bus participants (Master/Nodes, mod sources, analyzer)", "nodes": ["prd_the_bus", "prd_overseer", "prd_nerve", "prd_x_ray"], "relation": "participate_in", "confidence": "EXTRACTED", "confidence_score": 1.0, "source_file": "PRD.md"}, {"id": "stft_engine_family", "label": "Plugins built on the shared STFT/spectral engine", "nodes": ["prd_stft_engine", "prd_ember", "prd_smudge", "prd_carve", "prd_grit", "prd_seance"], "relation": "participate_in", "confidence": "EXTRACTED", "confidence_score": 1.0, "source_file": "PRD.md"}, {"id": "phase4_workflow_automations", "label": "Phase 4 FL Studio workflow automations (W1-W8)", "nodes": ["prd_rumble_bassline", "prd_break_chop", "prd_dark_progression", "prd_session_bootstrap", "prd_project_janitor", "prd_sample_librarian", "prd_reference_gap", "prd_vitalgen"], "relation": "form", "confidence": "EXTRACTED", "confidence_score": 1.0, "source_file": "PRD.md"}];
+// afterDrawing passes ctx already transformed to network coordinate space.
+// Draw node positions raw — no manual pan/zoom/DPR math needed.
+network.on('afterDrawing', function(ctx) {
+    hyperedges.forEach(h => {
+        const positions = h.nodes
+            .map(nid => network.getPositions([nid])[nid])
+            .filter(p => p !== undefined);
+        if (positions.length < 2) return;
+        ctx.save();
+        ctx.globalAlpha = 0.12;
+        ctx.fillStyle = '#6366f1';
+        ctx.strokeStyle = '#6366f1';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        // Centroid and expanded hull in network coordinates
+        const cx = positions.reduce((s, p) => s + p.x, 0) / positions.length;
+        const cy = positions.reduce((s, p) => s + p.y, 0) / positions.length;
+        const expanded = positions.map(p => ({
+            x: cx + (p.x - cx) * 1.15,
+            y: cy + (p.y - cy) * 1.15
+        }));
+        ctx.moveTo(expanded[0].x, expanded[0].y);
+        expanded.slice(1).forEach(p => ctx.lineTo(p.x, p.y));
+        ctx.closePath();
+        ctx.fill();
+        ctx.globalAlpha = 0.4;
+        ctx.stroke();
+        // Label
+        ctx.globalAlpha = 0.8;
+        ctx.fillStyle = '#4f46e5';
+        ctx.font = 'bold 11px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(h.label, cx, cy - 5);
+        ctx.restore();
+    });
+});
+</script>
+</body>
+</html>
