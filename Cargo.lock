@@ -1951,6 +1951,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "swarm"
+version = "0.1.0"
+dependencies = [
+ "nih_plug",
+ "nih_plug_egui",
+ "suite-core",
+]
+
+[[package]]
 name = "syn"
 version = "1.0.109"
 source = "registry+https://github.com/rust-lang/crates.io-index"
