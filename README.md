@@ -19,6 +19,7 @@ admin junction exists (see `CHECKPOINTS.md`).
 | IMPACT | Instrument | Kick drum synth (MIDI) — exponential pitch/amp envelopes, sine/tri body, band-passed click + 3 embedded PCM transients, sub osc, waveshaper drive; phase-continuous declicked retrigger, key-track, Length macro | [docs/IMPACT.md](docs/IMPACT.md) |
 | TRACER | Distortion | Pitch-tracking multiband saturation — MPM f0 detection locks a time-varying LR4 crossover tree to the note; per-band waveshaper drive (2x OS), Smart Frequency, constant-color, confidence freeze, MIDI mode | [docs/TRACER.md](docs/TRACER.md) |
 | OVERSEER | Mastering | ONE bundle, TWO plugins: **Node** channel strip (EQ, RMS comp, tanh sat, M/S width) + **Master** bus (EQ, 3-band LR4 multiband comp, 2 ms lookahead limiter w/ reported latency, BS.1770 LUFS meter). Master remote-controls Nodes over a same-DLL bus (override badges, local steal-back). Caveat: FL "Make bridged" severs the link | [docs/OVERSEER.md](docs/OVERSEER.md) |
+| DRIFT | Filter | Infinity filter — endless Shepard-tone filter sweep. N (2–8) octave-spaced TPT bell filters glide up/down over a log-freq range (free Hz or BPM-synced), wrapping at the edges with a raised-cosine gain window ⇒ seamless endless rise/fall. Shared resonance, depth, stereo phase offset, dry/wet. Zero latency (minimum-phase) | [docs/DRIFT.md](docs/DRIFT.md) |
 
 ## Tools (Phase 4)
 
