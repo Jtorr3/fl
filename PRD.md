@@ -311,7 +311,7 @@ Quick wins (non-Rust, immediately usable)
   green; shared partial-mix alignment regression helper wired into GRIT + TRACER.
 
 Phase 2a — clones
-- [x] DRIFT - [x] WIRE - [x] OUROBOROS - [x] SWARM - [x] SMUDGE - [ ] MURMUR
+- [x] DRIFT - [x] WIRE - [x] OUROBOROS - [x] SWARM - [x] SMUDGE - [x] MURMUR
 
 Taste-tailored (deps satisfied: IMPACT, MURMUR-FDN, EMBER/SMUDGE engines)
 - [ ] UNDERTOW - [ ] SNAP - [ ] SEANCE - [ ] ASCEND

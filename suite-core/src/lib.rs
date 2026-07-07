@@ -3,6 +3,7 @@
 //! `ui` module, which is gated behind the `gui` feature and depends on nih_plug_egui.
 
 pub mod dsp;
+pub mod fdn;
 pub mod harness;
 pub mod loudness;
 pub mod pitch;

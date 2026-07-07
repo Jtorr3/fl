@@ -1,0 +1,18 @@
+[package]
+name = "murmur"
+version = "0.1.0"
+edition = "2021"
+license = "ISC"
+description = "Qeynos MURMUR — stochastic reverb (8×8 Householder FDN re-randomised per onset, two-instance ping-pong crossfade, freeze; Hikari clone)"
+
+[lib]
+# `cdylib` for the CLAP/VST3 bundle; `lib` so `cargo test` and the harness can link the DSP.
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+nih_plug = { workspace = true }
+nih_plug_egui = { workspace = true }
+suite-core = { path = "../../suite-core" }
+
+[dev-dependencies]
+suite-core = { path = "../../suite-core" }
