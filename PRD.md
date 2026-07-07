@@ -315,6 +315,11 @@ Phase 2a — clones
 
 Taste-tailored (deps satisfied: IMPACT, MURMUR-FDN, EMBER/SMUDGE engines)
 - [ ] UNDERTOW - [ ] SEANCE - [ ] ASCEND
+
+VOX suite (user request 2026-07-07: rip lyrics from other songs, make them fit
+anything — key/tempo/character conforming; SEANCE's formant-preserving shift engine
+is the shared core, built immediately before)
+- [ ] W9-VOXRIP - [ ] VOXKEY - [ ] VOXFIT
 - [ ] W1-RUMBLE-BASSLINE - [ ] W2-BREAK-CHOP - [ ] W3-DARK-PROGRESSION
 **HARD CHECKPOINT**
 

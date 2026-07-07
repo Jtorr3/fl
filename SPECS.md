@@ -248,3 +248,52 @@ Params: key, length, curve, noise/tone balance, rise, impact, sync target.
 | W6 sample_librarian.py | librosa/soundfile (py 3.12 via uv) | BPM (onset autocorr) + key (chromagram) → rename {key}_{bpm}_{name}, sort; dry-run default, --apply to write |
 | W7 reference_gap.py | pyloudnorm/numpy (py 3.12) | LUFS-I, 1/3-oct diff plot, width by band, kick f0 + tuning suggestion → HTML |
 | W8 vitalgen | Python + Claude API | schema from installed-Vital-saved preset diffed vs OSS repo; pydantic validation + range clamps; CLI + Claude Code skill; --tweak iterate; --bank batch; Serum 2 = DEFERRED |
+
+
+---
+
+## VOX suite — lyric flexibility (user request 2026-07-07)
+
+### W9-VOXRIP — acapella extraction + conforming (Python tool)
+Pipeline: `voxrip.py <song.(mp3|wav|flac)> [--target-bpm N] [--target-key Am] [--out DIR]`
+1. Stem separation: demucs (htdemucs model) via uv-managed Python 3.12 env; CPU works
+   (slow ok, offline tool); outputs vocals.wav + instrumental.wav (+ drums/bass if free).
+2. Source analysis: BPM (librosa beat track) + key (chromagram, Krumhansl profiles) of
+   BOTH the full song and the isolated vocal; report confidence.
+3. Conform (if targets given): time-stretch vocal to target BPM (rubberband CLI —
+   portable binary into tools/bin, formant-preserving mode -F) and pitch-shift by the
+   minimal semitone move onto the target key (report the chosen transposition and the
+   relative mode option, e.g. target Am from source Cm -> -3 or +9; pick min |st|).
+4. Output folder: <song>/vocals_raw.wav, vocals_conformed.wav, instrumental.wav,
+   REPORT.md (source bpm/key, target, shift chosen, confidence warnings).
+Done bar (offline tests, no separation model in CI path): analysis + conform stages
+tested on synthesized fixtures (known-BPM click+vocal synth at known key -> detected
+within tolerance; conform hits target BPM ±0.5% and key shift exact); separation is
+smoke-tested live only if demucs weights download succeeds — else CHECKPOINTS entry.
+
+### VOXKEY — vocal retuner (plugin)
+```
+in -> PitchTracker (suite_core::pitch, mono vocal) -> target note = nearest in
+Key/Scale (root + scale-mask params, common scales + chromatic) -> shift ratio ->
+formant-preserving pitch shift (SEANCE engine from suite-core) -> out
+```
+- Retune speed (0 = hard snap / autotune artifact, up to 400 ms glide), amount (0-100%),
+  humanize (random cents drift), formant preserve on/off + formant offset (st),
+  MIDI override mode (held note = target, ignores scale), dry/wet.
+- Done bar: synthetic vocal gliding across a fifth -> output f0 quantizes to the
+  selected scale within +-15 cents at retune speed 0 (measured via suite_core::pitch);
+  formant preservation: spectral-envelope peak positions unchanged +-5% while f0 moves
+  >= 3 st; mix=0 null (latency-compensated).
+
+### VOXFIT — vocal character conformer (plugin)
+```
+in -> formant shift (+-5 st, pitch-independent, PV envelope-lift engine) -> de-esser
+(split 5-9 kHz, compression keyed on sibilant energy) -> harshness tamer (dynamic bell
+2-5 kHz) -> tilt EQ (+-6 dB/oct pivot 1 kHz) -> proximity (low-mid shelf 200-400 Hz) ->
+air (shelf 12 kHz) -> output trim -> out.  "Sit" macro sweeps a curated combination.
+```
+- Purpose: make a foreign acapella sit in a completely different production.
+- Done bar: formant shift +3 st moves spectral-envelope peaks by ~2^(3/12) ratio while
+  measured f0 stays +-10 cents; de-esser reduces 5-9 kHz band energy on synthetic
+  sibilant bursts (noise bursts through HP) by an amount consistent with its threshold
+  while leaving the vowel band (<2 kHz) within +-1 dB; universal assertions + mix null.
