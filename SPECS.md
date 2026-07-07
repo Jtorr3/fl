@@ -317,6 +317,22 @@ air (shelf 12 kHz) -> output trim -> out.  "Sit" macro sweeps a curated combinat
   load -> params restored exactly); a GUI-less unit test on the disk tier; name
   sanitization (illegal path chars); overwrite-safe.
 
+### PRESET-EXPANSION — deep factory banks (user: "tons and tons of good presets
+will make these plugins feel real")
+- Target: 15-30 factory presets PER PLUGIN (instruments and complex FX at the high
+  end; simple utilities may stop at 12), organized in categories shown as sections
+  in the preset bar (e.g. GRIT: Kick-Driven / Vocal / Bus / Extreme; EMBER: Pads /
+  Fades / Freezes / Rhythmic).
+- Naming = purpose-driven, evocative, genre-aware (dark techno + atmospheric dnb
+  taste profile): 'Warehouse Thump', 'Last Train Home', 'Drowned Ghost Sit' — never
+  'Preset 12' or settings descriptions.
+- Quality gate per preset (mechanical): loads, differs meaningfully (>=4 params from
+  default AND >=2 params from every other preset in its plugin — no near-duplicates),
+  render passes universal assertions; renders kept in renders/<plugin>/presets/ for
+  human audition.
+- Process: one pass over every shipped plugin after PRESET-SYSTEM lands (factory
+  presets ride the same disk format). Batchable: one commit per plugin.
+
 ### OVERSEER-ENRICH — instrument context + thematic banks
 - Node gains an Instrument Type param (enum: KICK, BASS, RUMBLE, PERC, HATS, SNARE,
   BREAKS, VOCAL, PAD, LEAD, ATMOS, FX, BUS, MASTER-ish). Type drives:
@@ -333,6 +349,20 @@ air (shelf 12 kHz) -> output trim -> out.  "Sit" macro sweeps a curated combinat
 - Done bar: type switch applies documented defaults (test asserts a KICK-vs-VOCAL
   default diff table); every bank preset loads + passes universal render assertions;
   Master grid displays type badges (validator editor test only).
+
+### BUILT-IN-MANUALS — in-GUI usage manual per plugin
+- Every plugin GUI gets a '?' button opening a manual panel (egui window/side panel,
+  scrollable, closable): sections = What It Is (2-3 sentences), Signal Flow (the
+  SPECS ASCII diagram rendered monospace), Controls (every param: name, range, what
+  it does musically — not just technically), Recipes (>=3 concrete workflow recipes
+  tuned to the user's genres, e.g. GRIT: 'Kick-driven rumble distortion: route kick
+  to sidechain, Mode A, drive 8, focus 60-120 Hz...').
+- Content source: extend each docs/<plugin>.md with these sections and embed at
+  compile time (include_str! + a tiny section parser in suite-core::ui::manual) —
+  one source of truth, readable both on GitHub and in-GUI.
+- Done bar: manual opens under validator editor test for every plugin; every param
+  listed in the manual exists in the param set (test cross-checks names); recipes
+  section non-empty.
 
 ### PEDAL-UI — modern stompbox theme (endgame, after all plugins exist)
 - suite-core::ui v2: pedal-style visual language — textured dark panel, chunky

@@ -336,7 +336,9 @@ Phase 4 — remaining automations
 POLISH phase (user feedback 2026-07-07: loves OVERSEER; wants instrument context,
 user preset saving everywhere, cooler UI — "modern pedal style" as endgame cleanup)
 - [ ] PRESET-SYSTEM (suite-wide user preset save/load + retrofit all plugins)
+- [ ] PRESET-EXPANSION (deep factory banks, 15-30 purpose-named presets per plugin)
 - [ ] OVERSEER-ENRICH (per-Node instrument type context + thematic preset banks)
+- [ ] BUILT-IN-MANUALS (in-GUI usage manual panel per plugin, embedded from docs/)
 - [ ] PEDAL-UI (modern stompbox theme in suite-core::ui + suite-wide retrofit)
 **FINAL CHECKPOINT**
 
