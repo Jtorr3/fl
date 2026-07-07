@@ -195,17 +195,75 @@ pub fn synth_kick_stub(len: usize, sample_rate: f32) -> Vec<f32> {
     synth_kick(&KickSpec::default(), len, sample_rate)
 }
 
-/// STUB: synthetic vocal placeholder — a sawtooth with light vibrato. Replaced by a
-/// proper formant model (saw + 5 Hz vibrato through 3 band-passes) when needed.
+/// Synthetic vocal (PRD §4; SEANCE reuses this): a sawtooth glottal source with a 5 Hz
+/// vibrato passed through three formant band-passes (an `/a/`-like vowel: F1≈700,
+/// F2≈1220, F3≈2600 Hz). Deterministic, peak-normalized below 0 dBFS.
+pub fn synth_vocal(freq: f32, len: usize, sample_rate: f32) -> Vec<f32> {
+    let sr = sample_rate.max(1.0);
+    let f = freq.clamp(20.0, sr * 0.25);
+    // Three formant band-passes (center Hz, Q, linear gain).
+    let formants = [(700.0f32, 6.0f32, 1.0f32), (1220.0, 8.0, 0.55), (2600.0, 10.0, 0.28)];
+    let mut bp = [crate::dsp::Svf::new(), crate::dsp::Svf::new(), crate::dsp::Svf::new()];
+    for (i, &(fc, q, _)) in formants.iter().enumerate() {
+        bp[i].set(fc.min(sr * 0.45), q, sr);
+    }
+    let mut phase = 0.0f32;
+    let mut out: Vec<f32> = Vec::with_capacity(len);
+    let mut peak = 1.0e-6f32;
+    for n in 0..len {
+        let t = n as f32 / sr;
+        // 5 Hz vibrato, ±1% depth, on the fundamental.
+        let vib = 1.0 + 0.01 * (2.0 * PI * 5.0 * t).sin();
+        phase += f * vib / sr;
+        if phase >= 1.0 {
+            phase -= phase.floor();
+        }
+        let saw = 2.0 * phase - 1.0;
+        let mut y = 0.0f32;
+        for (i, &(_, _, g)) in formants.iter().enumerate() {
+            y += bp[i].process(saw).bp * g;
+        }
+        peak = peak.max(y.abs());
+        out.push(y);
+    }
+    // Peak-normalize to 0.7 so downstream stages have headroom.
+    let norm = 0.7 / peak;
+    for v in out.iter_mut() {
+        *v *= norm;
+    }
+    out
+}
+
+/// STUB shim kept for API stability: delegates to [`synth_vocal`].
 pub fn synth_vocal_stub(freq: f32, len: usize, sample_rate: f32) -> Vec<f32> {
+    synth_vocal(freq, len, sample_rate)
+}
+
+/// Sliding-pitch sawtooth (808 / glide stand-in, PRD §4): an exponential glissando from
+/// `f_start` to `f_end` over the whole buffer. Use [`sliding_saw_f0`] to get the exact
+/// instantaneous fundamental at any sample for measurement.
+pub fn sliding_saw(f_start: f32, f_end: f32, amp: f32, len: usize, sample_rate: f32) -> Vec<f32> {
+    let sr = sample_rate.max(1.0);
+    let mut phase = 0.0f32;
     (0..len)
         .map(|n| {
-            let t = n as f32 / sample_rate;
-            let vib = 1.0 + 0.01 * (2.0 * PI * 5.0 * t).sin();
-            let phase = (freq * vib * t).fract();
-            0.4 * (2.0 * phase - 1.0)
+            let f = sliding_saw_f0(f_start, f_end, n, len);
+            phase += f / sr;
+            if phase >= 1.0 {
+                phase -= phase.floor();
+            }
+            amp * (2.0 * phase - 1.0)
         })
         .collect()
+}
+
+/// Instantaneous fundamental (Hz) of [`sliding_saw`] at sample `n` of `len` (exponential
+/// glide: `f(t) = f_start · (f_end/f_start)^(n/len)`).
+#[inline]
+pub fn sliding_saw_f0(f_start: f32, f_end: f32, n: usize, len: usize) -> f32 {
+    let denom = (len.max(1)) as f32;
+    let frac = (n as f32 / denom).clamp(0.0, 1.0);
+    f_start * (f_end / f_start).powf(frac)
 }
 
 #[cfg(test)]
