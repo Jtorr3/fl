@@ -17,3 +17,7 @@ Rules that override everything:
 - The build machine's Documents folder is OneDrive-redirected; resolve Documents via
   `[Environment]::GetFolderPath('MyDocuments')`. Cargo/build paths live outside
   OneDrive (repo at C:\dev\qeynos-vst-suite, CARGO_TARGET_DIR=C:\qvs-target).
+- Token policy (PRD §8): Opus for all routine work; a single Fable subagent only via
+  the 3-strikes escalation valve or the four named hard problems; ultracode/workflows
+  ONLY at the §7 hard checkpoints and Phase 0 GO/NO-GO — never for building plugins.
+  Log every escalation and ultracode use in STATUS.md.

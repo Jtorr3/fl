@@ -322,6 +322,32 @@ Phase 4 — remaining automations
 - [ ] W5-PROJECT-JANITOR - [ ] W6-SAMPLE-LIBRARIAN - [ ] W7-REFERENCE-GAP
 **FINAL CHECKPOINT**
 
+## 8. Model & token policy (user directive 2026-07-07)
+
+- **Opus is the default engine.** Launch the loop session on Opus
+  (`claude --model opus` in C:\dev\qeynos-vst-suite, bypass-permissions mode).
+  All routine iteration work — crate scaffolding, DSP implementation, params, GUI,
+  presets, docs, test writing, build/fix cycles, Phase 4 tools — runs on Opus.
+  Subagents spawned for parallel/mechanical work default to Opus too (haiku is fine
+  for pure-mechanical text chores like README rows).
+- **Fable escalation valve (inline with §1.5 attempt counters):** when the SAME error
+  signature survives 3 Opus attempts, spawn ONE Fable subagent
+  (`model: "fable"`) scoped to that specific problem, apply its fix, drop back to
+  Opus. Also Fable-eligible without waiting for failures: the four hardest specced
+  problems — EMBER's phase-vocoder tail, TRACER's time-varying LR4 stability,
+  the Bus seqlock layout, OVERSEER's limiter. Nothing else.
+- **Ultracode (multi-agent workflows): most important administrative tasks ONLY.**
+  Whitelist — exactly these, nothing else qualifies:
+  1. Phase 0 GO/NO-GO verdict (adversarial verification that the toolchain gate
+     genuinely passed, since everything rides on it);
+  2. each HARD CHECKPOINT in §7 (parallel re-validation sweep of all shipped
+     plugins + adversarial review of the phase, before declaring it green);
+  3. the FINAL CHECKPOINT (full-suite audit).
+  Never use workflows for building individual plugins. Log every ultracode use in
+  STATUS.md with a one-line justification.
+- Record token-notable events (a plugin that burned >3 escalations, a checkpoint
+  sweep) in the STATUS.md LOG so the user can audit spend cold.
+
 Phase 4 notes: Python via uv (`uv python install 3.12`; PEP 723 headers pin
 `requires-python = ">=3.12,<3.13"` — librosa/numba on 3.14 are bleeding-edge).
 W1–W5 need FL running with the MCP controller: if `fl_connection_status` fails,
