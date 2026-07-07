@@ -4,6 +4,7 @@
 
 pub mod dsp;
 pub mod harness;
+pub mod loudness;
 pub mod pitch;
 pub mod presets;
 pub mod stft;

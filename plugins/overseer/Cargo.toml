@@ -1,0 +1,19 @@
+[package]
+name = "overseer"
+version = "0.1.0"
+edition = "2021"
+license = "ISC"
+description = "Qeynos OVERSEER — mastering system: one library exporting two plugins (Node channel strip + Master bus), linked over a same-DLL bus"
+
+[lib]
+# `cdylib` for the CLAP/VST3 bundle (which contains BOTH exported plugins); `lib` so
+# `cargo test` and the offline harness can link the pure DSP.
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+nih_plug = { workspace = true }
+nih_plug_egui = { workspace = true }
+suite-core = { path = "../../suite-core" }
+
+[dev-dependencies]
+suite-core = { path = "../../suite-core" }
