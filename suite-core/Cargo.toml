@@ -1,0 +1,19 @@
+[package]
+name = "suite-core"
+version = "0.1.0"
+edition = "2021"
+license = "ISC"
+
+[lib]
+name = "suite_core"
+
+[features]
+default = ["gui"]
+# The `ui` module pulls in nih_plug_egui. Pure-DSP consumers/tests can disable it,
+# but plugins keep it on.
+gui = ["dep:nih_plug", "dep:nih_plug_egui"]
+
+[dependencies]
+hound = { workspace = true }
+nih_plug = { workspace = true, optional = true }
+nih_plug_egui = { workspace = true, optional = true }

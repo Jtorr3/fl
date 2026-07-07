@@ -1,4 +1,5 @@
 target/
 renders/
 tools/bin/
+dist/
 *.wav

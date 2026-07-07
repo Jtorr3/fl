@@ -294,7 +294,7 @@ Read the relevant SPECS.md section at step 1 of every iteration.
 ## 7. Canonical checklist (order = value-if-interrupted + dependencies; names are IDs)
 
 Phase 0
-- [ ] BOOTSTRAP (toolchain, workspace, harness+testsig, validators, _template GO/NO-GO)
+- [x] BOOTSTRAP (toolchain, workspace, harness+testsig, validators, _template GO/NO-GO)
 
 Phase 1 — priority plugins
 - [ ] GRIT   - [ ] EMBER   - [ ] IMPACT   - [ ] TRACER   - [ ] OVERSEER

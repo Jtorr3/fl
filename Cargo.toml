@@ -1,0 +1,23 @@
+[workspace]
+resolver = "2"
+members = ["suite-core", "plugins/_template", "xtask"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "ISC"
+authors = ["Jtorr3 <jason@qeynosholdings.com>"]
+
+[workspace.dependencies]
+# nih-plug pinned to a specific master rev (queried via `git ls-remote` 2026-07-07).
+# NEVER enable the `simd` feature (requires nightly; we build on stable windows-gnu).
+nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", rev = "f36931f7af4646065488a9845d8f8c2f95252c23", features = ["assert_process_allocs"] }
+nih_plug_egui = { git = "https://github.com/robbert-vdh/nih-plug.git", rev = "f36931f7af4646065488a9845d8f8c2f95252c23" }
+nih_plug_xtask = { git = "https://github.com/robbert-vdh/nih-plug.git", rev = "f36931f7af4646065488a9845d8f8c2f95252c23" }
+hound = "3.5"
+
+# Release profile tuned for real plugin bundles. thin LTO keeps cold-build time sane
+# while still inlining across crates.
+[profile.release]
+lto = "thin"
+opt-level = 3

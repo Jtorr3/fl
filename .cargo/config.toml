@@ -1,0 +1,3 @@
+# Enables `cargo xtask bundle <crate> --release` for nih-plug bundling.
+[alias]
+xtask = "run --release --package xtask --"
