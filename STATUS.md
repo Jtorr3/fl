@@ -1,6 +1,6 @@
 # STATUS
 
-CURRENT: EMBER | STEP: 1 | ATTEMPTS: 0 | LAST-ACTION: start(EMBER) — spectral fader / temporal smoother; adding suite_core::stft (realfft) then EMBER crate
+CURRENT: EMBER | STEP: 3 | ATTEMPTS: 0 | LAST-ACTION: suite_core::stft added (realfft 3.5, alloc-free streaming WOLA, latency==fft_size verified, all suite-core tests green); scaffolding EMBER crate + DSP core next
 PUSH-PENDING: no
 DONE: BOOTSTRAP, GRIT
 DESCOPED: GRIT Mode C (spectral STFT) → DEFERRED.md

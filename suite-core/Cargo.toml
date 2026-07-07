@@ -17,5 +17,6 @@ gui = ["dep:nih_plug", "dep:nih_plug_egui"]
 hound = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+realfft = { workspace = true }
 nih_plug = { workspace = true, optional = true }
 nih_plug_egui = { workspace = true, optional = true }
