@@ -4,6 +4,7 @@
 
 pub mod dsp;
 pub mod harness;
+pub mod presets;
 pub mod testsig;
 
 #[cfg(feature = "gui")]

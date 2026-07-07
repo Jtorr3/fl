@@ -15,6 +15,11 @@
       installed at `%LOCALAPPDATA%\Programs\Common\CLAP\Qeynos\_template.clap`.
       In FL: Options → Manage plugins → "Find more plugins", then load
       "Qeynos Template" to confirm the GUI opens (OpenGL) and the gain knob works.
+- [ ] **GRIT (shipped 2026-07-07): FL rescan + GUI/sidechain spot-check.** "Qeynos GRIT"
+      CLAP installed at `%LOCALAPPDATA%\Programs\Common\CLAP\Qeynos\grit.clap`. In FL:
+      Find more plugins → add GRIT to a track, route a kick to its **sidechain** input,
+      load the "Kick Bass Grit" preset, confirm the GUI opens (all params + preset combo
+      + SC Listen / Auto-Gain toggles) and the distortion pumps with the kick.
 - [ ] FL Studio: Options → Manage plugins → "Find more plugins" after new installs
       (FL never auto-detects new plugins).
 - [ ] Audition `renders/<plugin>/*.wav` — automated assertions check math, not taste.

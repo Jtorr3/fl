@@ -1,15 +1,26 @@
 # STATUS
 
-CURRENT: GRIT | STEP: 1 | ATTEMPTS: 0 | LAST-ACTION: start(GRIT) — sidechained distortion iteration begun
+CURRENT: (none) | STEP: - | ATTEMPTS: 0 | LAST-ACTION: GRIT SHIPPED (degraded: Mode C deferred) — grit.clap green on clap-validator + pluginval s8, installed
 PUSH-PENDING: no
-DONE: BOOTSTRAP
-DESCOPED: (none)
+DONE: BOOTSTRAP, GRIT
+DESCOPED: GRIT Mode C (spectral STFT) → DEFERRED.md
 
 ## LOG (append-only: date | item | outcome | how-to-test-in-FL)
 2026-07-07 | PLANNING | PRD v2 hardened via 3-agent adversarial review; repo, specs, loop contract, allowlist committed | n/a
 2026-07-07 | BOOTSTRAP | GO: _template passes clap-validator + pluginval on windows-gnu | rescan plugins in FL, load "Qeynos Template"
+2026-07-07 | GRIT | SHIPPED (degraded, [x]*): sidechained distortion, Modes A (Env-Drive) + B (Waveshape); Mode C (spectral STFT) deferred to DEFERRED.md. 4x oversampling + presets module added to suite-core (all-crates revalidated: _template green). clap-validator 14/0, pluginval s8 PASS, CLAP installed. Done-bar met: THD rises during SC pulses, auto-gain holds post-RMS within ±1 dB of pre. 5 presets, renders in renders/GRIT/. | FL: Find more plugins → add "Qeynos GRIT", route a kick to its sidechain, load "Kick Bass Grit", confirm it pumps with the kick (SC Listen to audition the focus band)
 
 ## NOTES
+- New suite-core APIs (GRIT, 2026-07-07): `dsp::Oversampler2x` / `dsp::Oversampler4x`
+  (polyphase halfband FIR, alloc-free `process(x, |v| f(v))`; reset()); `presets`
+  module (`Preset{name, values}`, `Preset::parse`, `load_all(&[&str])` — flat embedded
+  JSON via serde_json, now a suite-core dep). Any later plugin needing oversampling or
+  factory presets should reuse these. suite-core API rule honored: workspace rebuilt,
+  _template revalidated green.
+- Fixed a latent pre-existing bug: `dsp::tests::env_follower_tracks_level` asserted RMS
+  (0.354) but used fast-attack/slow-release times (which peak-track ~0.5). Made the test
+  times symmetric so it measures level. (Never gated anything — build.ps1 tests per
+  plugin crate, not `-p suite-core`.)
 - Toolchain gap fixed: rustup's x86_64-pc-windows-gnu ships dlltool but NO assembler,
   so raw-dylib import-lib generation (windows-sys, parking_lot_core) fails with
   "dlltool could not create import library ... CreateProcess". Fix = portable

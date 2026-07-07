@@ -204,6 +204,149 @@ pub fn tape_soft(x: f32) -> f32 {
     t * (27.0 + t * t) / (27.0 + 9.0 * t * t)
 }
 
+// ---------------------------------------------------------------------------
+// Oversampling — polyphase-style halfband FIR up/down-samplers for nonlinear
+// stages (PRD §3 "2–4x oversampling on nonlinear stages"). Linear-phase windowed
+// -sinc halfband lowpass at Fs/4; a 2x stage cascades to 4x. Fully preallocated,
+// allocation-free in `process` (safe under nih-plug's assert_process_allocs).
+// ---------------------------------------------------------------------------
+
+/// Design a windowed-sinc (Hamming) FIR lowpass of `num_taps` taps with cutoff
+/// `fc_norm` in cycles/sample (0..0.5), normalized to unity DC gain.
+fn design_lowpass(num_taps: usize, fc_norm: f32) -> Vec<f32> {
+    let n = num_taps.max(3) | 1; // force odd for a symmetric linear-phase kernel
+    let m = (n - 1) as f32 / 2.0;
+    let mut h = vec![0.0f32; n];
+    let mut sum = 0.0f32;
+    for (i, hi) in h.iter_mut().enumerate() {
+        let k = i as f32 - m;
+        let sinc = if k.abs() < 1.0e-6 {
+            2.0 * fc_norm
+        } else {
+            (2.0 * PI * fc_norm * k).sin() / (PI * k)
+        };
+        let w = 0.54 - 0.46 * (2.0 * PI * i as f32 / (n - 1) as f32).cos();
+        *hi = sinc * w;
+        sum += *hi;
+    }
+    if sum.abs() > 1.0e-12 {
+        for hi in h.iter_mut() {
+            *hi /= sum;
+        }
+    }
+    h
+}
+
+/// Streaming direct-form FIR with a ring-buffer history. Allocation-free `process`.
+#[derive(Clone)]
+struct Fir {
+    h: Vec<f32>,
+    z: Vec<f32>,
+    pos: usize,
+}
+
+impl Fir {
+    fn new(h: Vec<f32>) -> Self {
+        let n = h.len();
+        Self {
+            h,
+            z: vec![0.0; n],
+            pos: 0,
+        }
+    }
+
+    fn reset(&mut self) {
+        for v in self.z.iter_mut() {
+            *v = 0.0;
+        }
+        self.pos = 0;
+    }
+
+    #[inline]
+    fn process(&mut self, x: f32) -> f32 {
+        let n = self.h.len();
+        self.z[self.pos] = x;
+        let mut acc = 0.0f32;
+        let mut idx = self.pos;
+        for &hk in self.h.iter() {
+            acc += hk * self.z[idx];
+            idx = if idx == 0 { n - 1 } else { idx - 1 };
+        }
+        self.pos += 1;
+        if self.pos == n {
+            self.pos = 0;
+        }
+        acc
+    }
+}
+
+/// 2x oversampler: zero-stuffing upsample → nonlinearity at 2x → halfband decimate.
+#[derive(Clone)]
+pub struct Oversampler2x {
+    up: Fir,
+    down: Fir,
+}
+
+impl Default for Oversampler2x {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Oversampler2x {
+    pub fn new() -> Self {
+        let h = design_lowpass(31, 0.25);
+        Self {
+            up: Fir::new(h.clone()),
+            down: Fir::new(h),
+        }
+    }
+
+    pub fn reset(&mut self) {
+        self.up.reset();
+        self.down.reset();
+    }
+
+    /// Process one input sample: upsample 2x, apply `f` per high-rate sample,
+    /// decimate back. `f` sees the same nonlinearity at twice the rate.
+    #[inline]
+    pub fn process<F: FnMut(f32) -> f32>(&mut self, x: f32, mut f: F) -> f32 {
+        // Zero-stuff and compensate the halving of energy with a gain of 2.
+        let u0 = self.up.process(x * 2.0);
+        let u1 = self.up.process(0.0);
+        let y0 = f(u0);
+        let y1 = f(u1);
+        // Anti-alias then decimate by 2 (advance on both, keep the second).
+        self.down.process(y0);
+        self.down.process(y1)
+    }
+}
+
+/// 4x oversampler = two cascaded 2x halfband stages.
+#[derive(Clone, Default)]
+pub struct Oversampler4x {
+    s1: Oversampler2x,
+    s2: Oversampler2x,
+}
+
+impl Oversampler4x {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn reset(&mut self) {
+        self.s1.reset();
+        self.s2.reset();
+    }
+
+    /// Process one input sample at 4x oversampling, applying `f` at the 4x rate.
+    #[inline]
+    pub fn process<F: FnMut(f32) -> f32>(&mut self, x: f32, mut f: F) -> f32 {
+        let s2 = &mut self.s2;
+        self.s1.process(x, |u| s2.process(u, &mut f))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -249,9 +392,47 @@ mod tests {
     }
 
     #[test]
+    fn oversampler4x_passes_low_frequency_cleanly() {
+        // A 1 kHz sine put through a 4x oversampler with an identity nonlinearity
+        // should come back with nearly the same amplitude (allowing for filter
+        // group delay) and no blow-up.
+        let mut os = Oversampler4x::new();
+        let sr = 48_000.0f32;
+        let mut peak_in = 0.0f32;
+        let mut peak_out = 0.0f32;
+        // Prime the filters, then measure a steady window.
+        for n in 0..9_600usize {
+            let x = 0.5 * (2.0 * PI * 1_000.0 * n as f32 / sr).sin();
+            let y = os.process(x, |v| v);
+            if n > 4_800 {
+                peak_in = peak_in.max(x.abs());
+                peak_out = peak_out.max(y.abs());
+            }
+        }
+        assert!(peak_out.is_finite());
+        assert!(
+            (peak_out - peak_in).abs() < 0.06,
+            "OS changed amplitude too much: in {peak_in:.3} out {peak_out:.3}"
+        );
+    }
+
+    #[test]
+    fn oversampler2x_bounded_under_hard_drive() {
+        let mut os = Oversampler2x::new();
+        let sr = 48_000.0f32;
+        for n in 0..4_800usize {
+            let x = (2.0 * PI * 3_000.0 * n as f32 / sr).sin();
+            let y = os.process(x, |v| (v * 4.0).tanh());
+            assert!(y.is_finite() && y.abs() < 1.5, "os2x out of range: {y}");
+        }
+    }
+
+    #[test]
     fn env_follower_tracks_level() {
+        // Symmetric smoothing >> signal period so the follower averages x^2 and
+        // reports true RMS (a fast attack + slow release would peak-track instead).
         let mut e = EnvFollower::new(Detector::Rms);
-        e.set_times(1.0, 50.0, 48_000.0);
+        e.set_times(50.0, 50.0, 48_000.0);
         let mut env = 0.0;
         for n in 0..48_000 {
             let x = (2.0 * PI * 1_000.0 * n as f32 / 48_000.0).sin() * 0.5;
