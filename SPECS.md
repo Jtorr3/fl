@@ -218,6 +218,28 @@ in(kick) ─┬─────────────────────�
 Params: strip, drive, reverb size/decay, LP freq, tune note, duck depth/release,
 rumble level, width.
 
+### SNAP — snare/clap generator (MIDI instrument; user request 2026-07-07)
+```
+note-on -> [BODY: sine/tri 140-260 Hz w/ fast pitch env (shell knock)]
+        -> [RATTLE: noise -> parallel BP bank (2-3 formants ~800/1.5k/3k) w/ own env]
+        -> [CLAP ENGINE: 3-5 noise bursts at 8-30 ms spread (humanized pre-delays,
+            each shorter env) + longer tail burst -> BP/LP tone shaping]
+        -> mode blend (Snare / Clap / Hybrid crossfade) -> transient click layer
+        -> drive (suite bank, 2x OS) -> amp env -> width (haas-free stereo via
+            decorrelated noise per channel) -> soft clip -> out
+```
+- IMPACT's architecture is the template (mono-ish voice, phase-continuous retrigger,
+  1.5 ms declick, length macro scaling all envelopes, key-track optional off).
+- Params: mode blend, tune (body Hz), body/noise balance, snap (click + rattle env
+  speed), decay, clap taps count + spread + humanize, tone (BP center), drive,
+  width, level. >= 6 presets per mode family (e.g. 'Rimshot Knock', 'Wet Techno
+  Clap', 'DnB Crack', 'Gunshot Layer', '90s Machine Clap', 'Airy Top Snare').
+- Done bar (PRD S4 style): universal assertions + (1) clap mode render shows the
+  configured number of distinct onsets within the spread window (onset detection on
+  the render); (2) tone param moves the noise-band spectral centroid monotonically
+  across 3 settings; (3) retrigger mid-decay click-free (IMPACT's test recipe);
+  (4) decay param scales measured RT of the render.
+
 ### SEANCE — ethereal vocal machine
 ```
 in ─ pitch shift (±12 st, formant-preserving PV + envelope lift) ─ formant knob

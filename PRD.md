@@ -314,7 +314,7 @@ Phase 2a — clones
 - [x] DRIFT - [x] WIRE - [x] OUROBOROS - [ ] SWARM - [ ] SMUDGE - [ ] MURMUR
 
 Taste-tailored (deps satisfied: IMPACT, MURMUR-FDN, EMBER/SMUDGE engines)
-- [ ] UNDERTOW - [ ] SEANCE - [ ] ASCEND
+- [ ] UNDERTOW - [ ] SNAP - [ ] SEANCE - [ ] ASCEND
 
 VOX suite (user request 2026-07-07: rip lyrics from other songs, make them fit
 anything — key/tempo/character conforming; SEANCE's formant-preserving shift engine
