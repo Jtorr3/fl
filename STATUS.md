@@ -1,6 +1,6 @@
 # STATUS
 
-CURRENT: (none) | STEP: - | ATTEMPTS: 0 | LAST-ACTION: EMBER SHIPPED (full, [x]) — ember.clap green on clap-validator + pluginval s8, installed. suite_core::stft added (all crates revalidated). No escalation, no descope.
+CURRENT: IMPACT | STEP: 1 | ATTEMPTS: 0 | LAST-ACTION: start(IMPACT) — kick drum synth MIDI instrument. EMBER SHIPPED (full, [x]) prior.
 PUSH-PENDING: no
 DONE: BOOTSTRAP, GRIT, EMBER
 DESCOPED: GRIT Mode C (spectral STFT) → DEFERRED.md
