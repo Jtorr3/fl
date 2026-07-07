@@ -1,6 +1,6 @@
 # STATUS
 
-CURRENT: EMBER | STEP: 3 | ATTEMPTS: 0 | LAST-ACTION: suite_core::stft added (realfft 3.5, alloc-free streaming WOLA, latency==fft_size verified, all suite-core tests green); scaffolding EMBER crate + DSP core next
+CURRENT: EMBER | STEP: 4 | ATTEMPTS: 0 | LAST-ACTION: EMBER DSP core done — per-bin state machine + phase-vocoder tails PASS all 3 done-bar asserts first try (τ=10s tail +2s>-40dB & monotone; freeze flat; mix=0 null<-80dB). No escalation needed. Building params/GUI/presets next.
 PUSH-PENDING: no
 DONE: BOOTSTRAP, GRIT
 DESCOPED: GRIT Mode C (spectral STFT) → DEFERRED.md

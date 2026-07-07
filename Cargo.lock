@@ -588,6 +588,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ember"
+version = "0.1.0"
+dependencies = [
+ "nih_plug",
+ "nih_plug_egui",
+ "suite-core",
+]
+
+[[package]]
 name = "epaint"
 version = "0.31.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

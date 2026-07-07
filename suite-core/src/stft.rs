@@ -17,9 +17,12 @@
 //! below, the algorithmic latency is exactly `fft_size` samples — see
 //! [`Stft::latency`] and the `identity_latency_is_fft_size` test.
 
-use realfft::num_complex::Complex;
 use realfft::{ComplexToReal, RealFftPlanner, RealToComplex};
 use std::sync::Arc;
+
+/// Re-exported complex type so consumers of the callback spectrum don't need a direct
+/// `realfft`/`num_complex` dependency.
+pub use realfft::num_complex::Complex;
 
 /// A streaming short-time Fourier transform with per-frame callback resynthesis.
 pub struct Stft {
