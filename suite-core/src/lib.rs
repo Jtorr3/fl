@@ -8,6 +8,7 @@ pub mod harness;
 pub mod loudness;
 pub mod pitch;
 pub mod presets;
+pub mod shift;
 pub mod stft;
 pub mod testsig;
 
