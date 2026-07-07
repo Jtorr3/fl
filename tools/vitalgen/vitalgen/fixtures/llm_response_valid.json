@@ -1,0 +1,43 @@
+{
+  "name": "Drowned Grief Pad",
+  "author": "Qeynos vitalgen",
+  "comments": "slow-attack minor pad, filtered and drowned",
+  "style": "Pad",
+  "params": {
+    "osc_1_on": 1,
+    "osc_1_level": 0.72,
+    "osc_1_unison_voices": 6,
+    "osc_1_unison_detune": 3.5,
+    "osc_2_on": 1,
+    "osc_2_level": 0.5,
+    "osc_2_transpose": -12,
+    "filter_1_on": 1,
+    "filter_1_cutoff": 42.0,
+    "filter_1_resonance": 0.35,
+    "filter_1_model": 0,
+    "filter_1_drive": 4.0,
+    "env_1_attack": 1.4,
+    "env_1_decay": 1.2,
+    "env_1_sustain": 0.75,
+    "env_1_release": 1.9,
+    "reverb_on": 1,
+    "reverb_dry_wet": 0.6,
+    "chorus_on": 1,
+    "chorus_dry_wet": 0.4,
+    "distortion_on": 0,
+    "volume": 5200.0
+  },
+  "lfos": [
+    {
+      "index": 0,
+      "name": "Slow Swell",
+      "points": [0.0, 0.0, 0.5, 1.0, 1.0, 0.0],
+      "powers": [0.0, 0.0, 0.0],
+      "smooth": true
+    }
+  ],
+  "macros": {
+    "macro1": "REVERB",
+    "macro2": "DROWN"
+  }
+}

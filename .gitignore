@@ -3,3 +3,6 @@ renders/
 tools/bin/
 dist/
 *.wav
+__pycache__/
+*.pyc
+out/

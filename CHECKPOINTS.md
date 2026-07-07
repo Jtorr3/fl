@@ -11,6 +11,20 @@
       an MSVC fallback to exist. The loop will never try to install it itself.
 
 ## During / after the run (whenever you're at the machine)
+- [ ] **W8-VITALGEN (shipped 2026-07-07): open Vital, load the Qeynos bank preset.**
+      A fixture-built preset is already written to
+      `Documents\Vital\User\Qeynos\Drowned_Grief_Pad.vital` (real 1.5.5 base +
+      constrained overrides, passes offline `vitalgen validate`). Open Vital 1.5.5 ->
+      browser -> User -> Qeynos -> load it to confirm it opens without error and sounds
+      like a slow-attack drowned pad. (GUI load is human-only; the loop can't launch
+      Vital's GUI.)
+- [ ] **W8-VITALGEN: set ANTHROPIC_API_KEY and smoke-test live generation.** No key
+      was set on the build machine, so the live Claude API path was not exercised
+      (all offline tests pass). Set `ANTHROPIC_API_KEY`, then run:
+      `uv run --python 3.12 tools\vitalgen\vitalgen\vitalgen.py generate "cavernous mid bass" --bank Qeynos`
+      (uv is at `%USERPROFILE%\.local\bin\uv.exe`, not on PATH). The offline
+      `test_vitalgen.py` live smoke test also auto-runs once the key is present.
+
 - [ ] **BOOTSTRAP (done 2026-07-07): FL rescan needed.** "Qeynos Template" CLAP is
       installed at `%LOCALAPPDATA%\Programs\Common\CLAP\Qeynos\_template.clap`.
       In FL: Options → Manage plugins → "Find more plugins", then load

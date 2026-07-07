@@ -20,6 +20,12 @@ admin junction exists (see `CHECKPOINTS.md`).
 | TRACER | Distortion | Pitch-tracking multiband saturation — MPM f0 detection locks a time-varying LR4 crossover tree to the note; per-band waveshaper drive (2x OS), Smart Frequency, constant-color, confidence freeze, MIDI mode | [docs/TRACER.md](docs/TRACER.md) |
 | OVERSEER | Mastering | ONE bundle, TWO plugins: **Node** channel strip (EQ, RMS comp, tanh sat, M/S width) + **Master** bus (EQ, 3-band LR4 multiband comp, 2 ms lookahead limiter w/ reported latency, BS.1770 LUFS meter). Master remote-controls Nodes over a same-DLL bus (override badges, local steal-back). Caveat: FL "Make bridged" severs the link | [docs/OVERSEER.md](docs/OVERSEER.md) |
 
+## Tools (Phase 4)
+
+| Tool | Type | Summary | Docs |
+|---|---|---|---|
+| W8-VITALGEN | Python + Claude API | Generate/tweak/validate Vital 1.5.x synth presets from natural-language descriptions. Claude fills a constrained parameter subset (osc/filter/env/LFO/FX/macros) merged onto an embedded known-good 1.5.5 base patch; pydantic clamps ranges and rejects bad enums so output always loads. Offline tests run without an API key. Skill: `.claude/skills/vitalgen`. | [docs/W8-VITALGEN.md](docs/W8-VITALGEN.md) |
+
 ## Building
 
 ```powershell

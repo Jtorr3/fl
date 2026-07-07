@@ -38,3 +38,16 @@ Each entry: item | feature | why | how to pick it back up.
 - **How to resume:** NERVE/X-RAY build the `memmap2` shared-memory bus in suite-core
   (PRD §3 tier 2: fixed-layout slots, per-slot seqlock, heartbeat GC); port
   `plugins/overseer/src/bus.rs` onto it keeping the same `Slot` API.
+
+## W8-VITALGEN — Serum 2 preset generation
+- **Deferred by spec** (SPECS.md "W8 vitalgen": "Serum 2 = DEFERRED"), recorded
+  2026-07-07 at ship time. VITALGEN shipped for Vital 1.5.x only.
+- **Why:** Serum 2's preset format and parameter model differ entirely from Vital's
+  flat JSON `settings` map; it needs its own schema ground-truth (a Serum 2 install +
+  saved presets to diff), its own base template, and its own PARAM_SPEC. Out of scope
+  for one iteration, and no Serum 2 install was present on the build machine to derive
+  the schema from.
+- **How to resume:** add a `serumgen.py` (or a `--target serum2` backend to vitalgen)
+  with a Serum-2 base template + PARAM_SPEC derived from real saved Serum 2 presets,
+  reusing the same constrained-subset-merged-onto-base architecture and pydantic
+  validation. Add fixtures + offline tests mirroring the Vital ones.

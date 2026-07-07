@@ -300,7 +300,7 @@ Phase 1 — priority plugins
 - [x]* GRIT   - [x] EMBER   - [x] IMPACT   - [x] TRACER   - [x] OVERSEER
 
 Quick wins (non-Rust, immediately usable)
-- [ ] W8-VITALGEN   - [ ] W4-SESSION-BOOTSTRAP
+- [x] W8-VITALGEN   - [ ] W4-SESSION-BOOTSTRAP
 **HARD CHECKPOINT**
 
 Phase 2a — clones

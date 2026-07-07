@@ -1,0 +1,8 @@
+{
+  "name": "Broken Enum",
+  "style": "Bass",
+  "params": {
+    "osc_1_level": 0.6,
+    "filter_1_model": 99
+  }
+}
