@@ -19,7 +19,7 @@
 //! API-agnostic pure Rust, shared verbatim between the nih-plug `process` path and the
 //! offline harness tests.
 
-use suite_core::dsp::{Oversampler2x, Shaper, Svf};
+use suite_core::dsp::{DelayLine, Oversampler2x, Shaper, Svf};
 use suite_core::pitch::PitchTracker;
 
 const MAX_BANDS: usize = 4;
@@ -252,11 +252,20 @@ pub struct TracerCore {
     color: [f32; MAX_BANDS],
     band_centers: [f32; MAX_BANDS],
     configured: bool,
+    // Dry-path delay compensation: every band's saturation runs through a 2x oversampler
+    // with the same fixed halfband group delay, so the band sum is coherent but delayed
+    // relative to the input. The dry path is delayed by that integer amount so partial mix
+    // does not comb-filter; the delay is reported to the host as latency.
+    dry_delay: [DelayLine; 2],
+    latency: usize,
 }
 
 impl TracerCore {
     pub fn new(sample_rate: f32) -> Self {
         let sr = if sample_rate > 0.0 { sample_rate } else { 48_000.0 };
+        // All bands share one 2x-oversampler group delay (SR-independent — fixed FIR taps).
+        // Use the empirically-measured integer peak lag for exact dry/wet alignment.
+        let latency = Oversampler2x::measure_group_delay();
         let mut core = TracerCore {
             sr,
             ch: [Channel::new(), Channel::new()],
@@ -266,9 +275,17 @@ impl TracerCore {
             color: [1.0; MAX_BANDS],
             band_centers: [110.0, 400.0, 1500.0, 6000.0],
             configured: false,
+            dry_delay: [DelayLine::new(latency), DelayLine::new(latency)],
+            latency,
         };
         core.set_sample_rate(sr);
         core
+    }
+
+    /// Reported plugin latency (samples) = the per-band oversampler group delay the dry
+    /// path is compensated by. Constant across sample rates.
+    pub fn latency_samples(&self) -> u32 {
+        self.latency as u32
     }
 
     pub fn set_sample_rate(&mut self, sample_rate: f32) {
@@ -284,6 +301,9 @@ impl TracerCore {
         self.tracker.reset();
         self.ctrl_count = 0;
         self.configured = false;
+        for d in self.dry_delay.iter_mut() {
+            d.reset();
+        }
     }
 
     /// Latest crossover cutoffs (Hz). Exposed for the freeze done-bar test.
@@ -382,11 +402,16 @@ impl TracerCore {
         let trim = db_to_lin(s.trim_db);
         let mix = s.mix.clamp(0.0, 1.0);
         let out_lin = db_to_lin(s.out_db);
-        let dry = [l_in, r_in];
+        let wet_in = [l_in, r_in];
+        // Latency-compensated dry for the mix (kept aligned with the oversampled wet sum).
+        let dry = [
+            self.dry_delay[0].process(l_in),
+            self.dry_delay[1].process(r_in),
+        ];
         let mut out = [0.0f32; 2];
 
         for ci in 0..2 {
-            let x = dry[ci] * trim;
+            let x = wet_in[ci] * trim;
 
             // Serial LR4 split into `n_active` bands (band 0 = lowest).
             let mut bands = [0.0f32; MAX_BANDS];
@@ -564,7 +589,7 @@ mod tests {
     }
 
     #[test]
-    fn mix_zero_nulls_against_dry() {
+    fn mix_zero_nulls_against_latency_matched_dry() {
         let sr = 48_000.0f32;
         let n = 24_000usize;
         let main: Vec<f32> = (0..n)
@@ -574,16 +599,42 @@ mod tests {
         s.mix = 0.0;
         s.out_db = 0.0;
         let mut core = TracerCore::new(sr);
+        let lat = core.latency_samples() as usize;
         let mut out = main.clone();
         core.process_mono(&mut out, &s);
-        let mse = main
-            .iter()
-            .zip(&out)
-            .map(|(a, b)| (a - b) * (a - b))
+        // At mix=0 the output is the dry path delayed by the reported latency.
+        let m = n - lat;
+        let mse = (0..m)
+            .map(|i| {
+                let d = main[i] - out[i + lat];
+                d * d
+            })
             .sum::<f32>()
-            / n as f32;
+            / m as f32;
         let resid = 20.0 * mse.sqrt().max(1.0e-12).log10();
         assert!(resid < -80.0, "mix=0 did not null: residual {resid:.1} dB");
+    }
+
+    /// Regression (HARD CHECKPOINT 1): at mix=0.5 the delayed dry and the oversampled wet
+    /// sum must form a SINGLE coherent impulse peak — all bands share one group delay, so
+    /// with dry-path compensation there is exactly one cluster, not two peaks.
+    #[test]
+    fn partial_mix_impulse_is_single_coherent_peak() {
+        use suite_core::harness::assert_single_coherent_peak;
+        let sr = 48_000.0f32;
+        let n = 256usize;
+        let mut s = Settings::default();
+        s.mix = 0.5;
+        s.const_color = false;
+        s.band_drive_db = [0.0, 0.0, 0.0, 0.0]; // ~unity wet
+        s.band_level_db = [0.0, 0.0, 0.0, 0.0];
+        s.xo_mode = [XoMode::Fixed, XoMode::Fixed, XoMode::Fixed];
+        s.xo_fixed_hz = [200.0, 1000.0, 4000.0];
+        let mut main = vec![0.0f32; n];
+        main[0] = 1.0;
+        let mut core = TracerCore::new(sr);
+        core.process_mono(&mut main, &s);
+        assert_single_coherent_peak(&main, 2, 0.5);
     }
 
     #[test]

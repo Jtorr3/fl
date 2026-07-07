@@ -301,7 +301,12 @@ Phase 1 — priority plugins
 
 Quick wins (non-Rust, immediately usable)
 - [x] W8-VITALGEN   - [x] W4-SESSION-BOOTSTRAP
-**HARD CHECKPOINT**
+- [x] **HARD CHECKPOINT 1** (2026-07-07): remediation of 7 confirmed adversarial-review
+  findings — GRIT/TRACER parallel-mix comb + PDC latency (measured group delay, matched
+  dry delay, set_latency_samples), OVERSEER smoother application, OVERSEER Node
+  saturation aliasing (2x OS), loudness realtime cost (momentary-only + O(bins) gating),
+  suite-wide denormal FTZ/DAZ. `cargo test --workspace --release` + `build.ps1 -All`
+  green; shared partial-mix alignment regression helper wired into GRIT + TRACER.
 
 Phase 2a — clones
 - [ ] DRIFT - [ ] WIRE - [ ] OUROBOROS - [ ] SWARM - [ ] SMUDGE - [ ] MURMUR

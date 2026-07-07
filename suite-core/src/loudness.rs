@@ -216,6 +216,103 @@ impl PowerWindow {
     }
 }
 
+/// A fixed-size log-power histogram over completed 400 ms block powers. Bounds the cost
+/// of the integrated-loudness gating so it is **O(number of bins)** — independent of how
+/// long the meter has been running — rather than an O(n) rescan of an ever-growing Vec on
+/// every 100 ms step inside the audio callback (HARD CHECKPOINT 1, MINOR 6).
+///
+/// Each bin keeps the exact `f64` sum of the powers that fell in it, so gated averages are
+/// numerically exact; only the *gate threshold* decision is quantised to the bin width
+/// (0.05 dB → well under the ±0.5 LU tolerance).
+struct PowerHistogram {
+    counts: Vec<u64>,
+    sums: Vec<f64>,
+    lo_db: f64,
+    bin_db: f64,
+}
+
+impl PowerHistogram {
+    fn new() -> Self {
+        // Power expressed as 10·log10(power) ("power dB"): cover −120..+20, 0.05 dB bins.
+        let lo_db: f64 = -120.0;
+        let hi_db: f64 = 20.0;
+        let bin_db: f64 = 0.05;
+        let nbins = (((hi_db - lo_db) / bin_db).round() as usize) + 1;
+        Self {
+            counts: vec![0; nbins],
+            sums: vec![0.0; nbins],
+            lo_db,
+            bin_db,
+        }
+    }
+
+    #[inline]
+    fn bin_of(&self, power: f64) -> usize {
+        let d = 10.0 * power.max(1.0e-30).log10();
+        let idx = ((d - self.lo_db) / self.bin_db).floor() as isize;
+        idx.clamp(0, self.counts.len() as isize - 1) as usize
+    }
+
+    #[inline]
+    fn center_power(&self, bin: usize) -> f64 {
+        let d = self.lo_db + (bin as f64 + 0.5) * self.bin_db;
+        10.0_f64.powf(d / 10.0)
+    }
+
+    #[inline]
+    fn add(&mut self, power: f64) {
+        if power <= 0.0 {
+            return;
+        }
+        let b = self.bin_of(power);
+        self.counts[b] += 1;
+        self.sums[b] += power;
+    }
+
+    fn clear(&mut self) {
+        for c in self.counts.iter_mut() {
+            *c = 0;
+        }
+        for s in self.sums.iter_mut() {
+            *s = 0.0;
+        }
+    }
+
+    /// Two-stage gated integrated power (absolute −70 LUFS, then relative −10 LU) folded
+    /// with the K-weighting `offset` into a LUFS value.
+    fn integrated_lufs(&self, offset: f64) -> f64 {
+        let abs_gate = 10.0_f64.powf((-70.0 - offset) / 10.0);
+        // Pass 1 — absolute gate: running sums over bins above the gate.
+        let mut sum = 0.0;
+        let mut count = 0u64;
+        for b in 0..self.counts.len() {
+            if self.counts[b] > 0 && self.center_power(b) > abs_gate {
+                sum += self.sums[b];
+                count += self.counts[b];
+            }
+        }
+        if count == 0 {
+            return f64::NEG_INFINITY;
+        }
+        let abs_mean = sum / count as f64;
+        // Relative gate at abs_mean − 10 LU == abs_mean / 10 in linear power.
+        let gate = abs_gate.max(abs_mean * 0.1);
+        let mut sum2 = 0.0;
+        let mut count2 = 0u64;
+        for b in 0..self.counts.len() {
+            if self.counts[b] > 0 && self.center_power(b) > gate {
+                sum2 += self.sums[b];
+                count2 += self.counts[b];
+            }
+        }
+        if count2 == 0 {
+            f64::NEG_INFINITY
+        } else {
+            offset + 10.0 * (sum2 / count2 as f64).log10()
+        }
+    }
+}
+
 /// Full BS.1770 loudness meter: momentary (400 ms), short-term (3 s), and gated
 /// integrated loudness with reset. Feeds on per-sample channel frames.
 pub struct LoudnessMeter {
@@ -224,37 +321,60 @@ pub struct LoudnessMeter {
     short: PowerWindow,
     kweighting: bool,
 
+    /// When true (constructed via [`LoudnessMeter::new_momentary`]) the integrated /
+    /// short-term gating machinery is skipped entirely — used by consumers that only read
+    /// momentary loudness (e.g. OVERSEER Node), so `push` stays O(1) with no histogram
+    /// bookkeeping in the audio callback.
+    momentary_only: bool,
+
     // Integrated gating: 400 ms blocks with 75 % overlap (a new block every 100 ms step,
     // each covering the last 400 ms — read straight off the momentary window's mean).
     block_len: usize,
     step_len: usize,
     step_counter: usize,
     samples_seen: usize,
-    // Pre-reserved store of completed-block mean powers (one per 100 ms). Bounded so
-    // `push` never reallocates inside an audio callback.
-    block_powers: Vec<f64>,
+    // Bounded histogram of completed-block mean powers (see `PowerHistogram`): keeps the
+    // integrated recompute O(bins), not O(elapsed time), inside `process`.
+    hist: PowerHistogram,
     integrated_cache: f64,
 }
 
 impl LoudnessMeter {
-    /// Build a meter for `channels` channels at `fs`. Reserves ~60 min of gating blocks.
+    /// Build a full meter (momentary + short + gated integrated) for `channels` channels
+    /// at `fs`.
     pub fn new(fs: f32, channels: usize) -> Self {
+        Self::build(fs, channels, false)
+    }
+
+    /// Build a **momentary-only** meter: momentary loudness is tracked, but the short-term
+    /// window and the integrated-gating histogram are inert, so `push` does no per-100 ms
+    /// gating work. For consumers that only read [`momentary_lufs`](Self::momentary_lufs).
+    pub fn new_momentary(fs: f32, channels: usize) -> Self {
+        Self::build(fs, channels, true)
+    }
+
+    fn build(fs: f32, channels: usize, momentary_only: bool) -> Self {
         let fsf = fs.max(1.0) as f64;
         let ch = channels.max(1);
         let block_len = (0.4 * fsf).round() as usize;
         let step_len = (0.1 * fsf).round() as usize;
-        // 60 minutes of 100 ms steps.
-        let cap = 60 * 60 * 10 + 8;
+        // A momentary-only meter does not need the 3 s short window.
+        let short_len = if momentary_only {
+            1
+        } else {
+            (3.0 * fsf).round() as usize
+        };
         Self {
             channels: (0..ch).map(|_| KWeight::new(fs)).collect(),
             momentary: PowerWindow::new((0.4 * fsf).round() as usize),
-            short: PowerWindow::new((3.0 * fsf).round() as usize),
+            short: PowerWindow::new(short_len),
             kweighting: true,
+            momentary_only,
             block_len,
             step_len,
             step_counter: 0,
             samples_seen: 0,
-            block_powers: Vec::with_capacity(cap),
+            hist: PowerHistogram::new(),
             integrated_cache: f64::NEG_INFINITY,
         }
     }
@@ -288,19 +408,21 @@ impl LoudnessMeter {
             power += w * w; // G = 1.0 for L/R
         }
         self.momentary.push(power);
+        if self.momentary_only {
+            return;
+        }
         self.short.push(power);
 
         // Integrated gating: every 100 ms, once at least one full 400 ms block exists,
-        // record the 400 ms mean power (the momentary window already holds exactly that).
+        // record the 400 ms mean power (the momentary window already holds exactly that)
+        // into the bounded histogram and refresh the (now O(bins)) integrated value.
         self.samples_seen += 1;
         self.step_counter += 1;
         if self.step_counter >= self.step_len {
             self.step_counter = 0;
             if self.samples_seen >= self.block_len {
                 let mean = self.momentary.mean();
-                if self.block_powers.len() < self.block_powers.capacity() {
-                    self.block_powers.push(mean);
-                }
+                self.hist.add(mean);
                 self.recompute_integrated();
             }
         }
@@ -330,40 +452,11 @@ impl LoudnessMeter {
         }
     }
 
-    /// Two-stage gated integration (BS.1770-4) over the recorded 400 ms block powers.
+    /// Two-stage gated integration (BS.1770-4) over the histogram of 400 ms block powers.
+    /// O(number of histogram bins), independent of elapsed time.
     fn recompute_integrated(&mut self) {
         let offset = self.offset();
-        // Absolute gate at -70 LUFS.
-        let abs_gate_power = 10.0_f64.powf((-70.0 - offset) / 10.0);
-        let mut sum = 0.0;
-        let mut count = 0usize;
-        for &p in self.block_powers.iter() {
-            if p > abs_gate_power {
-                sum += p;
-                count += 1;
-            }
-        }
-        if count == 0 {
-            self.integrated_cache = f64::NEG_INFINITY;
-            return;
-        }
-        // Relative gate at (integrated of abs-gated) - 10 LU.
-        let abs_mean = sum / count as f64;
-        let rel_gate_lufs = offset + 10.0 * abs_mean.log10() - 10.0;
-        let rel_gate_power = 10.0_f64.powf((rel_gate_lufs - offset) / 10.0);
-        let mut sum2 = 0.0;
-        let mut count2 = 0usize;
-        for &p in self.block_powers.iter() {
-            if p > abs_gate_power && p > rel_gate_power {
-                sum2 += p;
-                count2 += 1;
-            }
-        }
-        self.integrated_cache = if count2 == 0 {
-            f64::NEG_INFINITY
-        } else {
-            offset + 10.0 * (sum2 / count2 as f64).log10()
-        };
+        self.integrated_cache = self.hist.integrated_lufs(offset);
     }
 
     /// Reset every window, filter, and the integrated history.
@@ -375,7 +468,7 @@ impl LoudnessMeter {
         self.short.reset();
         self.step_counter = 0;
         self.samples_seen = 0;
-        self.block_powers.clear();
+        self.hist.clear();
         self.integrated_cache = f64::NEG_INFINITY;
     }
 }
@@ -445,6 +538,32 @@ mod tests {
             (integ - mom).abs() < 0.6,
             "integrated {integ} should track momentary {mom} on a steady tone"
         );
+    }
+
+    #[test]
+    fn momentary_only_matches_full_momentary_and_skips_integrated() {
+        // A momentary-only meter must read the same momentary loudness as a full meter,
+        // while leaving integrated at -inf (no gating work done).
+        let fs = 48_000.0f32;
+        let rms = 10f32.powf(-23.0 / 20.0);
+        let x = sine(1_000.0, rms, (fs * 2.0) as usize, fs);
+        let mut full = LoudnessMeter::new(fs, 1);
+        let mut mom = LoudnessMeter::new_momentary(fs, 1);
+        for &s in &x {
+            full.push(&[s]);
+            mom.push(&[s]);
+        }
+        assert!(
+            (full.momentary_lufs() - mom.momentary_lufs()).abs() < 1e-4,
+            "momentary-only {} != full {}",
+            mom.momentary_lufs(),
+            full.momentary_lufs()
+        );
+        assert!(
+            !mom.integrated_lufs().is_finite(),
+            "momentary-only meter should not compute integrated loudness"
+        );
+        assert!(full.integrated_lufs().is_finite());
     }
 
     #[test]

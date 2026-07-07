@@ -119,6 +119,43 @@ pub fn null_residual_db(a: &[f32], b: &[f32]) -> f32 {
     rms_dbfs(&residual)
 }
 
+/// Partial-mix (parallel) alignment assertion — the regression guard for HARD CHECKPOINT
+/// 1's comb-filtering class of bug.
+///
+/// Given the output of a plugin fed a **unit impulse at mix = 0.5** with a neutral /
+/// near-identity wet setting, the dry and wet paths must land on top of each other: the
+/// output must show a SINGLE coherent peak, not two peaks separated by the wet path's
+/// (uncompensated) oversampler group delay. Concretely: no sample farther than
+/// `cluster` samples from the global-peak index may reach `frac`·peak. An uncompensated
+/// dry path leaves a second peak of ~0.5·(full scale) at lag 0 (or at the wet delay),
+/// which trips this assertion.
+pub fn assert_single_coherent_peak(out: &[f32], cluster: usize, frac: f32) {
+    assert!(!has_nan_or_inf(out), "signal contains NaN/inf");
+    let (peak_idx, peak) = out
+        .iter()
+        .enumerate()
+        .fold((0usize, 0.0f32), |(bi, bv), (i, &v)| {
+            if v.abs() > bv {
+                (i, v.abs())
+            } else {
+                (bi, bv)
+            }
+        });
+    assert!(peak > 0.0, "no peak found (silent output)");
+    let thresh = frac * peak;
+    for (i, &v) in out.iter().enumerate() {
+        let dist = i.abs_diff(peak_idx);
+        if dist > cluster && v.abs() >= thresh {
+            panic!(
+                "second peak at sample {i} (|{:.4}| >= {:.4}) is {dist} samples from the \
+                 main peak at {peak_idx} — dry/wet not aligned (comb filtering)",
+                v.abs(),
+                thresh
+            );
+        }
+    }
+}
+
 /// Universal assertions applied to every render (PRD §4): finite, peak <= 0 dBFS,
 /// RMS above the silence floor. Panics with a descriptive message on failure.
 pub fn assert_universal(x: &[f32]) {

@@ -58,6 +58,16 @@
       Routing ops for channels that don't exist in the rack yet will report as
       warnings — that's expected. Preview any time without FL via `apply TECHNO
       --dry-run`. (`tempo` is intentionally not applied — no MCP command exists.)
+- [ ] **HARD CHECKPOINT 1 (2026-07-07): re-test GRIT/TRACER parallel (dry/wet) mix in FL.**
+      The comb-filtering + wrong-PDC defects were fixed: GRIT (4x OS, 22-sample latency)
+      and TRACER (per-band 2x OS, 14-sample latency) now delay-compensate their dry paths
+      and report `set_latency_samples`, and OVERSEER Node now reports 14 samples (its
+      saturation is 2x-oversampled). Reinstalled CLAPs are at
+      `%LOCALAPPDATA%\Programs\Common\CLAP\Qeynos\`. In FL: put GRIT (or TRACER) on a
+      track, set **MIX ≈ 50%** with a light/neutral wet, and confirm the parallel blend
+      sounds full (no hollow comb) and that FL's automatic plugin-delay-compensation keeps
+      it phase-aligned with dry sibling tracks. Also sanity-check OVERSEER Node at partial
+      MIX. (Latency/alignment is asserted offline; the FL listen is the human confirmation.)
 - [ ] FL Studio: Options → Manage plugins → "Find more plugins" after new installs
       (FL never auto-detects new plugins).
 - [ ] Audition `renders/<plugin>/*.wav` — automated assertions check math, not taste.

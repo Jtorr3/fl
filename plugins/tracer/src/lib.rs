@@ -316,7 +316,10 @@ impl TracerParams {
             pitch_mode: self.pitch_mode.value().to_dsp(),
             midi_note_hz: None,
             band_count: self.bands.value().to_count(),
-            smart_freq_oct: self.smart_freq.smoothed.next(),
+            // Placeholder: the smart-freq smoother is advanced per sample in `process`
+            // (MINOR 4) — advancing it once per block here would clock it at the wrong
+            // rate. This field is overwritten before the DSP core ever reads it.
+            smart_freq_oct: 0.0,
             xo_mode: [
                 self.xo1_mode.value().to_dsp(),
                 self.xo2_mode.value().to_dsp(),
@@ -616,9 +619,11 @@ impl Plugin for Tracer {
         &mut self,
         _audio_io_layout: &AudioIOLayout,
         buffer_config: &BufferConfig,
-        _context: &mut impl InitContext<Self>,
+        context: &mut impl InitContext<Self>,
     ) -> bool {
         self.core = TracerCore::new(buffer_config.sample_rate);
+        // Report the per-band oversampler group delay the dry path is compensated by (PDC).
+        context.set_latency_samples(self.core.latency_samples());
         true
     }
 
@@ -632,6 +637,9 @@ impl Plugin for Tracer {
         _aux: &mut AuxiliaryBuffers,
         context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
+        // Denormal mitigation for the whole process scope (FTZ/DAZ), restored on drop.
+        let _ftz = suite_core::dsp::ScopedFtz::enable();
+
         let mut base = self.params.snapshot();
         base.midi_note_hz = self.last_note_hz;
         self.core.configure(&base);
@@ -664,6 +672,10 @@ impl Plugin for Tracer {
             let r_in = if num_main > 1 { main[1][n] } else { l_in };
 
             let mut s = base;
+            // Advance the smart-freq smoother once per sample (MINOR 4): the DSP core
+            // samples this value only at its 32-sample control-block boundaries, so a
+            // per-sample advance clocks the smoother at exactly the right rate.
+            s.smart_freq_oct = self.params.smart_freq.smoothed.next();
             s.trim_db = self.params.trim.smoothed.next();
             s.mix = self.params.mix.smoothed.next();
             s.out_db = self.params.out.smoothed.next();

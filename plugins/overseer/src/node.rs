@@ -7,10 +7,20 @@
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
+use suite_core::dsp::{DelayLine, OnePole, Oversampler2x};
 use suite_core::loudness::LoudnessMeter;
 
 use crate::bus::{Slot, NUM_OVERRIDES, OVR_DRIVE, OVR_RATIO, OVR_THRESHOLD, OVR_TRIM, OVR_WIDTH};
 use crate::eq::{EqSettings, FourBandEq};
+
+/// Control sub-block length for block-advanced smoothing of the EQ-gain and compressor
+/// coefficients (continuous scalar params — drive/width/trim/mix — are smoothed per
+/// sample). 32 samples ≈ 0.67 ms at 48 kHz.
+const CTRL_CHUNK: usize = 32;
+
+/// Param smoothing time constant (ms) for the core-internal smoothers. Matches the
+/// intent of the params' `SmoothingStyle::Linear(20.0)`.
+const SMOOTH_MS: f32 = 20.0;
 
 #[inline]
 fn db_to_lin(db: f32) -> f32 {
@@ -99,30 +109,76 @@ pub struct NodeCore {
     fs: f32,
     eq: [FourBandEq; 2],
     comp: Compressor,
+    // Level-preserving tanh saturation, per channel, oversampled 2x so its harmonics do
+    // not alias (MINOR 5 — the only formerly-un-oversampled nonlinearity in the suite).
+    sat_os: [Oversampler2x; 2],
+    // Momentary-only meter: the Node only reads momentary LUFS, so it must not pay the
+    // integrated-gating cost in the audio callback (MINOR 6).
     lufs: LoudnessMeter,
     slot: Arc<Slot>,
     pub meters: Arc<NodeMeters>,
-    // Effective (post-override) block values.
-    eff_drive_lin: f32,
-    eff_width: f32,
-    eff_trim_lin: f32,
-    mix: f32,
+    // Dry-path latency compensation for the oversampled saturation stage (keeps partial
+    // mix free of comb filtering); reported to the host as latency.
+    dry_delay: [DelayLine; 2],
+    latency: usize,
+
+    // --- Param smoothing (MAJOR 3) --------------------------------------------------
+    // Continuous scalar params applied per sample → per-sample smoothed (zipper-free).
+    sm_drive: OnePole,
+    sm_width: OnePole,
+    sm_trim: OnePole,
+    sm_mix: OnePole,
+    // EQ gains + comp threshold/makeup → smoothed too, but consumed via block-advanced
+    // coefficient recompute every CTRL_CHUNK samples.
+    sm_low_gain: OnePole,
+    sm_b1_gain: OnePole,
+    sm_b2_gain: OnePole,
+    sm_high_gain: OnePole,
+    sm_threshold: OnePole,
+    sm_makeup: OnePole,
+    /// Resolved (post-override) target settings for this block.
+    tgt: NodeSettings,
+    /// Snap smoothers to their targets on the first configure after (re)construction/reset.
+    primed: bool,
 }
 
 impl NodeCore {
     pub fn new(fs: f32, slot: Arc<Slot>, meters: Arc<NodeMeters>) -> Self {
+        // Empirically-measured saturation-oversampler group delay for exact dry alignment.
+        let latency = Oversampler2x::measure_group_delay();
+        let sm = || {
+            let mut p = OnePole::new();
+            p.set_time(SMOOTH_MS, fs);
+            p
+        };
         Self {
             fs,
             eq: [FourBandEq::new(), FourBandEq::new()],
             comp: Compressor::new(fs),
-            lufs: LoudnessMeter::new(fs, 2),
+            sat_os: [Oversampler2x::new(), Oversampler2x::new()],
+            lufs: LoudnessMeter::new_momentary(fs, 2),
             slot,
             meters,
-            eff_drive_lin: 1.0,
-            eff_width: 1.0,
-            eff_trim_lin: 1.0,
-            mix: 1.0,
+            dry_delay: [DelayLine::new(latency), DelayLine::new(latency)],
+            latency,
+            sm_drive: sm(),
+            sm_width: sm(),
+            sm_trim: sm(),
+            sm_mix: sm(),
+            sm_low_gain: sm(),
+            sm_b1_gain: sm(),
+            sm_b2_gain: sm(),
+            sm_high_gain: sm(),
+            sm_threshold: sm(),
+            sm_makeup: sm(),
+            tgt: NodeSettings::default(),
+            primed: false,
         }
+    }
+
+    /// Reported plugin latency (samples) — the saturation oversampler group delay.
+    pub fn latency_samples(&self) -> u32 {
+        self.latency as u32
     }
 
     pub fn slot(&self) -> &Arc<Slot> {
@@ -134,11 +190,32 @@ impl NodeCore {
             e.reset();
         }
         self.comp.reset();
+        for o in self.sat_os.iter_mut() {
+            o.reset();
+        }
+        for d in self.dry_delay.iter_mut() {
+            d.reset();
+        }
         self.lufs.reset();
+        self.primed = false;
     }
 
-    /// Resolve overrides, configure the EQ/compressor, and mirror the effective key params
+    fn snap_smoothers(&mut self) {
+        self.sm_drive.reset(self.tgt.drive_db);
+        self.sm_width.reset(self.tgt.width);
+        self.sm_trim.reset(self.tgt.trim_db);
+        self.sm_mix.reset(self.tgt.mix.clamp(0.0, 1.0));
+        self.sm_low_gain.reset(self.tgt.eq.low_gain);
+        self.sm_b1_gain.reset(self.tgt.eq.b1_gain);
+        self.sm_b2_gain.reset(self.tgt.eq.b2_gain);
+        self.sm_high_gain.reset(self.tgt.eq.high_gain);
+        self.sm_threshold.reset(self.tgt.comp_threshold);
+        self.sm_makeup.reset(self.tgt.comp_makeup);
+    }
+
+    /// Resolve overrides, latch the per-block targets, and mirror the effective key params
     /// into the slot. Call once per block before [`process_block`](Self::process_block).
+    /// The actual EQ/comp coefficients and scalar gains are smoothed inside `process_block`.
     pub fn configure(&mut self, s: &NodeSettings) {
         // Resolve the five overridable params against the bus (Master override vs local).
         let threshold = self.slot.effective(OVR_THRESHOLD, s.comp_threshold);
@@ -147,21 +224,17 @@ impl NodeCore {
         let width = self.slot.effective(OVR_WIDTH, s.width);
         let trim = self.slot.effective(OVR_TRIM, s.trim_db);
 
-        self.eq[0].configure(&s.eq, self.fs);
-        self.eq[1].configure(&s.eq, self.fs);
-        self.comp.configure(
-            threshold,
-            ratio,
-            s.comp_knee,
-            s.comp_attack,
-            s.comp_release,
-            s.comp_makeup,
-            self.fs,
-        );
-        self.eff_drive_lin = db_to_lin(drive);
-        self.eff_width = width;
-        self.eff_trim_lin = db_to_lin(trim);
-        self.mix = s.mix.clamp(0.0, 1.0);
+        self.tgt = *s;
+        self.tgt.comp_threshold = threshold;
+        self.tgt.comp_ratio = ratio;
+        self.tgt.drive_db = drive;
+        self.tgt.width = width;
+        self.tgt.trim_db = trim;
+
+        if !self.primed {
+            self.snap_smoothers();
+            self.primed = true;
+        }
 
         // Mirror the effective values for the Master GUI.
         let mut mir = [0.0f32; NUM_OVERRIDES];
@@ -175,11 +248,32 @@ impl NodeCore {
         }
     }
 
-    #[inline]
-    fn sat(&self, x: f32) -> f32 {
-        // Unity for small signals, tanh saturation for large ones (level-preserving).
-        let pre = self.eff_drive_lin;
-        (x * pre).tanh() / pre
+    /// Recompute the EQ + compressor coefficients from the currently-smoothed gain /
+    /// threshold / makeup values (called at each CTRL_CHUNK boundary).
+    fn config_coeffs_from_smoothers(&mut self) {
+        let eqs = EqSettings {
+            low_freq: self.tgt.eq.low_freq,
+            low_gain: self.sm_low_gain.value(),
+            b1_freq: self.tgt.eq.b1_freq,
+            b1_gain: self.sm_b1_gain.value(),
+            b1_q: self.tgt.eq.b1_q,
+            b2_freq: self.tgt.eq.b2_freq,
+            b2_gain: self.sm_b2_gain.value(),
+            b2_q: self.tgt.eq.b2_q,
+            high_freq: self.tgt.eq.high_freq,
+            high_gain: self.sm_high_gain.value(),
+        };
+        self.eq[0].configure(&eqs, self.fs);
+        self.eq[1].configure(&eqs, self.fs);
+        self.comp.configure(
+            self.sm_threshold.value(),
+            self.tgt.comp_ratio,
+            self.tgt.comp_knee,
+            self.tgt.comp_attack,
+            self.tgt.comp_release,
+            self.sm_makeup.value(),
+            self.fs,
+        );
     }
 
     /// Process a stereo block in place. `configure` must have been called for this block.
@@ -191,47 +285,73 @@ impl NodeCore {
         let mut out_sq = 0.0f32;
         let mut gr_min = 0.0f32;
 
-        for i in 0..n {
-            let dry_l = l[i];
-            let dry_r = r[i];
-            in_peak = in_peak.max(dry_l.abs()).max(dry_r.abs());
-            in_sq += dry_l * dry_l + dry_r * dry_r;
+        let mut i = 0;
+        while i < n {
+            let end = (i + CTRL_CHUNK).min(n);
+            // Block-advanced coefficient smoothing for EQ gains + comp threshold/makeup.
+            self.config_coeffs_from_smoothers();
 
-            // EQ (per channel).
-            let mut wl = self.eq[0].process(dry_l);
-            let mut wr = self.eq[1].process(dry_r);
+            for k in i..end {
+                // Per-sample smoothing of the directly-applied scalar params.
+                let drive = db_to_lin(self.sm_drive.process(self.tgt.drive_db));
+                let width = self.sm_width.process(self.tgt.width);
+                let trim = db_to_lin(self.sm_trim.process(self.tgt.trim_db));
+                let mix = self.sm_mix.process(self.tgt.mix).clamp(0.0, 1.0);
+                // Advance the coefficient smoothers per sample so the next chunk's recompute
+                // sees continuous progress (32-sample-granular EQ/comp smoothing).
+                self.sm_low_gain.process(self.tgt.eq.low_gain);
+                self.sm_b1_gain.process(self.tgt.eq.b1_gain);
+                self.sm_b2_gain.process(self.tgt.eq.b2_gain);
+                self.sm_high_gain.process(self.tgt.eq.high_gain);
+                self.sm_threshold.process(self.tgt.comp_threshold);
+                self.sm_makeup.process(self.tgt.comp_makeup);
 
-            // Compressor (channel-linked detector), applied to both.
-            let det = wl.abs().max(wr.abs());
-            let g = self.comp.process(det);
-            wl *= g;
-            wr *= g;
-            gr_min = gr_min.min(self.comp.gain_reduction_db());
+                let dry_l = l[k];
+                let dry_r = r[k];
+                in_peak = in_peak.max(dry_l.abs()).max(dry_r.abs());
+                in_sq += dry_l * dry_l + dry_r * dry_r;
 
-            // Saturation.
-            wl = self.sat(wl);
-            wr = self.sat(wr);
+                // Latency-compensated dry (aligned with the oversampled wet path).
+                let dd_l = self.dry_delay[0].process(dry_l);
+                let dd_r = self.dry_delay[1].process(dry_r);
 
-            // M/S width.
-            let mid = (wl + wr) * 0.5;
-            let side = (wl - wr) * 0.5 * self.eff_width;
-            wl = mid + side;
-            wr = mid - side;
+                // EQ (per channel).
+                let mut wl = self.eq[0].process(dry_l);
+                let mut wr = self.eq[1].process(dry_r);
 
-            // Output trim.
-            wl *= self.eff_trim_lin;
-            wr *= self.eff_trim_lin;
+                // Compressor (channel-linked detector), applied to both.
+                let det = wl.abs().max(wr.abs());
+                let g = self.comp.process(det);
+                wl *= g;
+                wr *= g;
+                gr_min = gr_min.min(self.comp.gain_reduction_db());
 
-            // Dry/wet mix (clean null at mix=0).
-            let ol = self.mix * wl + (1.0 - self.mix) * dry_l;
-            let or = self.mix * wr + (1.0 - self.mix) * dry_r;
+                // Saturation — 2x oversampled, level-preserving tanh (drive smoothed).
+                wl = self.sat_os[0].process(wl, |x| (x * drive).tanh() / drive);
+                wr = self.sat_os[1].process(wr, |x| (x * drive).tanh() / drive);
 
-            out_peak = out_peak.max(ol.abs()).max(or.abs());
-            out_sq += ol * ol + or * or;
-            self.lufs.push(&[ol, or]);
+                // M/S width.
+                let mid = (wl + wr) * 0.5;
+                let side = (wl - wr) * 0.5 * width;
+                wl = mid + side;
+                wr = mid - side;
 
-            l[i] = ol;
-            r[i] = or;
+                // Output trim.
+                wl *= trim;
+                wr *= trim;
+
+                // Dry/wet mix (clean null at mix=0 against the delayed dry).
+                let ol = mix * wl + (1.0 - mix) * dd_l;
+                let or = mix * wr + (1.0 - mix) * dd_r;
+
+                out_peak = out_peak.max(ol.abs()).max(or.abs());
+                out_sq += ol * ol + or * or;
+                self.lufs.push(&[ol, or]);
+
+                l[k] = ol;
+                r[k] = or;
+            }
+            i = end;
         }
 
         if n > 0 {

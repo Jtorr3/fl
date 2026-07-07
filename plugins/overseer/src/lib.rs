@@ -526,9 +526,11 @@ impl Plugin for OverseerNode {
         &mut self,
         _audio_io_layout: &AudioIOLayout,
         buffer_config: &BufferConfig,
-        _context: &mut impl InitContext<Self>,
+        context: &mut impl InitContext<Self>,
     ) -> bool {
         self.core = NodeCore::new(buffer_config.sample_rate, self.slot.clone(), self.meters.clone());
+        // Report the saturation oversampler group delay the dry path is compensated by.
+        context.set_latency_samples(self.core.latency_samples());
         // Persisted label may have been restored after `Default` — sync it to the slot.
         if let Ok(label) = self.params.label.read() {
             self.slot.set_label(&label);
@@ -546,6 +548,9 @@ impl Plugin for OverseerNode {
         _aux: &mut AuxiliaryBuffers,
         _context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
+        // Denormal mitigation for the whole process scope (FTZ/DAZ), restored on drop.
+        let _ftz = suite_core::dsp::ScopedFtz::enable();
+
         let s = self.params.snapshot();
 
         // Local-touch detection: if any of the 5 overridable local params moved since the
@@ -1121,6 +1126,9 @@ impl Plugin for OverseerMaster {
         _aux: &mut AuxiliaryBuffers,
         _context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
+        // Denormal mitigation for the whole process scope (FTZ/DAZ), restored on drop.
+        let _ftz = suite_core::dsp::ScopedFtz::enable();
+
         if self.lufs_reset.swap(false, Ordering::Relaxed) {
             self.core.reset_lufs();
         }
@@ -1346,13 +1354,22 @@ mod tests {
         let id = slot.id;
         drop(node);
         drop(slot);
-        let live = bus::bus().live_slots();
-        assert!(!live.iter().any(|x| x.id == id), "dead node slot not GC'd");
+        // Retry: the global BUS is shared across all tests in this binary, so a concurrent
+        // test cloning the slot vec can transiently keep this slot alive for one GC pass.
+        let mut gone = false;
+        for _ in 0..10_000 {
+            if !bus::bus().live_slots().iter().any(|x| x.id == id) {
+                gone = true;
+                break;
+            }
+            std::thread::yield_now();
+        }
+        assert!(gone, "dead node slot not GC'd");
     }
 
     // ---- Universal assertions + renders ------------------------------------
     #[test]
-    fn node_mix_zero_nulls_dry() {
+    fn node_mix_zero_nulls_latency_matched_dry() {
         let meters = Arc::new(NodeMeters::default());
         let slot = bus::bus().register("NULL");
         let mut node = NodeCore::new(SR, slot, meters);
@@ -1364,9 +1381,68 @@ mod tests {
         let mut l = dry.clone();
         let mut r = dry.clone();
         node.configure(&s);
+        let lat = node.latency_samples() as usize;
         node.process_block(&mut l, &mut r);
-        let resid = null_residual_db(&dry, &l);
+        // At mix=0 the output is the dry path delayed by the saturation-oversampler latency.
+        let m = dry.len() - lat;
+        let delayed: Vec<f32> = dry[..m].to_vec();
+        let out: Vec<f32> = l[lat..].to_vec();
+        let resid = null_residual_db(&delayed, &out);
         assert!(resid < -80.0, "node mix=0 residual {resid:.1} dB >= -80");
+    }
+
+    /// MAJOR 3 done-bar: a mid-buffer step change in trim / mix / EQ gain must be smoothed
+    /// (params declare smoothers; the fix applies them). Assert the output has no
+    /// sample-to-sample jump beyond a bound consistent with the smoothing — the previous
+    /// snapshot-reads-`.value()` code applied the whole change in one sample (a click).
+    #[test]
+    fn node_param_step_is_smoothed_no_zipper() {
+        let meters = Arc::new(NodeMeters::default());
+        let slot = bus::bus().register("SMOOTH");
+        let mut node = NodeCore::new(SR, slot, meters);
+
+        // Neutral strip: flat EQ, unity comp, no drive.
+        let mut s = NodeSettings::default();
+        s.eq = EqSettings::default();
+        s.comp_ratio = 1.0;
+        s.comp_threshold = 0.0;
+        s.comp_makeup = 0.0;
+        s.drive_db = 0.0;
+        s.width = 1.0;
+        s.trim_db = 0.0;
+        s.mix = 1.0;
+
+        let n = 8192usize;
+        let sig = testsig::sine(220.0, 0.5, n, SR);
+        let half = n / 2;
+
+        let mut l1 = sig[..half].to_vec();
+        let mut r1 = l1.clone();
+        node.configure(&s);
+        node.process_block(&mut l1, &mut r1);
+
+        // Step trim +6 dB, mix → 0.5, low-shelf gain +12 dB, all at the buffer midpoint.
+        s.trim_db = 6.0;
+        s.mix = 0.5;
+        s.eq.low_gain = 12.0;
+        let mut l2 = sig[half..].to_vec();
+        let mut r2 = l2.clone();
+        node.configure(&s);
+        node.process_block(&mut l2, &mut r2);
+
+        let mut out = l1;
+        out.extend_from_slice(&l2);
+        let mut max_delta = 0.0f32;
+        for i in 1..out.len() {
+            max_delta = max_delta.max((out[i] - out[i - 1]).abs());
+        }
+        // A 220 Hz sine peaking near ~1.0 after the +6 dB trim slews at most
+        // ~1.0·2π·220/48000 ≈ 0.029/sample; the smoother adds only a tiny per-sample
+        // increment. The unsmoothed step would jump by ~half the peak (>0.3).
+        assert!(
+            max_delta < 0.1,
+            "zipper: max sample-to-sample delta {max_delta:.4} (smoothing not applied?)"
+        );
     }
 
     #[test]

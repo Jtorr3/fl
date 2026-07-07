@@ -8,12 +8,18 @@
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
-use suite_core::dsp::Oversampler4x;
+use suite_core::dsp::{OnePole, Oversampler4x};
 use suite_core::loudness::LoudnessMeter;
 
 use crate::dynamics::{Limiter, MultibandComp};
 use crate::eq::{EqSettings, FourBandEq};
 use crate::node::load_f32;
+
+/// Control sub-block length for block-advanced smoothing of the EQ-gain, band-comp and
+/// ceiling coefficients (mix is smoothed per sample).
+const CTRL_CHUNK: usize = 32;
+/// Param smoothing time constant (ms) — matches the params' `SmoothingStyle::Linear(20.0)`.
+const SMOOTH_MS: f32 = 20.0;
 
 #[inline]
 fn lin_to_db(x: f32) -> f32 {
@@ -132,14 +138,30 @@ pub struct MasterCore {
     dry_l: Vec<f32>,
     dry_r: Vec<f32>,
     dpos: usize,
-    mix: f32,
     pub meters: Arc<MasterMeters>,
+
+    // --- Param smoothing (MAJOR 3) --------------------------------------------------
+    sm_mix: OnePole,      // per sample
+    sm_ceiling: OnePole,  // per CTRL_CHUNK
+    sm_low_gain: OnePole, // EQ gains, per CTRL_CHUNK
+    sm_b1_gain: OnePole,
+    sm_b2_gain: OnePole,
+    sm_high_gain: OnePole,
+    sm_thr: [OnePole; 3],    // band thresholds, per CTRL_CHUNK
+    sm_makeup: [OnePole; 3], // band makeups, per CTRL_CHUNK
+    tgt: MasterSettings,
+    primed: bool,
 }
 
 impl MasterCore {
     pub fn new(fs: f32, meters: Arc<MasterMeters>) -> Self {
         let limiter = Limiter::new(fs);
         let latency = limiter.lookahead_samples();
+        let sm = || {
+            let mut p = OnePole::new();
+            p.set_time(SMOOTH_MS, fs);
+            p
+        };
         Self {
             fs,
             eq: [FourBandEq::new(), FourBandEq::new()],
@@ -151,8 +173,17 @@ impl MasterCore {
             dry_l: vec![0.0; latency.max(1) + 1],
             dry_r: vec![0.0; latency.max(1) + 1],
             dpos: 0,
-            mix: 1.0,
             meters,
+            sm_mix: sm(),
+            sm_ceiling: sm(),
+            sm_low_gain: sm(),
+            sm_b1_gain: sm(),
+            sm_b2_gain: sm(),
+            sm_high_gain: sm(),
+            sm_thr: [sm(), sm(), sm()],
+            sm_makeup: [sm(), sm(), sm()],
+            tgt: MasterSettings::default(),
+            primed: false,
         }
     }
 
@@ -179,6 +210,20 @@ impl MasterCore {
             *v = 0.0;
         }
         self.dpos = 0;
+        self.primed = false;
+    }
+
+    fn snap_smoothers(&mut self) {
+        self.sm_mix.reset(self.tgt.mix.clamp(0.0, 1.0));
+        self.sm_ceiling.reset(self.tgt.ceiling_db);
+        self.sm_low_gain.reset(self.tgt.eq.low_gain);
+        self.sm_b1_gain.reset(self.tgt.eq.b1_gain);
+        self.sm_b2_gain.reset(self.tgt.eq.b2_gain);
+        self.sm_high_gain.reset(self.tgt.eq.high_gain);
+        for bi in 0..3 {
+            self.sm_thr[bi].reset(self.tgt.bands[bi].threshold);
+            self.sm_makeup[bi].reset(self.tgt.bands[bi].makeup);
+        }
     }
 
     /// Reset only the LUFS integrator (GUI "reset loudness" action).
@@ -192,27 +237,52 @@ impl MasterCore {
     }
 
     pub fn configure(&mut self, s: &MasterSettings) {
-        for e in self.eq.iter_mut() {
-            e.configure(&s.eq, self.fs);
-        }
+        self.tgt = *s;
+        // Crossovers + comp ratio/knee/atk/rel + limiter release are block-rate (not
+        // declared smoothed); the smoothed EQ gains / band thresholds / band makeups /
+        // ceiling / mix are applied inside `process_block`.
         for m in self.mb.iter_mut() {
             m.set_crossovers(s.xo_low, s.xo_high, self.fs);
+        }
+        self.limiter.set_release_ms(s.limiter_release, self.fs);
+        if !self.primed {
+            self.snap_smoothers();
+            self.primed = true;
+        }
+    }
+
+    /// Recompute EQ + band-comp coefficients + limiter ceiling from the currently-smoothed
+    /// values (called at each CTRL_CHUNK boundary).
+    fn config_coeffs_from_smoothers(&mut self) {
+        let eqs = EqSettings {
+            low_freq: self.tgt.eq.low_freq,
+            low_gain: self.sm_low_gain.value(),
+            b1_freq: self.tgt.eq.b1_freq,
+            b1_gain: self.sm_b1_gain.value(),
+            b1_q: self.tgt.eq.b1_q,
+            b2_freq: self.tgt.eq.b2_freq,
+            b2_gain: self.sm_b2_gain.value(),
+            b2_q: self.tgt.eq.b2_q,
+            high_freq: self.tgt.eq.high_freq,
+            high_gain: self.sm_high_gain.value(),
+        };
+        for e in self.eq.iter_mut() {
+            e.configure(&eqs, self.fs);
+        }
+        for m in self.mb.iter_mut() {
             for (bi, c) in m.comps.iter_mut().enumerate() {
-                let b = s.bands[bi];
                 c.configure(
-                    b.threshold,
-                    b.ratio,
-                    s.comp_knee,
-                    s.comp_attack,
-                    s.comp_release,
-                    b.makeup,
+                    self.sm_thr[bi].value(),
+                    self.tgt.bands[bi].ratio,
+                    self.tgt.comp_knee,
+                    self.tgt.comp_attack,
+                    self.tgt.comp_release,
+                    self.sm_makeup[bi].value(),
                     self.fs,
                 );
             }
         }
-        self.limiter.set_ceiling_db(s.ceiling_db);
-        self.limiter.set_release_ms(s.limiter_release, self.fs);
-        self.mix = s.mix.clamp(0.0, 1.0);
+        self.limiter.set_ceiling_db(self.sm_ceiling.value());
     }
 
     /// Process a stereo block in place.
@@ -223,44 +293,64 @@ impl MasterCore {
         let mut out_sq = 0.0f32;
         let dlen = self.dry_l.len();
 
-        for i in 0..n {
-            let in_l = l[i];
-            let in_r = r[i];
+        let mut i0 = 0;
+        while i0 < n {
+            let end = (i0 + CTRL_CHUNK).min(n);
+            // Block-advanced coefficient smoothing for EQ gains / band comp / ceiling.
+            self.config_coeffs_from_smoothers();
 
-            // Delayed dry (latency-matched to the limiter).
-            let read = (self.dpos + dlen - self.latency) % dlen;
-            let dry_l = self.dry_l[read];
-            let dry_r = self.dry_r[read];
-            self.dry_l[self.dpos] = in_l;
-            self.dry_r[self.dpos] = in_r;
-            self.dpos = (self.dpos + 1) % dlen;
+            for i in i0..end {
+                // Per-sample mix smoothing; advance the coefficient smoothers per sample.
+                let mix = self.sm_mix.process(self.tgt.mix).clamp(0.0, 1.0);
+                self.sm_ceiling.process(self.tgt.ceiling_db);
+                self.sm_low_gain.process(self.tgt.eq.low_gain);
+                self.sm_b1_gain.process(self.tgt.eq.b1_gain);
+                self.sm_b2_gain.process(self.tgt.eq.b2_gain);
+                self.sm_high_gain.process(self.tgt.eq.high_gain);
+                for bi in 0..3 {
+                    self.sm_thr[bi].process(self.tgt.bands[bi].threshold);
+                    self.sm_makeup[bi].process(self.tgt.bands[bi].makeup);
+                }
 
-            // Wet: EQ → multiband comp → limiter.
-            let el = self.eq[0].process(in_l);
-            let er = self.eq[1].process(in_r);
-            let ml = self.mb[0].process(el);
-            let mr = self.mb[1].process(er);
-            let (ll, lr) = self.limiter.process(ml, mr);
+                let in_l = l[i];
+                let in_r = r[i];
 
-            let ol = self.mix * ll + (1.0 - self.mix) * dry_l;
-            let or = self.mix * lr + (1.0 - self.mix) * dry_r;
+                // Delayed dry (latency-matched to the limiter).
+                let read = (self.dpos + dlen - self.latency) % dlen;
+                let dry_l = self.dry_l[read];
+                let dry_r = self.dry_r[read];
+                self.dry_l[self.dpos] = in_l;
+                self.dry_r[self.dpos] = in_r;
+                self.dpos = (self.dpos + 1) % dlen;
 
-            out_peak = out_peak.max(ol.abs()).max(or.abs());
-            out_sq += ol * ol + or * or;
-            // 4x-oversampled true-peak approximation.
-            let tpl = &mut true_peak;
-            self.tp_os[0].process(ol, |v| {
-                *tpl = tpl.max(v.abs());
-                v
-            });
-            self.tp_os[1].process(or, |v| {
-                *tpl = tpl.max(v.abs());
-                v
-            });
-            self.lufs.push(&[ol, or]);
+                // Wet: EQ → multiband comp → limiter.
+                let el = self.eq[0].process(in_l);
+                let er = self.eq[1].process(in_r);
+                let ml = self.mb[0].process(el);
+                let mr = self.mb[1].process(er);
+                let (ll, lr) = self.limiter.process(ml, mr);
 
-            l[i] = ol;
-            r[i] = or;
+                let ol = mix * ll + (1.0 - mix) * dry_l;
+                let or = mix * lr + (1.0 - mix) * dry_r;
+
+                out_peak = out_peak.max(ol.abs()).max(or.abs());
+                out_sq += ol * ol + or * or;
+                // 4x-oversampled true-peak approximation.
+                let tpl = &mut true_peak;
+                self.tp_os[0].process(ol, |v| {
+                    *tpl = tpl.max(v.abs());
+                    v
+                });
+                self.tp_os[1].process(or, |v| {
+                    *tpl = tpl.max(v.abs());
+                    v
+                });
+                self.lufs.push(&[ol, or]);
+
+                l[i] = ol;
+                r[i] = or;
+            }
+            i0 = end;
         }
 
         if n > 0 {

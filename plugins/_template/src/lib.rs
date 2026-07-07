@@ -184,6 +184,10 @@ impl Plugin for Template {
         _aux: &mut AuxiliaryBuffers,
         _context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
+        // Denormal mitigation for the whole process scope (FTZ/DAZ), restored on drop.
+        // Every Qeynos plugin copies this line — keep it at the top of `process`.
+        let _ftz = suite_core::dsp::ScopedFtz::enable();
+
         for channel_samples in buffer.iter_samples() {
             let mut amplitude = 0.0;
             let num_samples = channel_samples.len();

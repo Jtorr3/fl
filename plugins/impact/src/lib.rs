@@ -408,6 +408,9 @@ impl Plugin for Impact {
         _aux: &mut AuxiliaryBuffers,
         context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
+        // Denormal mitigation for the whole process scope (FTZ/DAZ), restored on drop.
+        let _ftz = suite_core::dsp::ScopedFtz::enable();
+
         let s = self.params.snapshot();
         self.voice.configure(&s);
         let keytrack = self.params.keytrack.value();

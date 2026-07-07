@@ -445,9 +445,11 @@ impl Plugin for Grit {
         &mut self,
         _audio_io_layout: &AudioIOLayout,
         buffer_config: &BufferConfig,
-        _context: &mut impl InitContext<Self>,
+        context: &mut impl InitContext<Self>,
     ) -> bool {
         self.core = GritCore::new(buffer_config.sample_rate);
+        // Report the oversampler group delay the dry path is compensated by (PDC).
+        context.set_latency_samples(self.core.latency_samples());
         true
     }
 
@@ -461,6 +463,9 @@ impl Plugin for Grit {
         aux: &mut AuxiliaryBuffers,
         _context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
+        // Denormal mitigation for the whole process scope (FTZ/DAZ), restored on drop.
+        let _ftz = suite_core::dsp::ScopedFtz::enable();
+
         // Block-rate filter configuration from the current param snapshot.
         let base = self.params.snapshot();
         self.core.configure(&base);

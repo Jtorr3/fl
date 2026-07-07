@@ -247,9 +247,19 @@ mod tests {
         assert!(b.live_slots().iter().any(|x| x.id == s.id));
         let id = s.id;
         drop(s);
-        // After dropping the Node handle, the slot GCs on next access.
-        let live = b.live_slots();
-        assert!(!live.iter().any(|x| x.id == id), "dead slot was not GC'd");
+        // After dropping the Node handle, the slot GCs on a subsequent access. Retry to
+        // tolerate a concurrent test transiently cloning the slot vec (which briefly bumps
+        // every slot's strong count) — the global BUS is shared across all tests in this
+        // binary, so they run against it in parallel.
+        let mut gone = false;
+        for _ in 0..10_000 {
+            if !b.live_slots().iter().any(|x| x.id == id) {
+                gone = true;
+                break;
+            }
+            std::thread::yield_now();
+        }
+        assert!(gone, "dead slot was not GC'd");
         assert!(b.live_slots().len() >= before.saturating_sub(0));
     }
 

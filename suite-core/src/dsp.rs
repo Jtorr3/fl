@@ -211,6 +211,11 @@ pub fn tape_soft(x: f32) -> f32 {
 // allocation-free in `process` (safe under nih-plug's assert_process_allocs).
 // ---------------------------------------------------------------------------
 
+/// Tap count of the halfband lowpass used by every oversampler stage. Forced odd in
+/// [`design_lowpass`] so the kernel is symmetric (linear phase) with an integer group
+/// delay of `(N-1)/2` samples at the rate the FIR runs.
+pub const HALFBAND_TAPS: usize = 31;
+
 /// Design a windowed-sinc (Hamming) FIR lowpass of `num_taps` taps with cutoff
 /// `fc_norm` in cycles/sample (0..0.5), normalized to unity DC gain.
 fn design_lowpass(num_taps: usize, fc_norm: f32) -> Vec<f32> {
@@ -295,11 +300,40 @@ impl Default for Oversampler2x {
 
 impl Oversampler2x {
     pub fn new() -> Self {
-        let h = design_lowpass(31, 0.25);
+        let h = design_lowpass(HALFBAND_TAPS, 0.25);
         Self {
             up: Fir::new(h.clone()),
             down: Fir::new(h),
         }
+    }
+
+    /// Group delay (base-rate samples) introduced by this 2x stage's linear-phase
+    /// halfband FIRs. Both the up- and down-sampling FIRs run at the 2x rate and each
+    /// contribute `(N-1)/2` samples of delay there, so together they add `(N-1)` samples
+    /// at 2x = `(N-1)/2` samples at the base rate. Verified empirically by the
+    /// `oversampler_group_delay_matches_analytic` test.
+    #[inline]
+    pub fn group_delay_samples() -> f32 {
+        (HALFBAND_TAPS as f32 - 1.0) / 2.0
+    }
+
+    /// Empirically measured base-rate group delay: the integer peak lag of a unit impulse
+    /// pushed through this oversampler with an identity shaper. Equals
+    /// [`group_delay_samples`](Self::group_delay_samples) to within 1 sample; used for
+    /// dry-path delay compensation so the alignment is exact (0-sample error).
+    pub fn measure_group_delay() -> usize {
+        let mut os = Oversampler2x::new();
+        let mut peak = 0.0f32;
+        let mut idx = 0usize;
+        for n in 0..256usize {
+            let x = if n == 0 { 1.0 } else { 0.0 };
+            let y = os.process(x, |v| v);
+            if y.abs() > peak {
+                peak = y.abs();
+                idx = n;
+            }
+        }
+        idx
     }
 
     pub fn reset(&mut self) {
@@ -334,6 +368,34 @@ impl Oversampler4x {
         Self::default()
     }
 
+    /// Group delay (base-rate samples) of the 4x oversampler. Stage 1's up/down FIRs run
+    /// at 2x and add `(N-1)/2` base samples; the inner stage 2 is itself a 2x oversampler
+    /// running at the 2x rate, so its own `(N-1)/2`-at-its-base delay is `(N-1)/4` base
+    /// samples. Total = `(N-1)/2 + (N-1)/4 = 3(N-1)/4` base samples (= 22.5 at N=31).
+    /// Verified empirically by the `oversampler_group_delay_matches_analytic` test.
+    #[inline]
+    pub fn group_delay_samples() -> f32 {
+        3.0 * (HALFBAND_TAPS as f32 - 1.0) / 4.0
+    }
+
+    /// Empirically measured base-rate group delay (integer impulse peak lag through an
+    /// identity shaper). Equals [`group_delay_samples`](Self::group_delay_samples) to
+    /// within 1 sample; used for exact dry-path delay compensation.
+    pub fn measure_group_delay() -> usize {
+        let mut os = Oversampler4x::new();
+        let mut peak = 0.0f32;
+        let mut idx = 0usize;
+        for n in 0..256usize {
+            let x = if n == 0 { 1.0 } else { 0.0 };
+            let y = os.process(x, |v| v);
+            if y.abs() > peak {
+                peak = y.abs();
+                idx = n;
+            }
+        }
+        idx
+    }
+
     pub fn reset(&mut self) {
         self.s1.reset();
         self.s2.reset();
@@ -344,6 +406,120 @@ impl Oversampler4x {
     pub fn process<F: FnMut(f32) -> f32>(&mut self, x: f32, mut f: F) -> f32 {
         let s2 = &mut self.s2;
         self.s1.process(x, |u| s2.process(u, &mut f))
+    }
+}
+
+/// A fixed integer-sample delay line (allocation-free `process`). Used to delay-compensate
+/// a dry path so it stays sample-aligned with a wet path that passes through an oversampler
+/// or other fixed-latency stage — the alignment that prevents comb filtering at partial
+/// dry/wet mix (PRD §3, HARD CHECKPOINT 1).
+#[derive(Clone)]
+pub struct DelayLine {
+    buf: Vec<f32>,
+    pos: usize,
+    delay: usize,
+}
+
+impl DelayLine {
+    /// Create a delay line that can delay by up to `max_delay` samples (initialised to
+    /// exactly `max_delay`).
+    pub fn new(max_delay: usize) -> Self {
+        Self {
+            buf: vec![0.0; max_delay + 1],
+            pos: 0,
+            delay: max_delay,
+        }
+    }
+
+    /// Set the active delay (clamped to the allocated maximum). Does not clear history.
+    pub fn set_delay(&mut self, delay: usize) {
+        self.delay = delay.min(self.buf.len().saturating_sub(1));
+    }
+
+    pub fn delay(&self) -> usize {
+        self.delay
+    }
+
+    pub fn reset(&mut self) {
+        for v in self.buf.iter_mut() {
+            *v = 0.0;
+        }
+        self.pos = 0;
+    }
+
+    /// Push `x`, return the sample from `delay` samples ago.
+    #[inline]
+    pub fn process(&mut self, x: f32) -> f32 {
+        let len = self.buf.len();
+        let read = (self.pos + len - self.delay) % len;
+        let y = self.buf[read];
+        self.buf[self.pos] = x;
+        self.pos += 1;
+        if self.pos == len {
+            self.pos = 0;
+        }
+        y
+    }
+}
+
+/// RAII guard that enables SSE flush-to-zero (FTZ) + denormals-are-zero (DAZ) for the
+/// duration of an audio `process()` scope, restoring the previous MXCSR mode on drop.
+///
+/// Denormal floats (e.g. the tails of IIR filters, reverbs, and envelopes decaying to
+/// silence) are hundreds of times slower to compute on x86; a single leaked denormal in a
+/// feedback path can spike CPU. Enabling FTZ/DAZ once at the top of every plugin's
+/// `process()` mitigates this suite-wide (PRD §3 / HARD CHECKPOINT 1, MINOR 7).
+///
+/// On non-x86_64 targets this is a no-op.
+pub struct ScopedFtz {
+    #[cfg(target_arch = "x86_64")]
+    saved_mxcsr: u32,
+}
+
+#[cfg(target_arch = "x86_64")]
+impl ScopedFtz {
+    /// MXCSR bit 15 — flush-to-zero (denormal *results* are flushed to 0).
+    const FTZ: u32 = 1 << 15;
+    /// MXCSR bit 6 — denormals-are-zero (denormal *inputs* are treated as 0). Supported on
+    /// all x86_64 CPUs in practice; SSE2 is mandatory on the architecture.
+    const DAZ: u32 = 1 << 6;
+}
+
+impl ScopedFtz {
+    /// Enable FTZ + DAZ, saving the prior MXCSR for restoration on drop.
+    ///
+    /// (This toolchain does not expose the `_MM_SET_DENORMALS_ZERO_MODE` intrinsic, so the
+    /// MXCSR control word is read/written directly — both bits live in it.)
+    #[inline]
+    pub fn enable() -> Self {
+        #[cfg(target_arch = "x86_64")]
+        {
+            // SSE/SSE2 are guaranteed on x86_64, so these MXCSR intrinsics are always safe
+            // to call here; the `unsafe` is only for the target-feature contract.
+            #[allow(deprecated)]
+            unsafe {
+                let saved_mxcsr = core::arch::x86_64::_mm_getcsr();
+                core::arch::x86_64::_mm_setcsr(saved_mxcsr | Self::FTZ | Self::DAZ);
+                Self { saved_mxcsr }
+            }
+        }
+        #[cfg(not(target_arch = "x86_64"))]
+        {
+            Self {}
+        }
+    }
+}
+
+impl Drop for ScopedFtz {
+    #[inline]
+    fn drop(&mut self) {
+        #[cfg(target_arch = "x86_64")]
+        {
+            #[allow(deprecated)]
+            unsafe {
+                core::arch::x86_64::_mm_setcsr(self.saved_mxcsr);
+            }
+        }
     }
 }
 
@@ -414,6 +590,77 @@ mod tests {
             (peak_out - peak_in).abs() < 0.06,
             "OS changed amplitude too much: in {peak_in:.3} out {peak_out:.3}"
         );
+    }
+
+    /// Empirically confirm the analytic `group_delay_samples()` values by measuring the
+    /// impulse peak lag through each oversampler with an identity (passthrough) shaper.
+    /// This is the measurement the GRIT/TRACER dry-path delay compensation relies on.
+    #[test]
+    fn oversampler_group_delay_matches_analytic() {
+        fn peak_lag_2x() -> usize {
+            let mut os = Oversampler2x::new();
+            let mut peak = 0.0f32;
+            let mut idx = 0usize;
+            for n in 0..256usize {
+                let x = if n == 0 { 1.0 } else { 0.0 };
+                let y = os.process(x, |v| v);
+                if y.abs() > peak {
+                    peak = y.abs();
+                    idx = n;
+                }
+            }
+            idx
+        }
+        fn peak_lag_4x() -> usize {
+            let mut os = Oversampler4x::new();
+            let mut peak = 0.0f32;
+            let mut idx = 0usize;
+            for n in 0..256usize {
+                let x = if n == 0 { 1.0 } else { 0.0 };
+                let y = os.process(x, |v| v);
+                if y.abs() > peak {
+                    peak = y.abs();
+                    idx = n;
+                }
+            }
+            idx
+        }
+
+        let lag2 = peak_lag_2x() as f32;
+        let a2 = Oversampler2x::group_delay_samples();
+        assert!(
+            (lag2 - a2).abs() <= 1.0,
+            "2x: measured peak lag {lag2} vs analytic {a2}"
+        );
+        // The exposed empirical measurement must equal the peak-lag probe here.
+        assert_eq!(Oversampler2x::measure_group_delay(), lag2 as usize);
+
+        let lag4 = peak_lag_4x() as f32;
+        let a4 = Oversampler4x::group_delay_samples();
+        assert!(
+            (lag4 - a4).abs() <= 1.0,
+            "4x: measured peak lag {lag4} vs analytic {a4}"
+        );
+        assert_eq!(Oversampler4x::measure_group_delay(), lag4 as usize);
+    }
+
+    #[test]
+    fn delay_line_delays_by_exact_samples() {
+        let mut d = DelayLine::new(23);
+        d.set_delay(23);
+        let mut out = Vec::new();
+        for n in 0..64 {
+            let x = if n == 0 { 1.0 } else { 0.0 };
+            out.push(d.process(x));
+        }
+        // The impulse must reappear exactly 23 samples later, nowhere else.
+        for (n, &v) in out.iter().enumerate() {
+            if n == 23 {
+                assert!((v - 1.0).abs() < 1e-9, "delayed impulse missing at 23: {v}");
+            } else {
+                assert!(v.abs() < 1e-9, "spurious output at {n}: {v}");
+            }
+        }
     }
 
     #[test]

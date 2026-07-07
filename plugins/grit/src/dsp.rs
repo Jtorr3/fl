@@ -14,7 +14,7 @@
 //! This module is API-agnostic pure Rust and is shared verbatim between the nih-plug
 //! `process` path and the offline harness tests, so the tested math is the shipped math.
 
-use suite_core::dsp::{EnvFollower, Detector, Oversampler4x, Shaper, Svf};
+use suite_core::dsp::{DelayLine, Detector, EnvFollower, Oversampler4x, Shaper, Svf};
 
 /// How the sidechain drives the distortion core.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -201,11 +201,21 @@ pub struct GritCore {
     ag_coef: f32,
     pre_ms: f32,
     post_ms: f32,
+    // Dry-path delay compensation: the wet path runs the distortion core through a 4x
+    // oversampler whose linear-phase halfband FIRs impose a fixed group delay. The dry
+    // path is delayed by the same integer amount so dry and wet stay sample-aligned at
+    // partial mix (no comb filtering); this delay is reported to the host as latency.
+    dry_delay: [DelayLine; 2],
+    latency: usize,
 }
 
 impl GritCore {
     pub fn new(sample_rate: f32) -> Self {
         let sr = if sample_rate > 0.0 { sample_rate } else { 48_000.0 };
+        // Empirically-measured group delay of the wet path's 4x oversampler (SR-independent
+        // — a fixed number of FIR taps). Using the measured integer peak lag makes the dry
+        // path align to the wet path with zero-sample error.
+        let latency = Oversampler4x::measure_group_delay();
         let mut core = GritCore {
             sr,
             ch: [Channel::new(), Channel::new()],
@@ -214,9 +224,17 @@ impl GritCore {
             ag_coef: 0.0,
             pre_ms: 0.0,
             post_ms: 0.0,
+            dry_delay: [DelayLine::new(latency), DelayLine::new(latency)],
+            latency,
         };
         core.set_sample_rate(sr);
         core
+    }
+
+    /// Reported plugin latency (samples) = the oversampler group delay the dry path is
+    /// compensated by. Constant across sample rates.
+    pub fn latency_samples(&self) -> u32 {
+        self.latency as u32
     }
 
     pub fn set_sample_rate(&mut self, sample_rate: f32) {
@@ -238,6 +256,9 @@ impl GritCore {
         self.sc_env.reset();
         self.pre_ms = 0.0;
         self.post_ms = 0.0;
+        for d in self.dry_delay.iter_mut() {
+            d.reset();
+        }
     }
 
     /// Reconfigure filters + envelope coefficients from a settings snapshot. Cheap
@@ -280,6 +301,12 @@ impl GritCore {
     /// Returns the processed `(l, r)`. Call [`configure`] once per block first.
     #[inline]
     pub fn process_sample(&mut self, l_in: f32, r_in: f32, sc: f32, s: &Settings) -> (f32, f32) {
+        // Advance the dry-delay lines every sample so the dry path stays group-delay
+        // aligned with the oversampled wet path (done before any early return so the delay
+        // state never drifts).
+        let dry_l = self.dry_delay[0].process(l_in);
+        let dry_r = self.dry_delay[1].process(r_in);
+
         // --- Sidechain path (mono, shared) ---
         let sc_band = self.sc_bp.process(sc).bp;
         let env = self.sc_env.process(sc_band).clamp(0.0, 4.0);
@@ -320,9 +347,10 @@ impl GritCore {
         }
 
         // --- Mix + output trim, with a hard safety ceiling at +/-0.999 (<= 0 dBFS) ---
+        // Dry uses the latency-compensated input so partial mix does not comb-filter.
         let out_lin = db_to_lin(s.out_db);
         let mix = s.mix.clamp(0.0, 1.0);
-        let dry = [l_in, r_in];
+        let dry = [dry_l, dry_r];
         let mut out = [0.0f32; 2];
         for ci in 0..2 {
             let w = wet[ci] * ag;
@@ -450,7 +478,7 @@ mod tests {
     }
 
     #[test]
-    fn mix_zero_nulls_against_dry() {
+    fn mix_zero_nulls_against_latency_matched_dry() {
         let sr = 48_000.0f32;
         let n = 24_000usize;
         let main: Vec<f32> = (0..n)
@@ -461,17 +489,44 @@ mod tests {
         s.mix = 0.0;
         s.out_db = 0.0;
         let mut core = GritCore::new(sr);
+        let lat = core.latency_samples() as usize;
         let mut out = main.clone();
         core.process_mono(&mut out, &sc, &s);
+        // At mix=0 the output is the dry path delayed by the reported latency.
+        let m = n - lat;
         let resid: f32 = {
-            let mse = main
-                .iter()
-                .zip(&out)
-                .map(|(a, b)| (a - b) * (a - b))
+            let mse = (0..m)
+                .map(|i| {
+                    let d = main[i] - out[i + lat];
+                    d * d
+                })
                 .sum::<f32>()
-                / n as f32;
+                / m as f32;
             20.0 * mse.sqrt().max(1.0e-12).log10()
         };
         assert!(resid < -80.0, "mix=0 did not null: residual {resid:.1} dB");
+    }
+
+    /// Regression (HARD CHECKPOINT 1): at mix=0.5 with a unit impulse and a near-identity
+    /// wet setting, dry and wet must land as a SINGLE coherent peak — the uncompensated
+    /// oversampler group delay would otherwise split it into two peaks (comb filtering).
+    #[test]
+    fn partial_mix_impulse_is_single_coherent_peak() {
+        use suite_core::harness::assert_single_coherent_peak;
+        let sr = 48_000.0f32;
+        let n = 256usize;
+        let mut s = Settings::default();
+        s.mix = 0.5;
+        s.drive_db = 0.0; // ~unity wet: no added drive
+        s.depth = 0.0;
+        s.auto_gain = false;
+        s.mode = Mode::EnvDrive;
+        let mut main = vec![0.0f32; n];
+        main[0] = 1.0;
+        let sc = vec![0.0f32; n];
+        let mut core = GritCore::new(sr);
+        core.process_mono(&mut main, &sc, &s);
+        // Dry (0.5) and wet (~0.5) coincide at the group-delay lag → one cluster.
+        assert_single_coherent_peak(&main, 2, 0.5);
     }
 }

@@ -377,6 +377,9 @@ impl Plugin for Ember {
         _aux: &mut AuxiliaryBuffers,
         _context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
+        // Denormal mitigation for the whole process scope (FTZ/DAZ), restored on drop.
+        let _ftz = suite_core::dsp::ScopedFtz::enable();
+
         let s = self.params.snapshot();
         self.core.configure(&s);
 
