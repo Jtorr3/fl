@@ -120,6 +120,15 @@ impl Default for ImpactParams {
                         _ => "Hard",
                     }
                     .to_string()
+                }))
+                .with_string_to_value(Arc::new(|s| {
+                    match s.trim().to_ascii_lowercase().as_str() {
+                        "tube" | "0" => Some(0),
+                        "tape" | "1" => Some(1),
+                        "fold" | "2" => Some(2),
+                        "hard" | "3" => Some(3),
+                        _ => s.trim().parse::<i32>().ok(),
+                    }
                 })),
             clip_soft: BoolParam::new("Soft Clip", d.clip_soft),
             clicklvl: pct("Click Level", d.click_level),
@@ -134,6 +143,15 @@ impl Default for ImpactParams {
                         _ => "Knock",
                     }
                     .to_string()
+                }))
+                .with_string_to_value(Arc::new(|s| {
+                    match s.trim().to_ascii_lowercase().as_str() {
+                        "off" | "0" => Some(0),
+                        "tick" | "1" => Some(1),
+                        "snap" | "2" => Some(2),
+                        "knock" | "3" => Some(3),
+                        _ => s.trim().parse::<i32>().ok(),
+                    }
                 })),
             translvl: pct("Transient Level", d.transient_level),
             sublvl: pct("Sub Level", d.sub_level),

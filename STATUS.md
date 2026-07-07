@@ -1,17 +1,27 @@
 # STATUS
 
-CURRENT: IMPACT | STEP: 7 | ATTEMPTS: 0 | LAST-ACTION: DSP+params+GUI+presets+tests done, all 7 impact tests + suite-core green (cargo test). Running build.ps1 gate.
+CURRENT: (none) | STEP: - | ATTEMPTS: 0 | LAST-ACTION: IMPACT SHIPPED (full, [x]) — impact.clap green on clap-validator (16/0) + pluginval s8, installed. suite_core::testsig::synth_kick added (all crates revalidated via build.ps1 -All). No escalation, no descope.
 PUSH-PENDING: no
-DONE: BOOTSTRAP, GRIT, EMBER
+DONE: BOOTSTRAP, GRIT, EMBER, IMPACT
 DESCOPED: GRIT Mode C (spectral STFT) → DEFERRED.md
 
 ## LOG (append-only: date | item | outcome | how-to-test-in-FL)
 2026-07-07 | PLANNING | PRD v2 hardened via 3-agent adversarial review; repo, specs, loop contract, allowlist committed | n/a
 2026-07-07 | BOOTSTRAP | GO: _template passes clap-validator + pluginval on windows-gnu | rescan plugins in FL, load "Qeynos Template"
 2026-07-07 | GRIT | SHIPPED (degraded, [x]*): sidechained distortion, Modes A (Env-Drive) + B (Waveshape); Mode C (spectral STFT) deferred to DEFERRED.md. 4x oversampling + presets module added to suite-core (all-crates revalidated: _template green). clap-validator 14/0, pluginval s8 PASS, CLAP installed. Done-bar met: THD rises during SC pulses, auto-gain holds post-RMS within ±1 dB of pre. 5 presets, renders in renders/GRIT/. | FL: Find more plugins → add "Qeynos GRIT", route a kick to its sidechain, load "Kick Bass Grit", confirm it pumps with the kick (SC Listen to audition the focus band)
+2026-07-07 | IMPACT | SHIPPED (full, [x]): kick drum synth (MIDI instrument). Mono last-note-priority voice: exponential pitch env f(t)=f_end+(f_start−f_end)e^(−t/τ_p) with curve morph → phase-continuous sine/tri body; band-passed noise click (SVF BP, own 5–50ms decay) + 3 embedded PCM transients (Tick/Snap/Knock, synthesized offline in build.rs as const arrays, windowed to zero) + sub osc (f_end×ratio); mix → waveshaper-bank drive (Tube/Tape/Fold/Hard, pre-amp-env) → exponential amp env (curve) → soft/hard clip. Length macro scales amp decay + pitch τ together; Key-track sets f_end from MIDI (A1=55Hz). Phase-continuous retrigger + 1.5ms declick ramp on amp env AND click/transient onset. New suite-core API `testsig::synth_kick`/`KickSpec` (IMPACT's own math, replaces the kick stub) — all crates revalidated green via build.ps1 -All (_template, grit, ember, impact). Done-bar met: STFT f0 starts within 10% of f_start & ends within 5% of f_end; mid-decay retrigger stays within declick bound vs no-retrigger. clap-validator 16/0 (was 15/1 — fixed IntParam text_to_value consistency by adding string_to_value to shape/trans), pluginval s8 SUCCESS, CLAP installed. 5 presets, renders in renders/IMPACT/. No Fable escalation, no descope. | FL: Find more plugins → add "Qeynos IMPACT" to a channel, play notes (each fires a kick); load "808 Long"/"House Punch"; enable Key Track to tune from the keyboard; fire rapid repeated notes to hear the declicked retrigger.
 2026-07-07 | EMBER | SHIPPED (full, [x]): spectral fader / temporal smoother. Added alloc-free streaming STFT engine to suite-core (`suite_core::stft`, realfft 3.5) — all crates revalidated green (_template, grit). EMBER: per-bin state machine (coef=1-exp(-T/τ), 8-band log-freq attack/decay curves, decay to 60s), phase-vocoder tails (tonal ring), 1/3-oct fitting envelope, freeze (τ→∞), gate, tail gain, latency-aligned dry/wet. Reports 2048-sample latency. Done-bar met on FIRST attempt (no Fable escalation): τ=10s noise tail +2s > -40 dBFS & frame-RMS monotone↓; freeze tail flat ±1 dB over 5s; mix=0 nulls vs latency-delayed dry < -80 dB. clap-validator PASS, pluginval s8 SUCCESS (44.1/48/96k, blocks 64..1024), CLAP installed. 5 presets, renders in renders/EMBER/. | FL: Find more plugins → add "Qeynos EMBER", load "Bloom Pad" on a pad/vocal (notes bloom & sustain past release); play a sustained note, tick Freeze, stop input → spectrum holds as a drone. Host reports +2048-sample latency (auto delay-comp).
 
 ## NOTES
+- New suite-core API (IMPACT, 2026-07-07): `testsig::synth_kick(&KickSpec, len, sr) -> Vec<f32>`
+  and `testsig::KickSpec { f_start, f_end, pitch_decay_s, amp_decay_s, click, sub_level,
+  sub_ratio, drive }` (Default = 180→55 Hz, ~0.5 s tail, light click). This is IMPACT's own
+  kick math (exp pitch env → phase-continuous sine → band-passed noise click → tanh drive →
+  exp amp env w/ 1.5 ms attack → soft clip; deterministic, peak-bounded < 0 dBFS). It REPLACES
+  the old decaying-sine stub; `testsig::synth_kick_stub(len, sr)` is kept and now delegates to
+  `synth_kick(&KickSpec::default(), …)`. UNDERTOW (kick-duck test), SEANCE, and any later
+  plugin needing a synthetic kick should use this. IMPACT's per-plugin f0 measurement pattern:
+  streaming `stft::Stft` (fft 4096/hop 1024) + quadratic peak interpolation over the low band.
 - New suite-core API (EMBER, 2026-07-07): `stft::Stft` — streaming alloc-free STFT.
   `Stft::new(fft_size, hop)` (periodic Hann, COLA-normalized WOLA); `process(x, &mut cb)`
   where `cb: FnMut(&mut [Complex<f32>])` mutates the length-`num_bins()` complex spectrum

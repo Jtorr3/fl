@@ -335,7 +335,8 @@ impl KickVoice {
         };
 
         // --- Embedded PCM transient ---
-        let trans = if self.trans_playing {
+        // `transient` may be automated to 0 mid-playback, so guard the 1-based table index.
+        let trans = if self.trans_playing && self.transient >= 1 {
             let tbl = transients::TRANSIENTS[self.transient - 1];
             if self.trans_pos < tbl.len() {
                 let v = tbl[self.trans_pos] * self.transient_level;
