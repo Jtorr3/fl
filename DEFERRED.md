@@ -66,3 +66,26 @@ Each entry: item | feature | why | how to pick it back up.
   with a Serum-2 base template + PARAM_SPEC derived from real saved Serum 2 presets,
   reusing the same constrained-subset-merged-onto-base architecture and pydantic
   validation. Add fixtures + offline tests mirroring the Vital ones.
+
+## WIRE — true per-bandwidth Opus internal rate + real FEC/PLC recovery
+- **Deferred 2026-07-07 (crate limitation + PRD-sanctioned approximation, not an
+  attempt-budget descope).** WIRE shipped complete ([x], full): Plan A (`opus-rs`)
+  landed, all specced params present, both done-bar assertions met.
+- **What is approximated:**
+  1. **Bandwidth** (NB→FB) is realised as a *pre-codec low-pass*, not by switching the
+     Opus encoder's internal sampling rate (8/12/16/24/48 k). The link-test showed
+     `opus-rs` 0.1.23's SILK-resampler paths at 12 k and 24 k are **buggy** (decode
+     decorrelates to ~0.05 correlation at several bitrates), while the 48 k path is
+     reliable and monotonic in bitrate. Running the codec always at 48 k and low-passing
+     ahead of it is exactly the "approximate with bandwidth limiting and note it"
+     fallback PRD §5 allows, and dodges every broken path.
+  2. **FEC** is wired to the encoder (`use_inband_fec` + `packet_loss_perc`), but
+     `opus-rs`' `decode()` has no true FEC/PLC recovery entry point (it errors on empty
+     input), so WIRE synthesises its own click-free concealment (zero-fill + crossfade)
+     for dropped frames. FEC therefore has limited audible benefit under loss.
+- **How to resume:** (a) once `opus-rs` fixes its 12 k/24 k resampler (or by switching to
+  Plan B `audiopus`/libopus via the portable CMake in `tools/bin/cmake`), map `Bandwidth`
+  to `OpusEncoder::new(rate, …)` at 8/12/16/24/48 k with matching decoder + SRC, dropping
+  the pre-LP; (b) with a codec exposing `decode_fec`/PLC (libopus does), feed the decoder
+  the loss flag so FEC/PLC actually reconstruct dropped frames. WIRE's `Settings` already
+  carry `bandwidth`/`fec`/`loss_pct`, so only `dsp::ChannelCodec` changes.

@@ -20,6 +20,7 @@ admin junction exists (see `CHECKPOINTS.md`).
 | TRACER | Distortion | Pitch-tracking multiband saturation — MPM f0 detection locks a time-varying LR4 crossover tree to the note; per-band waveshaper drive (2x OS), Smart Frequency, constant-color, confidence freeze, MIDI mode | [docs/TRACER.md](docs/TRACER.md) |
 | OVERSEER | Mastering | ONE bundle, TWO plugins: **Node** channel strip (EQ, RMS comp, tanh sat, M/S width) + **Master** bus (EQ, 3-band LR4 multiband comp, 2 ms lookahead limiter w/ reported latency, BS.1770 LUFS meter). Master remote-controls Nodes over a same-DLL bus (override badges, local steal-back). Caveat: FL "Make bridged" severs the link | [docs/OVERSEER.md](docs/OVERSEER.md) |
 | DRIFT | Filter | Infinity filter — endless Shepard-tone filter sweep. N (2–8) octave-spaced TPT bell filters glide up/down over a log-freq range (free Hz or BPM-synced), wrapping at the edges with a raised-cosine gain window ⇒ seamless endless rise/fall. Shared resonance, depth, stereo phase offset, dry/wet. Zero latency (minimum-phase) | [docs/DRIFT.md](docs/DRIFT.md) |
+| WIRE | Lo-Fi | Codec degradation — a real **Opus** round-trip (pure-Rust `opus-rs`, 48 k internal) abused as an effect: bandwidth low-pass + **crunch** (bit/SR reduce) → encode (Bitrate 6–128 kbps, Voice/Music, FEC) → **packet-loss** dropouts (click-free concealment) → decode → re-encoding **regen** generation-loss loop → width/mix. 20 ms frames, latency reported + dry PDC-aligned. Codec runs in the audio thread (~0.3 % RT) | [docs/WIRE.md](docs/WIRE.md) |
 
 ## Tools (Phase 4)
 

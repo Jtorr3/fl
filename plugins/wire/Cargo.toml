@@ -1,0 +1,21 @@
+[package]
+name = "wire"
+version = "0.1.0"
+edition = "2021"
+license = "ISC"
+description = "Qeynos WIRE — codec degradation (Opus round-trip through a pure-Rust encoder/decoder + pre-codec crunch, packet-loss simulation, and a re-encoding generation-loss regen loop; Codec clone)"
+
+[lib]
+# `cdylib` for the CLAP/VST3 bundle; `lib` so `cargo test` and the harness can link the DSP.
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+nih_plug = { workspace = true }
+nih_plug_egui = { workspace = true }
+suite-core = { path = "../../suite-core" }
+# Plan A codec (PRD §5): pure-Rust Opus encoder+decoder, v0.1.x, zero C / no CMake.
+# (PRD names it `opus_rs`; the published crate name is hyphenated `opus-rs`.)
+opus-rs = "0.1.23"
+
+[dev-dependencies]
+suite-core = { path = "../../suite-core" }
