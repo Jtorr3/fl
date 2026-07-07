@@ -1,6 +1,6 @@
 # STATUS
 
-CURRENT: OVERSEER | STEP: 1 | ATTEMPTS: 0 | LAST-ACTION: start(OVERSEER) — mastering system: ONE crate exporting Node + Master, same-DLL BUS registry, suite_core::loudness (BS.1770 LUFS), lookahead limiter.
+CURRENT: OVERSEER | STEP: 7 | ATTEMPTS: 0 | LAST-ACTION: OVERSEER DSP+params+GUI+presets done, all 21 offline tests green first attempt (limiter ceiling, LUFS analytic, bus round-trip). Next: build.ps1 gate.
 PUSH-PENDING: no
 DONE: BOOTSTRAP, GRIT, EMBER, IMPACT, TRACER
 DESCOPED: GRIT Mode C (spectral STFT) → DEFERRED.md

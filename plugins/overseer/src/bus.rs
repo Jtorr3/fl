@@ -142,6 +142,14 @@ impl Slot {
     pub fn is_override_active(&self, idx: usize) -> bool {
         idx < NUM_OVERRIDES && self.ovr_active[idx].load(Ordering::Relaxed)
     }
+    /// Current override value for param `idx` (meaningful when the override is active).
+    pub fn override_value(&self, idx: usize) -> f32 {
+        if idx < NUM_OVERRIDES {
+            load_f32(&self.ovr_val[idx])
+        } else {
+            0.0
+        }
+    }
     /// True if the Master currently holds *any* param (badge on the Node GUI).
     pub fn override_held(&self) -> bool {
         self.ovr_ts.load(Ordering::Relaxed) > self.local_ts.load(Ordering::Relaxed)
