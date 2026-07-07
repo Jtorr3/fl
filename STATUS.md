@@ -1,6 +1,6 @@
 # STATUS
 
-CURRENT: (none) | STEP: - | ATTEMPTS: 0 | LAST-ACTION: IMPACT SHIPPED (full, [x]) — impact.clap green on clap-validator (16/0) + pluginval s8, installed. suite_core::testsig::synth_kick added (all crates revalidated via build.ps1 -All). No escalation, no descope.
+CURRENT: TRACER | STEP: 1 | ATTEMPTS: 0 | LAST-ACTION: start(TRACER) — pitch-tracking multiband saturation; copying grit crate as starting point, adding suite_core::pitch (MPM) + testsig::synth_vocal/sliding_saw
 PUSH-PENDING: no
 DONE: BOOTSTRAP, GRIT, EMBER, IMPACT
 DESCOPED: GRIT Mode C (spectral STFT) → DEFERRED.md
