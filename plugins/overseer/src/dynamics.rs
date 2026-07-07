@@ -189,8 +189,12 @@ impl MultibandComp {
     }
 
     pub fn set_crossovers(&mut self, low_hz: f32, high_hz: f32, fs: f32) {
-        let lo = low_hz.clamp(30.0, fs * 0.45);
-        let hi = high_hz.clamp(lo + 10.0, fs * 0.45);
+        // Fuzzer-extreme guard: keep the clamp bounds ordered for every input —
+        // `f32::clamp` PANICS on inverted min/max, and pluginval fuzzes params to the
+        // range edges (xo_low = 20 kHz at 44.1 kHz makes `lo + 10 > 0.45·fs`).
+        let max_hz = (fs * 0.45).max(100.0);
+        let lo = low_hz.clamp(30.0, max_hz - 20.0);
+        let hi = high_hz.clamp(lo + 10.0, max_hz);
         self.xo_low.set(lo, fs);
         self.xo_high.set(hi, fs);
     }
@@ -449,6 +453,25 @@ mod tests {
             let lo = if i >= 4 { i - 4 } else { 0 };
             let brute = xs[lo..=i].iter().cloned().fold(0.0f32, f32::max);
             assert!((g - brute).abs() < 1e-6, "at {i}: got {g} want {brute}");
+        }
+    }
+
+    #[test]
+    fn set_crossovers_survives_fuzzer_extremes_at_44k() {
+        // Regression: pluginval fuzzes xo_low to 20 kHz at fs=44.1 kHz, where a naive
+        // clamp gets inverted bounds and panics.
+        let fs = 44_100.0f32;
+        let mut mb = MultibandComp::new(fs);
+        for &(lo, hi) in &[
+            (20_000.0f32, 20.0f32),
+            (20_000.0, 20_000.0),
+            (20.0, 20.0),
+            (0.0, 0.0),
+            (20_000.0, 0.0),
+        ] {
+            mb.set_crossovers(lo, hi, fs);
+            let y = mb.process(0.5);
+            assert!(y.is_finite());
         }
     }
 

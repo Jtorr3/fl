@@ -18,6 +18,7 @@ admin junction exists (see `CHECKPOINTS.md`).
 | EMBER | Spectral | Spectral fader / temporal smoother — per-bin STFT state machine, 8-band attack/decay curves, phase-vocoder tails, freeze; reports 2048-sample latency | [docs/EMBER.md](docs/EMBER.md) |
 | IMPACT | Instrument | Kick drum synth (MIDI) — exponential pitch/amp envelopes, sine/tri body, band-passed click + 3 embedded PCM transients, sub osc, waveshaper drive; phase-continuous declicked retrigger, key-track, Length macro | [docs/IMPACT.md](docs/IMPACT.md) |
 | TRACER | Distortion | Pitch-tracking multiband saturation — MPM f0 detection locks a time-varying LR4 crossover tree to the note; per-band waveshaper drive (2x OS), Smart Frequency, constant-color, confidence freeze, MIDI mode | [docs/TRACER.md](docs/TRACER.md) |
+| OVERSEER | Mastering | ONE bundle, TWO plugins: **Node** channel strip (EQ, RMS comp, tanh sat, M/S width) + **Master** bus (EQ, 3-band LR4 multiband comp, 2 ms lookahead limiter w/ reported latency, BS.1770 LUFS meter). Master remote-controls Nodes over a same-DLL bus (override badges, local steal-back). Caveat: FL "Make bridged" severs the link | [docs/OVERSEER.md](docs/OVERSEER.md) |
 
 ## Building
 

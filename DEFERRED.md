@@ -21,3 +21,20 @@ Each entry: item | feature | why | how to pick it back up.
   to `dsp::Mode` + `ModeParam`. Per bin: `mag' = mag * (1 + drive·sc_bin_env)` shaped
   through a bounded nonlinearity, phase preserved. Add a THD-vs-SC render test in the
   spectral mode. Re-run `build.ps1 grit` and revalidate.
+
+## OVERSEER — Ozone (3rd-party plugin) hosting inside Master
+- **Deferred by spec (SPECS "OVERSEER": "Ozone hosting: DEFERRED.md only"), recorded
+  2026-07-07 at ship time.** OVERSEER shipped complete without it.
+- **Why:** hosting an external VST inside a plugin requires a full plugin-host layer
+  (scanning, editor embedding, state proxying) — far out of scope for one iteration.
+- **How to resume:** add a hosted-FX slot to `MasterCore` post-multiband/pre-limiter
+  using a minimal VST3 hosting layer, proxy bypass/latency, embed its editor in a
+  separate window. Revalidate via build.ps1 overseer.
+
+## OVERSEER — tier-2 (cross-process) bus fallback
+- **Deferred 2026-07-07 (design decision per PRD §3, not a failure).** The Node↔Master
+  link is tier 1 (same-DLL `static` registry); FL "Make bridged" on either instance
+  severs it (documented in README/docs/CHECKPOINTS; audio processing is unaffected).
+- **How to resume:** NERVE/X-RAY build the `memmap2` shared-memory bus in suite-core
+  (PRD §3 tier 2: fixed-layout slots, per-slot seqlock, heartbeat GC); port
+  `plugins/overseer/src/bus.rs` onto it keeping the same `Slot` API.

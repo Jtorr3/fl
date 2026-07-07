@@ -20,6 +20,15 @@
       Find more plugins → add GRIT to a track, route a kick to its **sidechain** input,
       load the "Kick Bass Grit" preset, confirm the GUI opens (all params + preset combo
       + SC Listen / Auto-Gain toggles) and the distortion pumps with the kick.
+- [ ] **OVERSEER (shipped 2026-07-07): FL rescan + two-plugin link check.** ONE bundle
+      (`overseer.clap`) installs BOTH "Qeynos OVERSEER Node" and "Qeynos OVERSEER Master".
+      In FL: Find more plugins → put **Node** on 2–3 tracks (set each LABEL in its GUI,
+      e.g. "KICK"), put **Master** on the master track. The Master GUI's NODES grid
+      should list every Node live with meters; drag a Node's THRESH/DRIVE slider there →
+      the Node shows an `OVR` badge and its sound changes; touch the same param on the
+      Node → control steals back. IMPORTANT: leave "Make bridged" UNTICKED on all
+      OVERSEER instances (bridging severs the same-process link; audio still works).
+      Limiter check: hot signal into Master, ceiling −1 dB → output never clips past it.
 - [ ] FL Studio: Options → Manage plugins → "Find more plugins" after new installs
       (FL never auto-detects new plugins).
 - [ ] Audition `renders/<plugin>/*.wav` — automated assertions check math, not taste.
