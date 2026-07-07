@@ -90,17 +90,109 @@ pub fn pink_noise(amp: f32, len: usize, seed: u32) -> Vec<f32> {
 // simple placeholders (PRD §4).
 // ---------------------------------------------------------------------------
 
-/// STUB: synthetic kick placeholder — a decaying low sine. Replaced by IMPACT's
-/// own math when that plugin is built.
-pub fn synth_kick_stub(len: usize, sample_rate: f32) -> Vec<f32> {
+/// Parameters for [`synth_kick`] — IMPACT's own kick math, exposed as a reusable synthetic
+/// signal for the rest of the suite (UNDERTOW's kick-duck test, SEANCE, etc.).
+#[derive(Clone, Copy, Debug)]
+pub struct KickSpec {
+    /// Pitch-envelope start frequency (Hz).
+    pub f_start: f32,
+    /// Pitch-envelope end / body frequency (Hz).
+    pub f_end: f32,
+    /// Pitch-envelope time constant τ_p (seconds).
+    pub pitch_decay_s: f32,
+    /// Amp-envelope time constant τ_a (seconds).
+    pub amp_decay_s: f32,
+    /// Band-passed noise click amount, 0..1.
+    pub click: f32,
+    /// Sub-oscillator level, 0..1 (sine at `f_end × sub_ratio`).
+    pub sub_level: f32,
+    /// Sub-oscillator frequency ratio of `f_end`.
+    pub sub_ratio: f32,
+    /// Pre-envelope drive into a `tanh` saturator, 0..1.
+    pub drive: f32,
+}
+
+impl Default for KickSpec {
+    /// A general-purpose kick: 180→55 Hz sweep, ~0.5 s tail, light click.
+    fn default() -> Self {
+        Self {
+            f_start: 180.0,
+            f_end: 55.0,
+            pitch_decay_s: 0.03,
+            amp_decay_s: 0.5,
+            click: 0.2,
+            sub_level: 0.0,
+            sub_ratio: 0.5,
+            drive: 0.0,
+        }
+    }
+}
+
+/// Synthetic kick using IMPACT's own signal path (PRD §4): exponential pitch envelope into a
+/// phase-continuous sine body, a band-passed white-noise click, a sub oscillator, `tanh` drive
+/// pre-envelope, an exponential amp envelope with a 1.5 ms attack (declick), and a soft clip.
+/// Deterministic. Peak-bounded below 0 dBFS.
+pub fn synth_kick(spec: &KickSpec, len: usize, sample_rate: f32) -> Vec<f32> {
+    let sr = sample_rate.max(1.0);
+    let dt = 1.0 / sr;
+    let mut phase = 0.0f32;
+    let mut sub_phase = 0.0f32;
+    let mut click_svf = crate::dsp::Svf::new();
+    click_svf.set(3500.0, 2.0, sr);
+    let mut click_env = 1.0f32;
+    let click_coef = (-1.0 / (0.012 * sr)).exp(); // ~12 ms click decay
+    let mut rng = Rng::new(0x51AC_2E17);
+    let attack_len = ((0.0015 * sr).round() as usize).max(1);
+    let tau_p = spec.pitch_decay_s.max(1.0e-5);
+    let tau_a = spec.amp_decay_s.max(1.0e-4);
+    let pregain = 1.0 + spec.drive.clamp(0.0, 1.0) * 11.0;
+
     (0..len)
         .map(|n| {
-            let t = n as f32 / sample_rate;
-            let env = (-t * 12.0).exp();
-            let f = 55.0 + 80.0 * (-t * 40.0).exp();
-            env * (2.0 * PI * f * t).sin()
+            let t = n as f32 / sr;
+            // Pitch envelope → phase-continuous body sine.
+            let f = spec.f_end + (spec.f_start - spec.f_end) * (-t / tau_p).exp();
+            phase += f / sr;
+            if phase >= 1.0 {
+                phase -= phase.floor();
+            }
+            let body = (2.0 * PI * phase).sin();
+            // Sub oscillator.
+            let sub = if spec.sub_level > 0.0 {
+                sub_phase += (spec.f_end * spec.sub_ratio) / sr;
+                if sub_phase >= 1.0 {
+                    sub_phase -= sub_phase.floor();
+                }
+                (2.0 * PI * sub_phase).sin() * spec.sub_level
+            } else {
+                0.0
+            };
+            // Band-passed noise click.
+            let click = if spec.click > 0.0 {
+                let bp = click_svf.process(rng.next_bipolar()).bp;
+                let c = bp * click_env * spec.click;
+                click_env *= click_coef;
+                c
+            } else {
+                0.0
+            };
+            // Mix → drive (pre-envelope) → amp env → soft clip.
+            let driven = (pregain * (body + sub + click)).tanh();
+            let amp = if n < attack_len {
+                n as f32 / attack_len as f32
+            } else {
+                let ta = (n - attack_len) as f32 * dt;
+                (-ta / tau_a).exp()
+            };
+            crate::dsp::tape_soft(driven * amp).clamp(-0.999, 0.999)
         })
         .collect()
+}
+
+/// Synthetic kick with the default [`KickSpec`]. Kept for callers that want a one-shot kick
+/// without configuring a spec (formerly a decaying-sine stub; now IMPACT's real math).
+pub fn synth_kick_stub(len: usize, sample_rate: f32) -> Vec<f32> {
+    synth_kick(&KickSpec::default(), len, sample_rate)
 }
 
 /// STUB: synthetic vocal placeholder — a sawtooth with light vibrato. Replaced by a
@@ -114,4 +206,23 @@ pub fn synth_vocal_stub(freq: f32, len: usize, sample_rate: f32) -> Vec<f32> {
             0.4 * (2.0 * phase - 1.0)
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn synth_kick_is_finite_bounded_and_non_silent() {
+        let sr = 48_000.0f32;
+        let x = synth_kick(&KickSpec::default(), (sr * 0.5) as usize, sr);
+        assert!(x.iter().all(|v| v.is_finite()));
+        let peak = x.iter().fold(0.0f32, |a, &v| a.max(v.abs()));
+        assert!(peak <= 1.0, "kick peak exceeds 0 dBFS: {peak}");
+        assert!(peak > 0.2, "kick too quiet: {peak}");
+        // Starts loud, decays: early RMS >> late RMS.
+        let e: f32 = x[..2000].iter().map(|v| v * v).sum();
+        let l: f32 = x[x.len() - 2000..].iter().map(|v| v * v).sum();
+        assert!(e > l, "kick did not decay (early {e} late {l})");
+    }
 }

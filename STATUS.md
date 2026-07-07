@@ -1,6 +1,6 @@
 # STATUS
 
-CURRENT: IMPACT | STEP: 1 | ATTEMPTS: 0 | LAST-ACTION: start(IMPACT) — kick drum synth MIDI instrument. EMBER SHIPPED (full, [x]) prior.
+CURRENT: IMPACT | STEP: 7 | ATTEMPTS: 0 | LAST-ACTION: DSP+params+GUI+presets+tests done, all 7 impact tests + suite-core green (cargo test). Running build.ps1 gate.
 PUSH-PENDING: no
 DONE: BOOTSTRAP, GRIT, EMBER
 DESCOPED: GRIT Mode C (spectral STFT) → DEFERRED.md
