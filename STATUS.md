@@ -1,6 +1,6 @@
 # STATUS
 
-CURRENT: (none) | STEP: - | ATTEMPTS: 0 | LAST-ACTION: GRIT SHIPPED (degraded: Mode C deferred) — grit.clap green on clap-validator + pluginval s8, installed
+CURRENT: EMBER | STEP: 1 | ATTEMPTS: 0 | LAST-ACTION: start(EMBER) — spectral fader / temporal smoother; adding suite_core::stft (realfft) then EMBER crate
 PUSH-PENDING: no
 DONE: BOOTSTRAP, GRIT
 DESCOPED: GRIT Mode C (spectral STFT) → DEFERRED.md
