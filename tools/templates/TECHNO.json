@@ -1,0 +1,29 @@
+{
+  "name": "Dark Melodic Techno",
+  "tempo": 132,
+  "loop_mode": "pattern",
+  "mixer_tracks": [
+    { "index": 1,  "name": "KICK",   "color": "#8B1E1E" },
+    { "index": 2,  "name": "RUMBLE", "color": "#5A1A2E" },
+    { "index": 3,  "name": "BASS",   "color": "#3B2A6B" },
+    { "index": 4,  "name": "PERC",   "color": "#2E4A6B" },
+    { "index": 5,  "name": "HATS",   "color": "#2E6B63" },
+    { "index": 6,  "name": "ATMOS",  "color": "#4B3B7A" },
+    { "index": 7,  "name": "LEAD",   "color": "#6B2E6B" },
+    { "index": 8,  "name": "CHORD",  "color": "#7A3B2E" },
+    { "index": 9,  "name": "FX",     "color": "#4A4A5C" },
+    { "index": 10, "name": "REVERB", "color": "#3A3A4A" },
+    { "index": 11, "name": "DELAY",  "color": "#2E5C5C" }
+  ],
+  "routing": [
+    { "channel": 0, "mixer_track": 1 },
+    { "channel": 1, "mixer_track": 2 },
+    { "channel": 2, "mixer_track": 3 },
+    { "channel": 3, "mixer_track": 4 },
+    { "channel": 4, "mixer_track": 5 },
+    { "channel": 5, "mixer_track": 6 },
+    { "channel": 6, "mixer_track": 7 },
+    { "channel": 7, "mixer_track": 8 },
+    { "channel": 8, "mixer_track": 9 }
+  ]
+}

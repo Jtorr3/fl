@@ -39,6 +39,21 @@ Each entry: item | feature | why | how to pick it back up.
   (PRD §3 tier 2: fixed-layout slots, per-slot seqlock, heartbeat GC); port
   `plugins/overseer/src/bus.rs` onto it keeping the same `Slot` API.
 
+## W4-SESSION-BOOTSTRAP — tempo (BPM) application
+- **Deferred 2026-07-07 (server limitation, not a code descope).** The SPECS.md W4
+  row lists "tempo" as a template field, but the FL Studio MCP server exposes NO
+  tempo/BPM setter — its transport handlers are only start/stop/record/getStatus/
+  setPosition/getLength/setLoopMode/setPlaybackSpeed (confirmed in
+  `device_FLStudioMCP.py` dispatch + `tools/transport.py`). The tool keeps `tempo`
+  in the template format and reports it as a **skipped** field (printed, not
+  applied, not an error) so templates carry the intended BPM as documentation.
+- **Why:** adding a tempo command would require modifying the user's FL MCP repo
+  (out of scope: "Do NOT modify that repo") and a matching FL-side handler.
+- **How to resume:** if the MCP server later gains a `transport.setTempo` (FL API:
+  `mixer.setMasterTempo` / processMECEvent tempo, or a general.setTempo), map the
+  template's `tempo` to it in `generate_ops()` (drop the skip report) and add a
+  snapshot/mock test. No format change needed — the field already exists.
+
 ## W8-VITALGEN — Serum 2 preset generation
 - **Deferred by spec** (SPECS.md "W8 vitalgen": "Serum 2 = DEFERRED"), recorded
   2026-07-07 at ship time. VITALGEN shipped for Vital 1.5.x only.

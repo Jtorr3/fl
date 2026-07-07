@@ -25,6 +25,7 @@ admin junction exists (see `CHECKPOINTS.md`).
 | Tool | Type | Summary | Docs |
 |---|---|---|---|
 | W8-VITALGEN | Python + Claude API | Generate/tweak/validate Vital 1.5.x synth presets from natural-language descriptions. Claude fills a constrained parameter subset (osc/filter/env/LFO/FX/macros) merged onto an embedded known-good 1.5.5 base patch; pydantic clamps ranges and rejects bad enums so output always loads. Offline tests run without an API key. Skill: `.claude/skills/vitalgen`. | [docs/W8-VITALGEN.md](docs/W8-VITALGEN.md) |
+| W4-SESSION-BOOTSTRAP | Python + FL MCP | One-command FL Studio session bootstrap: a JSON template sets mixer track names + colors, channel→mixer routing, and loop mode via the FL Studio MCP controller (SysEx). Ships TECHNO (dark techno) + DNB (atmospheric dnb) templates; `apply`/`list`, `--dry-run` preview, idempotent, resilient to per-op failures. `tempo` is reported/skipped (no MCP command exists). Skill: `.claude/skills/flsession`. | [docs/W4-SESSION-BOOTSTRAP.md](docs/W4-SESSION-BOOTSTRAP.md) |
 
 ## Building
 

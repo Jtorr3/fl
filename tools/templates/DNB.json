@@ -1,0 +1,27 @@
+{
+  "name": "Atmospheric Drum & Bass",
+  "tempo": 174,
+  "loop_mode": "pattern",
+  "mixer_tracks": [
+    { "index": 1,  "name": "KICK",   "color": "#1E3A5F" },
+    { "index": 2,  "name": "SNARE",  "color": "#2E6E7E" },
+    { "index": 3,  "name": "BREAKS", "color": "#1F6B5A" },
+    { "index": 4,  "name": "SUB",    "color": "#24306B" },
+    { "index": 5,  "name": "REESE",  "color": "#3B4A8B" },
+    { "index": 6,  "name": "PADS",   "color": "#4A6E9B" },
+    { "index": 7,  "name": "VOXFX",  "color": "#2E7E8B" },
+    { "index": 8,  "name": "FX",     "color": "#3A4A5C" },
+    { "index": 9,  "name": "REVERB", "color": "#33475C" },
+    { "index": 10, "name": "DELAY",  "color": "#2E5C6B" }
+  ],
+  "routing": [
+    { "channel": 0, "mixer_track": 1 },
+    { "channel": 1, "mixer_track": 2 },
+    { "channel": 2, "mixer_track": 3 },
+    { "channel": 3, "mixer_track": 4 },
+    { "channel": 4, "mixer_track": 5 },
+    { "channel": 5, "mixer_track": 6 },
+    { "channel": 6, "mixer_track": 7 },
+    { "channel": 7, "mixer_track": 8 }
+  ]
+}

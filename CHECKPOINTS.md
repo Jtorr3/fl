@@ -43,6 +43,21 @@
       Node → control steals back. IMPORTANT: leave "Make bridged" UNTICKED on all
       OVERSEER instances (bridging severs the same-process link; audio still works).
       Limiter check: hot signal into Master, ceiling −1 dB → output never clips past it.
+- [ ] **W4-SESSION-BOOTSTRAP (shipped 2026-07-07): live-apply smoke test.** Offline
+      gate is green (47 checks) but the live apply could NOT be run: on the build
+      machine `fl_connection_status` reported "connected" (the loopMIDI port opens),
+      but every real FL command timed out — FL Studio was not running with the
+      FLStudioMCP controller actually responding. To verify live: start FL Studio,
+      enable the FLStudioMCP controller on the loopMIDI port (port enabled in BOTH
+      MIDI Input and Output with the same number), open/confirm a session, then run:
+      `uv run --python 3.12 tools\session_bootstrap.py apply TECHNO`
+      (uv at `%USERPROFILE%\.local\bin\uv.exe`, not on PATH). Expect mixer tracks
+      1–11 to be renamed KICK/RUMBLE/BASS/PERC/HATS/ATMOS/LEAD/CHORD/FX/REVERB/DELAY
+      and recolored (dark scheme), loop mode → pattern, and channels 0–8 routed to
+      tracks 1–9. It only names/colors/routes (non-destructive) and is idempotent.
+      Routing ops for channels that don't exist in the rack yet will report as
+      warnings — that's expected. Preview any time without FL via `apply TECHNO
+      --dry-run`. (`tempo` is intentionally not applied — no MCP command exists.)
 - [ ] FL Studio: Options → Manage plugins → "Find more plugins" after new installs
       (FL never auto-detects new plugins).
 - [ ] Audition `renders/<plugin>/*.wav` — automated assertions check math, not taste.

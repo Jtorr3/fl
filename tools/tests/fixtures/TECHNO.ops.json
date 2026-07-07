@@ -1,0 +1,284 @@
+{
+  "ops": [
+    {
+      "action": "transport.setLoopMode",
+      "params": {
+        "mode": "pattern"
+      },
+      "desc": "loop mode -> pattern"
+    },
+    {
+      "action": "mixer.setTrackName",
+      "params": {
+        "track": 1,
+        "name": "KICK"
+      },
+      "desc": "mixer 1 name -> KICK"
+    },
+    {
+      "action": "mixer.setTrackColor",
+      "params": {
+        "track": 1,
+        "r": 139,
+        "g": 30,
+        "b": 30
+      },
+      "desc": "mixer 1 color -> #8B1E1E"
+    },
+    {
+      "action": "mixer.setTrackName",
+      "params": {
+        "track": 2,
+        "name": "RUMBLE"
+      },
+      "desc": "mixer 2 name -> RUMBLE"
+    },
+    {
+      "action": "mixer.setTrackColor",
+      "params": {
+        "track": 2,
+        "r": 90,
+        "g": 26,
+        "b": 46
+      },
+      "desc": "mixer 2 color -> #5A1A2E"
+    },
+    {
+      "action": "mixer.setTrackName",
+      "params": {
+        "track": 3,
+        "name": "BASS"
+      },
+      "desc": "mixer 3 name -> BASS"
+    },
+    {
+      "action": "mixer.setTrackColor",
+      "params": {
+        "track": 3,
+        "r": 59,
+        "g": 42,
+        "b": 107
+      },
+      "desc": "mixer 3 color -> #3B2A6B"
+    },
+    {
+      "action": "mixer.setTrackName",
+      "params": {
+        "track": 4,
+        "name": "PERC"
+      },
+      "desc": "mixer 4 name -> PERC"
+    },
+    {
+      "action": "mixer.setTrackColor",
+      "params": {
+        "track": 4,
+        "r": 46,
+        "g": 74,
+        "b": 107
+      },
+      "desc": "mixer 4 color -> #2E4A6B"
+    },
+    {
+      "action": "mixer.setTrackName",
+      "params": {
+        "track": 5,
+        "name": "HATS"
+      },
+      "desc": "mixer 5 name -> HATS"
+    },
+    {
+      "action": "mixer.setTrackColor",
+      "params": {
+        "track": 5,
+        "r": 46,
+        "g": 107,
+        "b": 99
+      },
+      "desc": "mixer 5 color -> #2E6B63"
+    },
+    {
+      "action": "mixer.setTrackName",
+      "params": {
+        "track": 6,
+        "name": "ATMOS"
+      },
+      "desc": "mixer 6 name -> ATMOS"
+    },
+    {
+      "action": "mixer.setTrackColor",
+      "params": {
+        "track": 6,
+        "r": 75,
+        "g": 59,
+        "b": 122
+      },
+      "desc": "mixer 6 color -> #4B3B7A"
+    },
+    {
+      "action": "mixer.setTrackName",
+      "params": {
+        "track": 7,
+        "name": "LEAD"
+      },
+      "desc": "mixer 7 name -> LEAD"
+    },
+    {
+      "action": "mixer.setTrackColor",
+      "params": {
+        "track": 7,
+        "r": 107,
+        "g": 46,
+        "b": 107
+      },
+      "desc": "mixer 7 color -> #6B2E6B"
+    },
+    {
+      "action": "mixer.setTrackName",
+      "params": {
+        "track": 8,
+        "name": "CHORD"
+      },
+      "desc": "mixer 8 name -> CHORD"
+    },
+    {
+      "action": "mixer.setTrackColor",
+      "params": {
+        "track": 8,
+        "r": 122,
+        "g": 59,
+        "b": 46
+      },
+      "desc": "mixer 8 color -> #7A3B2E"
+    },
+    {
+      "action": "mixer.setTrackName",
+      "params": {
+        "track": 9,
+        "name": "FX"
+      },
+      "desc": "mixer 9 name -> FX"
+    },
+    {
+      "action": "mixer.setTrackColor",
+      "params": {
+        "track": 9,
+        "r": 74,
+        "g": 74,
+        "b": 92
+      },
+      "desc": "mixer 9 color -> #4A4A5C"
+    },
+    {
+      "action": "mixer.setTrackName",
+      "params": {
+        "track": 10,
+        "name": "REVERB"
+      },
+      "desc": "mixer 10 name -> REVERB"
+    },
+    {
+      "action": "mixer.setTrackColor",
+      "params": {
+        "track": 10,
+        "r": 58,
+        "g": 58,
+        "b": 74
+      },
+      "desc": "mixer 10 color -> #3A3A4A"
+    },
+    {
+      "action": "mixer.setTrackName",
+      "params": {
+        "track": 11,
+        "name": "DELAY"
+      },
+      "desc": "mixer 11 name -> DELAY"
+    },
+    {
+      "action": "mixer.setTrackColor",
+      "params": {
+        "track": 11,
+        "r": 46,
+        "g": 92,
+        "b": 92
+      },
+      "desc": "mixer 11 color -> #2E5C5C"
+    },
+    {
+      "action": "channels.routeToMixer",
+      "params": {
+        "channel_index": 0,
+        "mixer_track": 1
+      },
+      "desc": "channel 0 -> mixer 1"
+    },
+    {
+      "action": "channels.routeToMixer",
+      "params": {
+        "channel_index": 1,
+        "mixer_track": 2
+      },
+      "desc": "channel 1 -> mixer 2"
+    },
+    {
+      "action": "channels.routeToMixer",
+      "params": {
+        "channel_index": 2,
+        "mixer_track": 3
+      },
+      "desc": "channel 2 -> mixer 3"
+    },
+    {
+      "action": "channels.routeToMixer",
+      "params": {
+        "channel_index": 3,
+        "mixer_track": 4
+      },
+      "desc": "channel 3 -> mixer 4"
+    },
+    {
+      "action": "channels.routeToMixer",
+      "params": {
+        "channel_index": 4,
+        "mixer_track": 5
+      },
+      "desc": "channel 4 -> mixer 5"
+    },
+    {
+      "action": "channels.routeToMixer",
+      "params": {
+        "channel_index": 5,
+        "mixer_track": 6
+      },
+      "desc": "channel 5 -> mixer 6"
+    },
+    {
+      "action": "channels.routeToMixer",
+      "params": {
+        "channel_index": 6,
+        "mixer_track": 7
+      },
+      "desc": "channel 6 -> mixer 7"
+    },
+    {
+      "action": "channels.routeToMixer",
+      "params": {
+        "channel_index": 7,
+        "mixer_track": 8
+      },
+      "desc": "channel 7 -> mixer 8"
+    },
+    {
+      "action": "channels.routeToMixer",
+      "params": {
+        "channel_index": 8,
+        "mixer_track": 9
+      },
+      "desc": "channel 8 -> mixer 9"
+    }
+  ],
+  "skipped": [
+    "tempo (132 BPM): the FL Studio MCP server exposes no tempo/BPM command \u2014 set the project tempo manually in FL Studio."
+  ]
+}
