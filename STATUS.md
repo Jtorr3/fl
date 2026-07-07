@@ -1,6 +1,6 @@
 # STATUS
 
-CURRENT: (none) | STEP: - | ATTEMPTS: 0 | LAST-ACTION: OVERSEER SHIPPED (full, [x]) — one bundle exporting Node + Master, both green on clap-validator (26/0) + pluginval s8 (both plugins, incl. Fuzz parameters), installed. New suite-core API: loudness (BS.1770 K-weighting + gated LUFS). All crates revalidated via build.ps1 -All. One fix attempt total (inverted-clamp panic under param fuzz at 44.1k). No Fable escalation, no descope beyond spec-mandated Ozone hosting.
+CURRENT: W8-VITALGEN | STEP: 1 | ATTEMPTS: 0 | LAST-ACTION: OVERSEER SHIPPED (full, [x]) — one bundle exporting Node + Master, both green on clap-validator (26/0) + pluginval s8 (both plugins, incl. Fuzz parameters), installed. New suite-core API: loudness (BS.1770 K-weighting + gated LUFS). All crates revalidated via build.ps1 -All. One fix attempt total (inverted-clamp panic under param fuzz at 44.1k). No Fable escalation, no descope beyond spec-mandated Ozone hosting.
 PUSH-PENDING: no
 DONE: BOOTSTRAP, GRIT, EMBER, IMPACT, TRACER, OVERSEER
 DESCOPED: GRIT Mode C (spectral STFT) → DEFERRED.md; OVERSEER Ozone hosting + tier-2 bus (by spec/design) → DEFERRED.md
