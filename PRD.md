@@ -17,9 +17,11 @@ in the same commit.
   decide, record the decision as a PRD/DEFERRED.md edit in the same commit, continue.
   Asking the user is never a valid step outcome. "Pause and tell user" does not exist;
   instead write a note to `CHECKPOINTS.md` (the human-checkpoint ledger) and continue.
-- Plugin formats: **CLAP primary** (FL Studio supports CLAP since 2024.1; per-user
-  install dir needs no admin; nih-plug CLAP export is ISC-licensed). **VST3 secondary**
-  (built always, installed only if the admin-created junction exists — see §2).
+- Plugin formats: both built always. **FIELD CORRECTION 2026-07-07: the machine runs
+  FL Studio 21, which predates CLAP support (2024.1+) — so VST3 is the delivery format
+  that actually loads.** The admin junction C:\Program Files\Common Files\VST3\Qeynos →
+  distst3 EXISTS (user created it via UAC); build.ps1 auto-installs VST3 through it.
+  CLAP installs continue (future-proofing for an FL update).
   FL does NOT scan custom VST3 folders (Image-Line manual: VST3 must be in
   `Program Files\Common Files\VST3`); never rely on a VST3 "extra search path".
 - All state files (STATUS.md, LOG, DEFERRED.md, CHECKPOINTS.md) refer to plugins by

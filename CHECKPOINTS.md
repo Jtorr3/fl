@@ -3,7 +3,7 @@
 ## Before launching the loop (optional but recommended)
 - [ ] Launch Claude Code in bypass-permissions mode for the run (the repo's
       .claude/settings.json allowlist is defense-in-depth, not sufficient alone).
-- [ ] OPTIONAL (admin, one time, enables VST3 alongside CLAP): open an elevated
+- [x] DONE 2026-07-07 (was required after all — FL 21 has no CLAP): open an elevated
       prompt and run:
       `mklink /J "C:\Program Files\Common Files\VST3\Qeynos" "C:\dev\qeynos-vst-suite\dist\vst3"`
       Without this, plugins ship as CLAP only — FL Studio ≥ 2024.1 scans CLAP fine.
