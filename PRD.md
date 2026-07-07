@@ -311,7 +311,7 @@ Quick wins (non-Rust, immediately usable)
   green; shared partial-mix alignment regression helper wired into GRIT + TRACER.
 
 Phase 2a — clones
-- [x] DRIFT - [x] WIRE - [ ] OUROBOROS - [ ] SWARM - [ ] SMUDGE - [ ] MURMUR
+- [x] DRIFT - [x] WIRE - [x] OUROBOROS - [ ] SWARM - [ ] SMUDGE - [ ] MURMUR
 
 Taste-tailored (deps satisfied: IMPACT, MURMUR-FDN, EMBER/SMUDGE engines)
 - [ ] UNDERTOW - [ ] SEANCE - [ ] ASCEND
@@ -332,6 +332,12 @@ Phase 3 — remainder
 
 Phase 4 — remaining automations
 - [ ] W5-PROJECT-JANITOR - [ ] W6-SAMPLE-LIBRARIAN - [ ] W7-REFERENCE-GAP
+
+POLISH phase (user feedback 2026-07-07: loves OVERSEER; wants instrument context,
+user preset saving everywhere, cooler UI — "modern pedal style" as endgame cleanup)
+- [ ] PRESET-SYSTEM (suite-wide user preset save/load + retrofit all plugins)
+- [ ] OVERSEER-ENRICH (per-Node instrument type context + thematic preset banks)
+- [ ] PEDAL-UI (modern stompbox theme in suite-core::ui + suite-wide retrofit)
 **FINAL CHECKPOINT**
 
 ## 8. Model & token policy (user directive 2026-07-07)

@@ -297,3 +297,55 @@ air (shelf 12 kHz) -> output trim -> out.  "Sit" macro sweeps a curated combinat
   measured f0 stays +-10 cents; de-esser reduces 5-9 kHz band energy on synthetic
   sibilant bursts (noise bursts through HP) by an amount consistent with its threshold
   while leaving the vowel band (<2 kHz) within +-1 dB; universal assertions + mix null.
+
+
+---
+
+## POLISH phase (user feedback 2026-07-07)
+
+### PRESET-SYSTEM — suite-wide user presets
+- suite-core::presets grows a disk tier: user presets in
+  [MyDocuments]/Qeynos/Presets/<plugin>/<name>.json (known-folder API, NOT
+  %USERPROFILE%\Documents literal). Same flat JSON as factory presets.
+- GUI preset bar widget in suite-core::ui used by every plugin: factory + user
+  sections in one dropdown, Save / Save As (text field), Delete (user only),
+  dirty-state dot when params diverge from loaded preset.
+- Filesystem IO NEVER on the audio thread (load applies via param setter events on
+  the GUI thread; save reads a params snapshot).
+- Retrofit: every shipped plugin adopts the bar; suite-core API rule applies
+  (rebuild-all + revalidate-all). Done bar: round-trip test (save -> mutate ->
+  load -> params restored exactly); a GUI-less unit test on the disk tier; name
+  sanitization (illegal path chars); overwrite-safe.
+
+### OVERSEER-ENRICH — instrument context + thematic banks
+- Node gains an Instrument Type param (enum: KICK, BASS, RUMBLE, PERC, HATS, SNARE,
+  BREAKS, VOCAL, PAD, LEAD, ATMOS, FX, BUS, MASTER-ish). Type drives:
+  (a) context-tuned defaults (EQ band starting freqs, comp time constants, sat amount,
+      width defaults — e.g. KICK: mono-below-120Hz width default, fast comp;
+      VOCAL: gentle knee, presence-tilted EQ bands),
+  (b) metering context (KICK shows fundamental-region level; VOCAL shows presence/sibilance),
+  (c) Master grid shows type badge + type-colored strip per Node.
+- Thematic preset banks per type, >= 6 per common type (KICK/BASS/VOCAL/PAD/PERC/BUS),
+  named by purpose not settings: e.g. KICK: 'Warehouse Thump', 'Rumble Bed Glue',
+  'Psy Click Forward'; VOCAL: 'Drowned Ghost Sit', 'Upfront Dark Pop', 'Tape Choir Bed';
+  PAD: 'Grief Wash', 'Afterlife Wide'. Banks live as factory presets tagged by type;
+  preset bar filters by the Node's current type.
+- Done bar: type switch applies documented defaults (test asserts a KICK-vs-VOCAL
+  default diff table); every bank preset loads + passes universal render assertions;
+  Master grid displays type badges (validator editor test only).
+
+### PEDAL-UI — modern stompbox theme (endgame, after all plugins exist)
+- suite-core::ui v2: pedal-style visual language — textured dark panel, chunky
+  rotary knobs with position indicator + value readout on hover, plugin-accent
+  color per pedal (GRIT rust-orange, EMBER ember-red, WIRE circuit-teal, ...),
+  LED indicator (activity/clip), footswitch-style bypass toggle, recessed screw
+  corners, consistent header (logo + plugin name + preset bar) and footer (in/out
+  meters). Pure egui painting (no image assets -> stays self-contained; rounded
+  rects, gradients, shadows via egui painter).
+- Rollout: build the widget set + apply to _template as the reference pedal, then
+  retrofit every plugin (mechanical: replace param rows with pedal layout groups).
+  One plugin per commit; build.ps1 -All at the end (suite-core API rule).
+- Done bar: every plugin opens under validator editor test with the new theme; all
+  params still reachable; knob drag/reset/fine-drag work (manual FL check ->
+  CHECKPOINTS). No aesthetic iteration loops beyond the defined language — the
+  spec above IS the design decision.
