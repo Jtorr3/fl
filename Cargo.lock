@@ -1504,6 +1504,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ouroboros"
+version = "0.1.0"
+dependencies = [
+ "nih_plug",
+ "nih_plug_egui",
+ "suite-core",
+]
+
+[[package]]
 name = "overseer"
 version = "0.1.0"
 dependencies = [
