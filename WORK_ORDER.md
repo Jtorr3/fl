@@ -1,7 +1,11 @@
 # Qeynos Audio Suite — Work Order
 
+> **HISTORICAL CONTEXT ONLY.** Canonical scope, order, and IDs live in PRD.md §7
+> (names, not numbers — numbering in this file is obsolete). All "open items" below
+> are RESOLVED in PRD.md §0. Do not execute from this file.
+
 > Working title only — rename anytime. One VST at a time, each fully finished
-> (DSP + GUI + presets + built VST3 + validated) before the next begins.
+> (DSP + GUI + presets + built + validated) before the next begins.
 > Stop the run at any point and everything completed so far is usable in FL Studio.
 
 ## Tech stack (decided)

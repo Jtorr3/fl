@@ -1,436 +1,332 @@
-# PRD — Qeynos Audio Suite
-### Technical design + execution playbook (this document is the source of truth during the build)
+# PRD v2 — Qeynos Audio Suite
+### Technical design + autonomous execution playbook (source of truth; hardened by adversarial review 2026-07-07)
 
-**Audience: me (Claude), executing autonomously.** WORK_ORDER.md is the *what*; this is
-the *how*. Every plugin section below contains enough backend design to implement without
-re-deriving decisions. When reality contradicts this doc, fix the doc in the same commit.
-
----
-
-## 1. Execution protocol (the loop I follow, one plugin at a time)
-
-```
-┌─> 1. Re-read this PRD section for the plugin
-│   2. `cargo new` crate from plugins/_template, register in workspace
-│   3. DSP core first, GUI last:
-│      a. implement engine in pure-DSP module (no plugin glue)
-│      b. offline test harness (cargo test): render known signals through it,
-│         assert on RMS/spectra/envelope shape — catches math bugs pre-GUI
-│   4. Param layer: nih-plug params w/ smoothers, sensible ranges, units
-│   5. GUI: suite-core theme + shared widgets; resizable; no custom art needed
-│   6. Presets: ≥5 factory presets as embedded JSON
-│   7. Build gate:  build.ps1 <crate>  →  release build → bundle .vst3
-│                   → pluginval --strictness-level 8 → copy to Documents\VST3
-│   8. Audible sanity: standalone target renders test WAVs to renders/<plugin>/
-│   9. Docs: README table row + params reference in docs/<plugin>.md
-│  10. git commit (one plugin = one commit minimum) + push
-│  11. Tick checklist at bottom of this file, update memory if decisions changed
-└── 12. Next plugin. NEVER two plugins in flight at once.
-```
-
-**Failure rules:** if a plugin is blocked >90 min on one issue, descope the feature
-(note it in `docs/DEFERRED.md`), ship the rest, move on. A working suite with gaps
-beats a stalled perfect plugin. If the *toolchain* breaks, fix that before anything.
-
-**Checkpointing:** after each phase, write a short status report the user can read
-cold: what shipped, what was descoped, what to test in FL.
+**Audience: me (Claude), executing autonomously in a loop with NO human available.**
+WORK_ORDER.md is historical context only. This file + the §7 checklist are the sole
+source of scope, order, and decisions. When reality contradicts this doc, fix the doc
+in the same commit.
 
 ---
+
+## 0. Resolved decisions — NEVER ask the user
+
+- All WORK_ORDER "open items" are RESOLVED: build order = §7 checklist exactly;
+  Phase 3 = all ten ideas; suite name = "Qeynos" (renameable later, irrelevant now);
+  GUI = minimal-dark shared theme. OVERSEER stays in Phase 1.
+- **Global rule:** if any step requires a judgment call not covered by this doc:
+  decide, record the decision as a PRD/DEFERRED.md edit in the same commit, continue.
+  Asking the user is never a valid step outcome. "Pause and tell user" does not exist;
+  instead write a note to `CHECKPOINTS.md` (the human-checkpoint ledger) and continue.
+- Plugin formats: **CLAP primary** (FL Studio supports CLAP since 2024.1; per-user
+  install dir needs no admin; nih-plug CLAP export is ISC-licensed). **VST3 secondary**
+  (built always, installed only if the admin-created junction exists — see §2).
+  FL does NOT scan custom VST3 folders (Image-Line manual: VST3 must be in
+  `Program Files\Common Files\VST3`); never rely on a VST3 "extra search path".
+- All state files (STATUS.md, LOG, DEFERRED.md, CHECKPOINTS.md) refer to plugins by
+  NAME, never by number. Numbering in WORK_ORDER.md is obsolete.
+- Never enable nih-plug's `simd` cargo feature (requires nightly; we build on stable).
+- Record decisions ONLY as repo file edits — never rely on conversation memory
+  surviving compaction.
+
+## 1. Loop contract (the outer loop)
+
+```
+ITERATION:
+ 1. Read STATUS.md. If CURRENT is set → resume at its STEP via §1.6 recovery.
+ 2. Else pick the FIRST unticked item in §7, top to bottom. Checklist order IS the
+    dependency order; never reorder or skip (except the shipped-degraded rule §1.5).
+ 3. Set CURRENT=<name> STEP=1 in STATUS.md, commit "start(<name>)".
+ 4. Execute the §1.4 iteration body, updating STATUS.md STEP before each step.
+ 5. On done: tick §7 checklist, clear CURRENT, append one LOG line to STATUS.md
+    (shipped / descoped-what / how-to-test-in-FL — this IS the user's report),
+    commit code+tick+STATUS in ONE commit, push.
+STOP CONDITIONS (the only ones):
+ - all §7 items ticked;
+ - toolchain broken and unfixable after 5 attempts → write BLOCKED.md (exact error,
+   everything tried), commit, stop;
+ - push auth-fails → do NOT stop: set PUSH-PENDING in STATUS.md, keep working locally,
+   retry push at each iteration start.
+HARD CHECKPOINTS (after OVERSEER+W4/W8, after ASCEND, after CHAMBER, at end):
+ - `build.ps1 --all` green, STATUS.md LOG current, everything pushed,
+   CHECKPOINTS.md updated with what the human should do/test in FL.
+```
+
+### 1.4 Iteration body (one plugin)
+
+```
+ 1. Re-read this PRD's section for the plugin
+ 2. Copy plugins/_template → new crate, register in workspace
+ 3. DSP core first: pure-DSP module + offline harness tests (§4 assertions)
+ 4. Param layer (nih-plug params + smoothers; ranges from spec, else defaults §1.5)
+ 5. GUI (suite-core theme; DONE when every param is on screen, theme applied,
+    opens under the validator editor test — no aesthetic iteration beyond theme)
+ 6. ≥5 factory presets (DONE when each loads, differs from default in ≥3 params,
+    and its render passes universal assertions; character is my judgment, never ask)
+ 7. Build gate: powershell -ExecutionPolicy Bypass -File build.ps1 <crate>
+    → release build → bundle .clap + .vst3 → clap-validator on .clap →
+    pluginval --strictness-level 8 --skip-gui-tests --timeout-ms 120000 on .vst3
+    → install .clap to user CLAP dir (+ .vst3 to junction if present)
+ 8. Render tests write renders/<plugin>/*.wav via the offline harness (cargo test)
+    — these are the artifacts the user auditions later. (nih-plug's standalone
+    target is realtime-only; it is NOT used for rendering.)
+ 9. Docs: README table row + docs/<plugin>.md param reference
+10. Tick checklist + STATUS.md LOG line, then ONE atomic commit, push
+11. Next item. Never two plugins in flight.
+```
+
+### 1.5 Failure valves (mechanical — replaces all wall-clock rules)
+
+- A **fix attempt** = one edit-build-test cycle targeting one error. Increment
+  ATTEMPTS in STATUS.md before each cycle.
+- ATTEMPTS on one step reaches **5**, or the same error signature survives **3**
+  consecutive attempts → descope that feature (DEFERRED.md entry), reset ATTEMPTS,
+  continue. If the whole plugin is the feature → ship a reduced-param stub that
+  passes the validators, mark `[x]*` (shipped-degraded) in §7, move on.
+- pluginval fails on a framework quirk after 3 attempts → drop to strictness 5,
+  record the exact failing check in DEFERRED.md, continue. Below 5 = not done;
+  descope features until 5 passes.
+- Param range defaults when spec is silent: freq 20–20k log; gain ±24 dB;
+  times log-scaled; mix 0–100%. Decide and move on.
+- If a crate hard-requires MSVC on windows-gnu after 3 distinct fix attempts:
+  drop the crate/feature, DEFERRED.md, note NEEDS-ELEVATION in CHECKPOINTS.md,
+  continue. There is NO winget/VS-installer fallback (it requires UAC elevation
+  that cannot be granted unattended).
+
+### 1.6 Recovery protocol (mechanical, no judgment)
+
+- **Session start, dirty tree:** never stash/reset. `git add -A && git commit -m
+  "wip(<CURRENT>): crash checkpoint at step <STEP>"`. Then re-run the current step's
+  verification (build/tests); trust test results over STATUS.md if they disagree,
+  and correct STATUS.md.
+- **Push fails:** retry once; then PUSH-PENDING in STATUS.md, continue, retry each
+  iteration start. Never block on push.
+- **Remote diverged:** `git pull --rebase`; on conflict keep LOCAL for `plugins/**`
+  and `suite-core/**` (I am sole code author), keep REMOTE for PRD/WORK_ORDER
+  (user may edit intent); rebuild + retest before continuing. `--force-with-lease`
+  only; never `git reset --hard`.
+- **Fresh session entry point:** repo CLAUDE.md mandates: read STATUS.md → read this
+  §1 + the CURRENT plugin's spec → `git status` + `git log -5` → reconcile → resume.
 
 ## 2. Repo & infrastructure
 
+**Repo location: `C:\dev\qeynos-vst-suite`** — Phase 0 clones it there from the
+remote. The OneDrive copy is retired (OneDrive corrupts `.git` under sync contention
+and risks MAX_PATH with cargo's deep paths; building inside a sync root is a known
+hazard). Remote: **https://github.com/Jtorr3/fl** (gh CLI authed).
+
 ```
-qeynos-vst-suite/            (git repo, GitHub: private)
-├── PRD.md  WORK_ORDER.md  README.md  CHANGELOG.md
-├── Cargo.toml               (workspace)
-├── build.ps1                (build → bundle → pluginval → install one crate or --all)
-├── suite-core/              (shared lib crate)
-│   ├── dsp/        filters (TPT SVF, biquad, LR4 crossover), delay lines, env followers,
-│   │               waveshaper bank, oversampling (2x/4x halfband), STFT engine (realfft,
-│   │               OLA, Hann), pitch detector (MPM), grain engine, FDN reverb core,
-│   │               LFO/noise, LUFS meter (K-weighting), limiter core
-│   ├── ui/         egui theme (minimal-dark), knob/slider/xy-pad/factor-band widgets,
-│   │               spectrum + meter displays
-│   ├── bus/        shared-state layer (see §3)
-│   └── presets/    preset save/load (serde JSON) + embed macro
-├── plugins/
-│   ├── _template/  hello-gain reference crate (copied for each new plugin)
-│   └── <one crate per plugin>
-├── tools/                    (Phase 4, Python — uv-managed)
-├── pyscripts/                 (Phase 4, FL piano roll scripts)
-├── renders/                   (test WAVs, gitignored)
-└── docs/                      (per-plugin param references, DEFERRED.md)
+qeynos-vst-suite/
+├── CLAUDE.md  PRD.md  WORK_ORDER.md  README.md  STATUS.md  CHECKPOINTS.md
+├── .claude/settings.json     (permission allowlist for unattended runs)
+├── Cargo.toml  build.ps1
+├── suite-core/   dsp/ ui/ bus/ presets/ testsig/   (see §3, §4)
+├── plugins/_template/ + one crate per plugin
+├── tools/        (Phase 4 Python; tools/bin/ for pluginval, clap-validator, cmake — gitignored)
+├── pyscripts/    docs/    renders/ (gitignored)
 ```
 
-- **Toolchain:** rustup, `stable-x86_64-pc-windows-gnu` (no admin). If any crate
-  hard-requires MSVC, fall back: `winget install Microsoft.VisualStudio.2022.BuildTools`
-  (needs elevation — pause and tell user).
-- **nih-plug** pinned to a git rev in workspace Cargo.toml. VST3 export only
-  (FL Studio has no CLAP). GPLv3 applies to VST3 export — fine, personal project.
-- **pluginval:** download Windows binary into `tools/bin/`, run headless in build.ps1.
-- **Install dir:** `%USERPROFILE%\Documents\VST3` — user adds it once in FL:
-  Options → File Settings → VST plugin extra search folder.
-- **GitHub:** `gh repo create qeynos-vst-suite --private`, push after every plugin.
-  (gh is authed as Jtorr3.)
-- **Python tooling (Phase 4):** install `uv`; each tool gets inline script deps
-  (PEP 723) so nothing needs a venv ritual.
+**Phase 0 bootstrap — exact non-interactive commands, in order:**
+1. `git clone https://github.com/Jtorr3/fl.git C:\dev\qeynos-vst-suite`
+   then in it: `git config user.name "Jtorr3"`, `git config user.email
+   "jason@qeynosholdings.com"`, `git config core.longpaths true`, `gh auth setup-git`
+   (routes git pushes through the gh token — no credential-manager popup).
+2. `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned -Force` (no admin needed).
+3. Rust, fully silent, no MSVC prompt branch:
+   `Invoke-WebRequest https://win.rustup.rs/x86_64 -OutFile $env:TEMP\rustup-init.exe`
+   `& $env:TEMP\rustup-init.exe -y --default-host x86_64-pc-windows-gnu --default-toolchain stable --profile minimal`
+4. **PATH is not refreshed in running shells**: every subsequent command uses
+   `& "$env:USERPROFILE\.cargo\bin\cargo.exe"` or build.ps1, whose first line is
+   `$env:Path = "$env:USERPROFILE\.cargo\bin;$env:Path"`. Same for uv later
+   (`%USERPROFILE%\.local\bin`).
+5. Set user env `CARGO_TARGET_DIR=C:\qvs-target` (shared target dir, off OneDrive,
+   short path).
+6. Validators into `tools/bin/`:
+   `gh release download -R Tracktion/pluginval -p "*Windows*"` → `Expand-Archive` →
+   `Unblock-File`; same for `robbert-vdh/clap-validator` (Windows binary).
+   Unblock-File strips Mark-of-the-Web on every downloaded exe.
+7. Preflight checks (report + adapt, never prompt): Smart App Control state (if ON,
+   unsigned validators/plugins may be silently blocked — write CHECKPOINTS.md entry
+   and attempt anyway); confirm `_template` build artifact survives a Defender scan
+   (mingw binaries are a false-positive class): build, wait, re-hash the file.
+8. Portable CMake (plan B for WIRE, harmless to have): cmake.org windows zip →
+   `Expand-Archive` into tools/bin/cmake. No installer, no admin.
+9. nih-plug pinned to a git rev in workspace Cargo.toml. Exports: `nih_export_clap!`
+   + `nih_export_vst3!` for every plugin. `cargo xtask bundle` produces both.
+10. Build `_template` (hello-gain) end-to-end through the §1.4 step-7 gate.
+    **GO/NO-GO GATE:** if windows-gnu cannot produce a passing .clap here, STOP and
+    write BLOCKED.md — do not attempt elevation-based fallbacks. This is the single
+    riskiest unknown (nih-plug is CI-tested on MSVC, not gnu) and it is resolved in
+    hour one, not at plugin 7.
 
----
+**Install targets (per build):**
+- CLAP → `%LOCALAPPDATA%\Programs\Common\CLAP\Qeynos\` (per-user, no admin, FL scans it).
+- VST3 → `C:\Program Files\Common Files\VST3\Qeynos\` ONLY if that junction/folder
+  exists and is writable (one-time optional human admin step, listed in
+  CHECKPOINTS.md); otherwise skip silently.
+- Any path involving Documents resolves via
+  `[Environment]::GetFolderPath('MyDocuments')` (Documents is OneDrive-redirected
+  on this machine; never hardcode `%USERPROFILE%\Documents`).
+
+**Human checkpoint ledger (`CHECKPOINTS.md`):** everything only a human can do lands
+here and the loop continues past it: FL "Manage plugins → find more" rescan after new
+installs; listening to renders/; optional admin VST3 junction
+(`mklink /J "C:\Program Files\Common Files\VST3\Qeynos" "C:\dev\qeynos-vst-suite\dist\vst3"`);
+optional MSVC Build Tools install; in-FL GUI/DPI spot-check (nih_plug_egui needs
+OpenGL; FL has known plugin-DPI quirks — validator editor tests don't catch a black
+window). GUI verification in FL is ALWAYS a checkpoint entry, never a loop step.
+
+**Unattended permissions:** `.claude/settings.json` in the repo allowlists cargo /
+rustup / git / gh / powershell build+download commands. The loop should be launched
+in bypass-permissions mode regardless; the allowlist is defense-in-depth.
+
+**suite-core API rule:** any public-API or wrapper change ⇒ `cargo build --workspace
+--release` + re-run build.ps1 gate (validate + install) for EVERY completed plugin
+before ticking the current item. NERVE and X-RAY explicitly include a
+"retrofit + rebuild-all + revalidate-all" step. `build.ps1 --all` exists from Phase 0.
 
 ## 3. Cross-plugin architecture — "the Bus"
 
-Three plugins need instances to talk to each other: OVERSEER (Master ⇄ Nodes),
-NERVE (mod sources → any plugin), X-RAY (all plugins → one analyzer).
+(unchanged in design; constraints verified)
+- Tier 1 (same-DLL): OVERSEER Node + Master exported from ONE library —
+  `nih_export_vst3!`/`nih_export_clap!` accept multiple plugin types (verified in
+  nih-plug source; CHANGELOG 2023-09-03). Shared `static BUS: Mutex<Registry>`.
+  Caveat documented in README: FL loads same-bitness plugins in-process by default,
+  but a user-ticked "Make bridged" degrades tier 1 → tier 2 is the fallback.
+- Tier 2 (cross-DLL/cross-process): file-backed shared memory via `memmap2`
+  (`MmapRaw` over a fixed-size file in `%TEMP%\qeynos-bus`; canonical Windows
+  cross-process mechanism — no named kernel mapping needed). Fixed-layout slots,
+  per-slot seqlock, atomics only, heartbeat = block counter, GC dead slots on init.
+  File is created at fixed size before mapping and never grown live.
+- Block-granularity only (~1–10 ms); Master-written overrides bypass host
+  automation/undo — Node GUI badges them; local touch steals back.
 
-**Problem:** Rust `static`s are per-DLL. Two different .vst3 files never share memory
-even in the same process, and FL can bridge plugins out of process entirely.
+**Suite-wide conventions:** smoothed params; 2–4x oversampling on nonlinear stages;
+latency reported for FFT/lookahead plugins; DC blocker + soft-clip guard on feedback
+paths; crossfaded bypass; 44.1–192k.
 
-**Design (two tiers):**
-1. **Same-DLL tier** — OVERSEER Node + Master are exported from *one* library
-   (`nih_export_vst3!(Node, Master)` — one .vst3, two plugin classes). They share a
-   `static BUS: Mutex<Registry>` directly. Fast path, zero IPC.
-2. **Cross-DLL tier** — named shared memory (`memmap2` over a file in `%TEMP%\qeynos-bus`,
-   fixed-layout slabs). Every suite plugin maps it on init and claims an instance slot:
-   `{ instance_id, plugin_kind, user_label, 32-band spectrum, peak/RMS/LUFS-M,
-   8 mod-signal floats, param-override area, heartbeat_counter }`.
-   Writers bump a per-slot seqlock; readers retry on odd counters. Heartbeat timestamps
-   (block counter, not wall clock) let readers GC dead slots. No locks held across
-   the audio callback; all fixed-size, no allocation in process().
+## 4. Offline verification harness (Phase 0 deliverable, in suite-core)
 
-**Honest constraints, documented in READMEs:**
-- Bus signals have block-size granularity (~1–10 ms) — fine for meters/ducking/mod,
-  not sample-accurate sync.
-- Master-written param overrides bypass host automation/undo (they write the Node's
-  own param space through the bus, Node applies at block start). Overrides are
-  visually flagged in the Node GUI.
+`suite-core/testsig` — generated-in-code signals ONLY (no external audio files,
+ever): impulse; 1 kHz sine; 20 Hz–20 kHz log chirp; white/pink noise bursts;
+synthetic kick (IMPACT's own math); **synthetic vocal** = sawtooth + 5 Hz vibrato
+through 3 formant band-passes; sliding-pitch saw (808 stand-in); MIDI event script
+type (timestamped note on/off); fake-transport struct (tempo, playhead, bar pos)
+for ASCEND/CLEAVE/HALT.
 
-**Suite-wide conventions (apply to every plugin, don't repeat below):**
-- All GUI-visible params smoothed (nih-plug smoothers, ~10–50 ms) — no zipper noise.
-- Any nonlinear stage runs 2–4x oversampled (halfband polyphase from suite-core).
-- Any FFT/lookahead plugin reports latency via nih-plug's latency API.
-- DC blocker + output soft-clip guard on every feedback plugin.
-- Bypass = crossfaded, click-free. Sample rates 44.1–192k supported.
+`render_offline(dsp, input, midi, transport) -> Vec<f32>` runs the pure-DSP module
+block-by-block inside `cargo test` and writes `renders/<plugin>/*.wav` via `hound`.
 
----
+**Universal assertions (every plugin, every render):** no NaN/inf; peak ≤ 0 dBFS;
+RMS > −60 dBFS (non-silence); mix=0 nulls against dry < −80 dB.
 
-## 4. Plugin technical specs
+**Per-plugin mechanical assertions (the "done" bar — no listening required):**
 
-### Phase 0 — `_template` (hello-gain)
-Proves: workspace builds, egui window opens, param automates in FL, pluginval passes,
-build.ps1 end-to-end. One gain knob + meter. **This is the pipeline test, keep it forever.**
+| Plugin | Assert |
+|---|---|
+| GRIT | THD higher during SC pulses than between; auto-gain holds post-RMS within ±1 dB of pre |
+| EMBER | noise burst→silence @ τ=10 s: tail at +2 s > −40 dBFS, frame-RMS monotone ↓ (±1 dB); freeze: tail RMS flat ±1 dB over 5 s |
+| IMPACT | STFT f0 starts within 10% of f_start, ends within 5% of f_end; retrigger mid-decay: no step > declick threshold |
+| TRACER | sliding saw: band-1 centroid tracks f0 ±1 semitone; white noise: crossovers frozen over 1 s |
+| OVERSEER | +6 dBFS sine: limiter output ≤ ceiling +0.1 dB; LUFS meter ±0.5 LU vs known reference signal |
+| DRIFT | dominant spectral peak strictly advances and wraps; spectra at t, t+period/N correlate |
+| WIRE | 6 kbps output correlates with input less than 128 kbps output does; measured latency == reported ±1 block |
+| OUROBOROS | 110% feedback, 30 s: peak ≤ 0 dBFS, no NaN, last-5 s RMS stable |
+| SWARM | onset count scales monotonically with density at 3 settings |
+| SMUDGE | all amounts 0: null < −60 dB; scramble > 0: frame correlation vs dry < 0.9 |
+| MURMUR | two impulses 2 s apart: tail cross-correlation < 0.9; RT60 within ±25% of setting |
+| FLYBY | sine input: periodic f0 deviation present; L/R RMS ratio crosses 1.0 each traversal |
+| CLEAVE | 120 BPM grid: output onsets on grid ±5 ms |
+| PLUCK | C-major trigger: spectral peaks at chord fundamentals ±10 cents; tail decays > 20 dB over decay setting |
+| SHAPESHIFT | XY at corner A nulls against shaper A alone < −60 dB |
+| CHAMBER | first reflection = direct r/c ±1 sample; late RT60 ±25% of Sabine prediction |
+| CARVE | gain reduction present only in SC-active bands |
+| NERVE | published mod signal measurably modulates a listening plugin's param (round-trip test) |
+| HALT | tape-stop: f0 glides to < 50 Hz; stutter: loop period == division ±1 ms |
+| BANDAID | per-band transient peak ratio moves with attack gain |
+| PATINA | wow: f0 modulation at ~0.4 Hz measurable; noise keyed: noise floor rises with input env |
+| X-RAY | reads ≥2 live slots' spectra from the bus in a two-instance test |
+| CHORALE | resonator peaks at tuned pitches ±10 cents |
+| UNDERTOW | rumble envelope dips ≥ duck-depth at each kick onset |
+| SEANCE | +12 st shift doubles f0 ±20 cents; chop gate periods match pattern |
+| ASCEND | spectral centroid rises monotonically over countdown; impact lands on target bar ±5 ms |
 
----
+CHAMBER CPU rule: bench mean process() per 512-sample block @48 kHz in release mode;
+> 30% of real-time budget → descope reflection order 3→2; still over → order 1 +
+bigger late field.
 
-### 1. GRIT — sidechained distortion
-```
-main in ─ trim ─ pre-filter(SVF HP/LP) ─┐
-                                        ├─ DISTORTION CORE ─ post-filter ─ auto-gain ─ mix ─ out
-sidechain in ─ SC filter ─ env follower ┘        ▲
-              (focus band)  (att/rel)            └ mode selects how SC drives the core
-```
-- **Mode A: Env→Drive.** drive_dB(t) = base + depth × env(t)^curve. Oversampled 4x.
-- **Mode B: Waveshape-by-SC.** dynamic bias/fold: y = shape(x + bias·sc(t)) with
-  shape from suite bank (tube/tape/fold/hard). Ring-mod-into-waveshaper territory.
-- **Mode C: Spectral.** STFT both signals; per-bin drive ∝ smoothed SC bin magnitude
-  (so main distorts only where SC has energy). Reports FFT latency.
-- Auto-gain: match post RMS to pre RMS over 300 ms window, ±12 dB clamp.
-- Params: mode, drive, depth, curve, attack, release, SC focus (freq+width), SC listen,
-  shape select, pre/post filter, mix, out. Presets: kick-driven bass grit, vocal spectral
-  crush, pad ring-fold, drum bus pump-drive, techno rumble driver.
-- **Risk:** none serious — this is deliberately the plumbing-prover.
+## 5. Plugin technical specs
 
-### 2. EMBER — spectral fader / temporal smoother (Fletcher-style)
-```
-in ─ STFT(2048, hop 512, Hann) ─ per-bin state machine ─ fitting ─ iSTFT/OLA ─ mix ─ out
-                                      ▲
-              factor-band curves: attack(f), decay(f)  (log-freq spline, UI-editable)
-```
-- Per bin k: `state[k] += coef(in>state ? atk(f_k) : dec(f_k)) × (in_mag[k] − state[k])`
-  Coefs from ms values via `1 − exp(−hopTime/τ)`. Decay τ up to 60 s ⇒ blooms/fades
-  continue after input stops.
-- **Phase strategy:** while input is active (bin mag above gate) use input phase;
-  when generating tail, advance phase by bin frequency (phase-vocoder integration)
-  so tails stay tonal, not metallic.
-- **Fitting:** compute spectral envelope (moving average over ~1/3 oct of bins); blend
-  each bin toward envelope ⇒ levels out spectral outliers (Fletcher's "fitting").
-- Freeze = force attack+decay τ→∞. Reports 2048-sample latency.
-- Params: factor bands (2 spline curves), fitting, freeze, gate, tail gain, mix.
-- **Risk (highest in Phase 1):** phase handling quality. Fallback: magnitude-only with
-  random phase + heavy OLA works acceptably for pads/ambience — descope path exists.
+*(Signal flows, parameters, and DSP designs are unchanged from v1 except where noted —
+see git history for v1. Amendments from adversarial review:)*
 
-### 3. IMPACT — kick synth (MIDI instrument)
-```
-note-on ─ pitch env(f_start→f_end, curve) ─ sine/tri osc ─┐
-        ─ click layer: noise burst → BP/HP + transient PCM ├─ mix ─ drive ─ amp env ─ clip ─ out
-        ─ sub osc (f_end × ratio)                          ┘
-```
-- Mono voice, phase-continuous retrigger + 1.5 ms declick ramp. Pitch env exponential:
-  `f(t) = f_end + (f_start−f_end)·e^(−t/τ_p)` with curve morphing τ shape.
-- Length macro scales amp-env decay + pitch τ together (one-knob short↔rumble).
-- Key-track toggle: MIDI note sets f_end (A1 = 55 Hz etc.), so kicks sit in key.
-- Click layer: white noise → SVF (BP 1–8 kHz) with own 5–50 ms decay + 3 baked PCM
-  transients (generated offline, embedded). Saturation pre-amp-env so drive shapes body.
-- Presets: 808 long, techno rumble kick, psy snap, house punch, hardstyle distorted.
+- **_template**: gains the §4 harness + testsig as part of its deliverable. Its gate
+  is the Phase 0 GO/NO-GO (§2 step 10).
+- **GRIT / EMBER / IMPACT / TRACER / OVERSEER / DRIFT / OUROBOROS / SWARM / SMUDGE /
+  MURMUR / FLYBY / CLEAVE / PLUCK / SHAPESHIFT / CHAMBER / CARVE / NERVE / HALT /
+  BANDAID / PATINA / X-RAY / CHORALE / UNDERTOW / SEANCE / ASCEND**: as specced in v1
+  (flow diagrams preserved below in §6), with these deltas:
+  - **EMBER fallback rule:** take the magnitude-only fallback iff the phase-vocoder
+    tail assertion fails after 5 attempts; the fallback's bar is the universal
+    assertions only.
+  - **TRACER done gate:** synthetic sliding-saw + synthetic-vocal testsig (no
+    external stems exist).
+  - **WIRE codec plan (rewritten):** plan A = `opus_rs` (pure-Rust encoder+decoder,
+    v0.1.x, published 2026-06; no C, no CMake). Plan B = `audiopus` built with the
+    portable CMake zip from tools/bin (audiopus_sys requires CMake on Windows).
+    Plan C (valve) = descope Opus; ship WIRE as bitcrush/SR-reduce/"crunch" only.
+    Note: `opus-embedded` is decoder-only — NOT an option. Before writing WIRE DSP,
+    build a 10-line encode/decode link-test; 3 failed attempts per plan → next plan.
+  - **OVERSEER:** Node+Master one-library export verified feasible. Ozone hosting
+    remains DEFERRED.md.
+  - **NERVE / X-RAY:** each begins with "retrofit suite-core wrapper → rebuild-all →
+    revalidate-all → reinstall-all" as an explicit checklist step (§2 API rule).
+- nih-plug capabilities verified: aux sidechain inputs (`AudioIOLayout.aux_input_ports`),
+  full MIDI, `set_latency_samples`, multi-plugin export, xtask bundling. Stable Rust
+  OK without `simd` feature. Framework is in maintenance mode — pin the rev, expect
+  no upstream fixes.
 
-### 4. TRACER — pitch-tracking multiband saturation
-```
-in ─┬─ mono sum → decimate to ~12 kHz → MPM pitch det (1024) → confidence gate
-    │            → median(5) → hysteresis (±35 cents) → slew (Hz/ms) → f0
-    └─ LR4 crossover tree (cutoffs = harmonic multiples of f0, coef-interp @ control rate)
-         band1..4: [drive → shaper(bank) → 2x OS → mix/level] → sum → out
-```
-- **Smart Frequency knob:** continuous harmonic-space position; crossover center =
-  f0 × 2^(knob). Detents at fundamental/2nd/3rd/"body"(×4–6)/"presence"(×8–12).
-  Each crossover independently pitch-locked or fixed-Hz.
-- Confidence < 0.6 ⇒ crossovers freeze at last-confident values (graceful fixed-band
-  fallback for polyphonic input). MIDI mode replaces detector with incoming notes.
-- **Constant-color drive:** per-band drive scaled by inverse equal-loudness weight at
-  band center (approx ISO 226 curve baked as lookup) — perceived grit stays even as
-  notes move.
-- Time-varying LR4: recompute coefs per 32-sample control block, linear-interp states;
-  crossfade filter pairs if instability detected (guard).
-- **Risk:** detector jitter on real material — mitigations above; test with sliding 808
-  render + vocal stem before calling done.
+## 6. Signal-flow specs
 
-### 5. OVERSEER — mastering system (one .vst3, two plugins)
-```
-NODE (per track):  in → meter → 4-band EQ → comp → sat → M/S width → trim → meter → out
-                                └── slot in same-DLL BUS: meters, params, override area
-MASTER (master bus): own chain: EQ → 3-band comp (LR4) → lookahead limiter → LUFS meter
-                     GUI: grid of all live Nodes (name, meters, strip controls)
-                     writes param overrides into Node slots via BUS
-```
-- Node chain DSP all from suite-core: biquad EQ (LS/2×bell/HS), feed-forward comp
-  (RMS det, soft knee), tanh sat, M/S width, LUFS-M meter.
-- Master limiter: 2 ms lookahead, smoothed gain envelope, true-peak-ish (4x OS meter),
-  reports latency. Integrated LUFS with reset.
-- Node GUI shows an "override" badge when Master holds a param; local touch steals back.
-- Naming: instance label param (user types "KICK") — VST3 can't read FL's track name.
-- **Stretch (explicitly deferred):** hosting Ozone inside = full VST3 host; revisit only
-  if suite completes early. DEFERRED.md gets the design sketch.
+The complete per-plugin signal flows, parameter lists, presets, and DSP algorithm
+choices live in **SPECS.md** (v1 content preserved with v2 amendments applied).
+Read the relevant SPECS.md section at step 1 of every iteration.
 
----
+## 7. Canonical checklist (order = value-if-interrupted + dependencies; names are IDs)
 
-### Phase 2 — Lese clones
+Phase 0
+- [ ] BOOTSTRAP (toolchain, workspace, harness+testsig, validators, _template GO/NO-GO)
 
-### 6. DRIFT — infinity filter (Sweep)
-Shepard-tone filter illusion: N=6 peak filters spaced one octave apart on log-freq axis,
-all gliding up (or down) at Rate; each wraps at range edge; per-filter gain follows a
-raised-cosine window over log-freq so filters fade in at bottom, out at top ⇒ endless
-rise. Params: rate (Hz/BPM sync), direction, resonance, range lo/hi, peaks count,
-stereo phase offset, mix. Cheap, pure biquads. **First Phase 2 plugin on purpose.**
+Phase 1 — priority plugins
+- [ ] GRIT   - [ ] EMBER   - [ ] IMPACT   - [ ] TRACER   - [ ] OVERSEER
 
-### 7. WIRE — codec degradation (Codec)
-```
-in ─ resample 48k ─ [crunch: bit/SR reduce] ─ Opus encode → (loss sim: drop/PLC) → decode ─ regen loop ─ out
-```
-- `audiopus` (libopus bindings). Frame 20 ms ⇒ latency reported (~40 ms w/ buffer).
-- Params: bitrate 6–128 kbps, packet loss %, bandwidth (NB/MB/WB/SWB/FB), voice/music
-  mode (LPC vs MDCT character), FEC on/off, crunch, regen (delay + re-encode feedback
-  = generation loss), width. Codec runs in audio thread (opus is realtime-safe at these
-  sizes); if not, ring-buffer worker thread pattern is the fallback.
-- **Risk:** audiopus build on windows-gnu — if libopus won't link, vendor `libopus-sys`
-  with cmake-less build or use pure-Rust `opus-embedded`. Test in first hour.
+Quick wins (non-Rust, immediately usable)
+- [ ] W8-VITALGEN   - [ ] W4-SESSION-BOOTSTRAP
+**HARD CHECKPOINT**
 
-### 8. OUROBOROS — recursive processor (Recurse)
-```
-in ─ + ─ delay(1 ms–2 s, sync) ─ [slot A ─ slot B ─ slot C] ─ limiter ─ DC block ─┬─ out
-     ▲                                                                            │
-     └───────────────────────────── × feedback (0–110%) ─────────────────────────┘
-```
-Slots choose from: pitch shift (granular ±12 st), SVF filter, freq shifter (Hilbert pair),
-saturator, reverse chunk, bit crush. Drag-to-reorder. Freeze = feedback 100% + input mute.
-In-loop limiter keeps 110% feedback usable. Params: per-slot amount, delay, feedback,
-decay-scale, freeze, mix.
+Phase 2a — clones
+- [ ] DRIFT - [ ] WIRE - [ ] OUROBOROS - [ ] SWARM - [ ] SMUDGE - [ ] MURMUR
 
-### 9. SWARM — mass granulator (Glow)
-Circular capture buffer 10 s. Scheduler: density 1–500 grains/s (poisson or grid-sync);
-per-grain randomized: position spray, pitch scatter (free or semitone-quantized),
-size 10–500 ms, Tukey envelope, pan, reverse probability. Sum → optional +12 st shimmer
-feedback send back into buffer. Freeze locks write head. Voice cap 128 grains,
-steal oldest. Params: density, size, spray, scatter, quantize, reverse %, shimmer,
-freeze, width, mix.
+Taste-tailored (deps satisfied: IMPACT, MURMUR-FDN, EMBER/SMUDGE engines)
+- [ ] UNDERTOW - [ ] SEANCE - [ ] ASCEND
+- [ ] W1-RUMBLE-BASSLINE - [ ] W2-BREAK-CHOP - [ ] W3-DARK-PROGRESSION
+**HARD CHECKPOINT**
 
-### 10. SMUDGE — spectral chaos (Smear)
-STFT 2048. Per-frame ops, each with amount knob: **scramble** (permute bins within
-neighborhoods of ±N bins), **spectral delay** (per-1/3-oct-band delay on bin frames w/
-feedback), **blur** (temporal magnitude averaging, τ per band), **smear/stretch**
-(bin index remap ×0.5–2). Chaos macro randomizes op parameters via slow S&H. Phase:
-keep input phase for scramble/delay; blur uses vocoder phase advance (EMBER's engine
-reused). Latency reported.
+Phase 2b — remaining clones
+- [ ] FLYBY - [ ] CLEAVE - [ ] PLUCK - [ ] SHAPESHIFT - [ ] CHAMBER
+**HARD CHECKPOINT**
 
-### 11. MURMUR — stochastic reverb (Hikari)
-FDN 8×8 (Householder matrix) from suite-core, but **re-randomized per onset**: onset
-detector (spectral flux) triggers new random draw of delay lengths (within size range),
-diffusion allpass coefs, per-line damping color ⇒ every hit gets a different room.
-Crossfade old/new FDN state over 50 ms to avoid clicks (two FDN instances, ping-pong).
-Params: size, decay, color (damping tilt), randomness amount, onset sensitivity,
-manual re-roll button, freeze, mix.
+Phase 3 — remainder
+- [ ] CARVE - [ ] NERVE - [ ] HALT - [ ] BANDAID - [ ] PATINA - [ ] X-RAY - [ ] CHORALE
 
-### 12. FLYBY — doppler spatializer (Transfer)
-Path editor: bezier loop on XY pad (listener at origin), traversal synced to BPM or Hz.
-Per block compute source pos → distance r, azimuth θ:
-- Doppler: fractional-delay read `delay = r/c`, interpolated (Catmull-Rom), rate-clamped
-- Distance: gain 1/max(r,r₀), air absorption = one-pole LP with cutoff ∝ 1/r
-- Pan: equal-power from θ + optional micro-ITD (≤0.6 ms L/R offset)
-Params: path (4–8 nodes), speed/sync, size scale, doppler amount, air, width, mix.
+Phase 4 — remaining automations
+- [ ] W5-PROJECT-JANITOR - [ ] W6-SAMPLE-LIBRARIAN - [ ] W7-REFERENCE-GAP
+**FINAL CHECKPOINT**
 
-### 13. CLEAVE — multi slicer (Slice)
-2-bar rolling capture buffer, sliced by transient detect (spectral flux + backtrack)
-or grid (1/8–1/32). Step sequencer 16–64 steps, per step: slice index (or "as-played"),
-gate len, reverse, pitch ±12, roll ×2/3/4, probability, level. Playback = grain-windowed
-slice reads (no clicks). Host-transport locked. Params: slice mode/sensitivity, pattern
-lane editing, swing, mix. Pattern randomizer button w/ density control.
-
-### 14. PLUCK — strummer (Strum)
-Karplus-Strong core: delay line + one-pole damp LP + allpass fine-tune in loop.
-N=6 strings tuned to chord (chord select or MIDI-held notes or key-detect via
-chromagram). Trigger: input onsets or MIDI. **Strum** = staggered excitation across
-strings (5–80 ms stride, up/down/alternate). Exciter = burst of input audio (500 samp
-window) ⇒ input timbre colors the pluck. Small body IR (embedded, 2048-tap conv).
-Params: tuning/chord, damp, decay, strum time/direction, body, velocity→brightness, mix.
-
-### 15. SHAPESHIFT — morphing distortion (Teuri)
-```
-in ─ pre-gain ─ 4x OS ─ [shaper A][B][C][D] ─ bilinear XY blend ─ post LP ─ mix ─ out
-```
-Corners pick any shaper from suite bank (tube, tape, diode, fold, sine-fold, digital
-hard, asym, chebyshev). XY pad automatable + built-in orbit LFO (rate, shape, radius).
-Per-corner pre-gain trim. Output y = Σ wᵢ(x_pos,y_pos)·shaperᵢ(g·x). Reuses GRIT bank —
-mostly a UI + morph-weights project.
-
-### 16. CHAMBER — space simulator (Eigen) *(hardest — last clone)*
-Shoebox image-source model: room W×D×H, source + listener draggable on floor plan.
-Early reflections to order 3 (≈ 60 images): per image → delay r/c, gain (1/r ×
-material absorption^bounces), HF damp one-pole, stereo pan by arrival azimuth.
-Late field: FDN (suite-core) with RT60 derived from Sabine eq (volume, absorption)
-crossfaded in after ER window. Moving source = interpolated delay updates (doppler for
-free, clamped). Params: room dims, materials (4 presets/wall-group), src/listener pos,
-ER/late balance, distance, mix. **Descope path:** cap at order 2 (~25 images) if CPU-heavy.
-
----
-
-### Phase 3 — idea pool
-
-### 17. CARVE — spectral ducker
-STFT main + sidechain (GRIT mode-C plumbing reused). Per 1/3-oct band: gain reduction
-= soft-knee function of SC band energy vs threshold, with attack/release per band-group,
-tilt control (duck lows vs highs harder), max depth. iSTFT. Latency reported.
-Params: amount, threshold, tilt, att/rel, sensitivity curve, listen-Δ, mix.
-
-### 18. NERVE — suite modulation bus
-GUI-only-ish plugin: 4 LFOs (sync/free, 8 shapes), 2 env followers (its own input),
-2 random S&H, 4 macro knobs → publishes 8 float streams to cross-DLL bus (§3).
-Every other suite plugin gets a per-param "listen" menu (source × depth × curve),
-applied at block rate pre-smoother — shipped as suite-core feature, retrofit = one
-line per param. Depends on bus tier 2; build after OVERSEER proves tier 1.
-
-### 19. HALT — performance buffer FX
-4-bar circular buffer. Momentary modes (MIDI-note or param-button triggered, all
-declick-crossfaded 5 ms): **tape stop** (rate ramps 1→0, curve + duration synced),
-**stutter** (loop last 1/4–1/64 with optional decay/pitch step per repeat),
-**reverse** (read backward from trigger point), **half-speed**. Retrigger quantize
-to grid. Params per mode + global quantize, mix.
-
-### 20. BANDAID — multiband transient designer
-LR4 3-band split. Per band: transient detect = fast env (1 ms) − slow env (50 ms);
-positive diff ⇒ attack region, apply attack gain (±12 dB); tail region ⇒ sustain gain.
-Smooth gain application (5 ms). Params: 2 crossover freqs, per-band attack/sustain,
-global output, listen-solo per band.
-
-### 21. PATINA — analog lo-fi character
-```
-in ─ wow/flutter (frac delay ← LFO stack: 0.4 Hz wow + 8 Hz flutter + random walk)
-   ─ saturation ─ head-bump EQ (LS boost 60–120 Hz) ─ azimuth (L/R HF phase skew)
-   ─ dropouts (random gain dips, depth/rate) ─ + noise layer (hiss + hum + crackle,
-     keyed to input env so it breathes) ─ age macro drives all ─ mix ─ out
-```
-Params: wow, flutter, sat, bump, azimuth, dropout, noise type/level/key-amount, age, mix.
-
-### 22. X-RAY — shared analyzer
-Pure bus consumer: renders every live suite instance's published 32-band spectrum as
-colored overlay curves + peak/RMS list; hover to highlight, click to solo-dim others
-(visual only). Needs every plugin publishing spectra — publishing is in suite-core's
-plugin wrapper, so it's free once bus tier 2 lands. Trivial DSP; it's a GUI project.
-
-### 23. CHORALE — resonator bank
-12–24 waveguide resonators (KS loops @ high feedback, damped) tuned to: held MIDI notes,
-selected scale/chord, or chromagram key-detect. Input audio excites all resonators
-(gain per resonator = input band energy at its pitch, so it "sings" sympathetically).
-Params: tuning source, decay, damp, spread (detune cents), stereo alternate, wet solo, mix.
-
-### 24. UNDERTOW — kick-to-rumble generator
-```
-in(kick) ─┬───────────────────────────────────────────┬─ dry ─ + ─ out
-          └ transient strip (env-gated: keep tail) ─ sat ─ FDN reverb (small/dark)
-            ─ LP 90–250 Hz ─ resonant tune peak (key-lockable) ─ ducker (keyed by
-            dry kick env, att 1 ms rel 80–300 ms) ─ rumble gain ┘
-```
-Ducker ensures rumble breathes *around* the kick (the classic rumble-bus trick in one
-insert). Tune control locks the LP resonance/peak to project key note. Params: strip,
-drive, reverb size/decay, LP freq, tune note, duck depth/release, rumble level, width.
-
-### 25. SEANCE — ethereal vocal machine
-```
-in ─ pitch shift (±12 st, formant-preserving: PV + spectral-envelope lift) ─ formant knob
-   ─ chopper (synced gate patterns / random, smooth edges) ─ shimmer verb (FDN with
-     +12 st pitch in feedback path) ─ wash (LP + wow from PATINA core) ─ ducker (keyed
-     to dry) ─ macro layer ─ mix ─ out
-```
-Macros: **Ghost** (pitch+formant+wash), **Drown** (verb size/wet/duck), **Chop**
-(pattern density). Phase-vocoder pitch shift w/ envelope preservation from EMBER/SMUDGE
-engines. Presets: grief pad vox, drowned lead vox, whisper choir, formant ghost.
-
-### 26. ASCEND — tension generator (MIDI/transport instrument)
-Reads host transport: bars-until-target (user sets drop bar or "next 8/16/32 boundary").
-Sources: filtered noise + tonal osc stack (root+5th of set key). Over countdown window:
-filter sweep up, pitch rise (0–24 st), width bloom, volume curve — all from one
-tension envelope with curve control. At target bar: optional impact (embedded PCM) +
-auto-cut. Downlifter mode = reversed envelope after the drop. Params: key, length,
-curve, noise/tone balance, rise amount, impact, sync target.
-
----
-
-## 5. Phase 4 — FL workflow automations (technical notes)
-
-| # | Deliverable | Stack | Design notes |
-|---|---|---|---|
-| W1 | `pyscripts/RumbleBassline.pyscript` | FL `flpianoroll` API | Inputs: key, density, ghost-note velocity range. Emits offbeat/rolling 16th patterns avoiding beat-1 kick collisions; humanize (±vel, ±5 ticks) |
-| W2 | `pyscripts/BreakChop.pyscript` | flpianoroll | Operates on selected slice-notes: permute, roll insert, reverse flags via slice-note properties, probability per step |
-| W3 | `pyscripts/DarkProgression.pyscript` | flpianoroll | Minor/phrygian/harmonic-minor pools, voice-leading rules, hypnotic arp emitter (up/down/rand, octave span), tension presets |
-| W4 | `tools/session_bootstrap.py` | FL MCP server | Template JSON → fl_set_track_name/color, fl_route_channel_to_mixer, tempo, loop mode. Templates: TECHNO, DNB |
-| W5 | `tools/project_janitor.py` | FL MCP | Heuristic naming from channel plugin/sample names; color map by category; report of changes |
-| W6 | `tools/sample_librarian.py` | Python: librosa/soundfile | Watch/scan dir → BPM (onset autocorr) + key (chromagram) → rename `{key}_{bpm}_{name}` + sort folders. Dry-run mode first, never destructive without `--apply` |
-| W7 | `tools/reference_gap.py` | Python: pyloudnorm/numpy | Ref vs mix: LUFS-I, 1/3-oct spectrum diff plot, stereo width by band, kick fundamental detect + tuning suggestion → HTML report |
-| W8 | `tools/vitalgen/` CLI + skill | Python + Claude API | See below |
-
-**W8 — Vital preset generator:**
-1. Extract param schema from Vital source (github.com/mtytel/vital, `.vital` = JSON:
-   `settings` dict of param→float + wavetable/LFO/modulation lists). Build a pydantic
-   schema with real ranges/enums.
-2. Prompt pipeline: sound description + taste profile → Claude (claude-fable-5, tool-use
-   with schema) → JSON → validate → clamp ranges → write to
-   `Documents\Vital\User\<bank>\<name>.vital`.
-3. Iterate mode (`--tweak "darker"`) rereads last preset, asks for a delta.
-   Batch mode (`--bank "grief pads" -n 12`).
-4. Ship as CLI + `.claude/skills/vitalgen/SKILL.md` so it works mid-session.
-5. **Serum 2 = DEFERRED.md** (binary container format, needs RE pass).
-
----
-
-## 6. Build order & progress checklist
-
-Order within phases is dependency-aware: GRIT before TRACER/SHAPESHIFT/CARVE (shaper
-bank, SC plumbing); EMBER before SMUDGE/SEANCE (STFT engine); OVERSEER before
-NERVE/X-RAY (bus tiers); IMPACT before UNDERTOW (kick context); MURMUR's FDN before
-CHAMBER/UNDERTOW/SEANCE reverbs. Phase 4 can interleave if a break from Rust is useful —
-W8 and W4 are the highest-value quick wins.
-
-- [ ] Phase 0: toolchain, workspace, _template, build.ps1, pluginval green
-- [ ] 1 GRIT   - [ ] 2 EMBER   - [ ] 3 IMPACT   - [ ] 4 TRACER   - [ ] 5 OVERSEER
-- [ ] 6 DRIFT  - [ ] 7 WIRE    - [ ] 8 OUROBOROS - [ ] 9 SWARM   - [ ] 10 SMUDGE
-- [ ] 11 MURMUR - [ ] 12 FLYBY - [ ] 13 CLEAVE  - [ ] 14 PLUCK   - [ ] 15 SHAPESHIFT
-- [ ] 16 CHAMBER
-- [ ] 17 CARVE - [ ] 18 NERVE  - [ ] 19 HALT    - [ ] 20 BANDAID - [ ] 21 PATINA
-- [ ] 22 X-RAY - [ ] 23 CHORALE - [ ] 24 UNDERTOW - [ ] 25 SEANCE - [ ] 26 ASCEND
-- [ ] W1 - [ ] W2 - [ ] W3 - [ ] W4 - [ ] W5 - [ ] W6 - [ ] W7 - [ ] W8
+Phase 4 notes: Python via uv (`uv python install 3.12`; PEP 723 headers pin
+`requires-python = ">=3.12,<3.13"` — librosa/numba on 3.14 are bleeding-edge).
+W1–W5 need FL running with the MCP controller: if `fl_connection_status` fails,
+build the tool against recorded fixtures, mark live verification in CHECKPOINTS.md,
+move on. W8 validates generated presets against a preset SAVED BY THE INSTALLED
+Vital (1.5.x) — the OSS repo tracks ~1.0.7; diff both before trusting the schema.
+Verify Vital is installed (and locate its preset dir via known-folder Documents)
+as a W8 preflight.

@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cargo:*)",
+      "Bash(rustup:*)",
+      "Bash(rustc:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(git pull:*)",
+      "Bash(git config:*)",
+      "Bash(git status:*)",
+      "Bash(git log:*)",
+      "Bash(git clone:*)",
+      "Bash(gh auth setup-git:*)",
+      "Bash(gh release download:*)",
+      "Bash(gh repo view:*)",
+      "Bash(uv:*)",
+      "Bash(python:*)",
+      "PowerShell(cargo:*)",
+      "PowerShell(rustup:*)",
+      "PowerShell(Invoke-WebRequest:*)",
+      "PowerShell(Expand-Archive:*)",
+      "PowerShell(Unblock-File:*)",
+      "PowerShell(Set-ExecutionPolicy -Scope CurrentUser:*)",
+      "PowerShell(powershell -ExecutionPolicy Bypass -File build.ps1:*)"
+    ]
+  }
+}
