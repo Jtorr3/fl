@@ -2084,6 +2084,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "tracer"
+version = "0.1.0"
+dependencies = [
+ "nih_plug",
+ "nih_plug_egui",
+ "realfft",
+ "suite-core",
+]
+
+[[package]]
 name = "tracing"
 version = "0.1.44"
 source = "registry+https://github.com/rust-lang/crates.io-index"
