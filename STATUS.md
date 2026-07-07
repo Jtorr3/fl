@@ -1,8 +1,8 @@
 # STATUS
 
-CURRENT: TRACER | STEP: 1 | ATTEMPTS: 0 | LAST-ACTION: start(TRACER) — pitch-tracking multiband saturation; copying grit crate as starting point, adding suite_core::pitch (MPM) + testsig::synth_vocal/sliding_saw
+CURRENT: (none) | STEP: - | ATTEMPTS: 0 | LAST-ACTION: TRACER SHIPPED (full, [x]) — tracer.clap green on clap-validator + pluginval s8 (incl. Fuzz parameters — the LR4-stability stressor), installed. New suite-core APIs: pitch (MPM + PitchTracker), testsig::synth_vocal + sliding_saw. All crates revalidated via build.ps1 -All. No Fable escalation, no descope.
 PUSH-PENDING: no
-DONE: BOOTSTRAP, GRIT, EMBER, IMPACT
+DONE: BOOTSTRAP, GRIT, EMBER, IMPACT, TRACER
 DESCOPED: GRIT Mode C (spectral STFT) → DEFERRED.md
 
 ## LOG (append-only: date | item | outcome | how-to-test-in-FL)
@@ -12,7 +12,27 @@ DESCOPED: GRIT Mode C (spectral STFT) → DEFERRED.md
 2026-07-07 | IMPACT | SHIPPED (full, [x]): kick drum synth (MIDI instrument). Mono last-note-priority voice: exponential pitch env f(t)=f_end+(f_start−f_end)e^(−t/τ_p) with curve morph → phase-continuous sine/tri body; band-passed noise click (SVF BP, own 5–50ms decay) + 3 embedded PCM transients (Tick/Snap/Knock, synthesized offline in build.rs as const arrays, windowed to zero) + sub osc (f_end×ratio); mix → waveshaper-bank drive (Tube/Tape/Fold/Hard, pre-amp-env) → exponential amp env (curve) → soft/hard clip. Length macro scales amp decay + pitch τ together; Key-track sets f_end from MIDI (A1=55Hz). Phase-continuous retrigger + 1.5ms declick ramp on amp env AND click/transient onset. New suite-core API `testsig::synth_kick`/`KickSpec` (IMPACT's own math, replaces the kick stub) — all crates revalidated green via build.ps1 -All (_template, grit, ember, impact). Done-bar met: STFT f0 starts within 10% of f_start & ends within 5% of f_end; mid-decay retrigger stays within declick bound vs no-retrigger. clap-validator 16/0 (was 15/1 — fixed IntParam text_to_value consistency by adding string_to_value to shape/trans), pluginval s8 SUCCESS, CLAP installed. 5 presets, renders in renders/IMPACT/. No Fable escalation, no descope. | FL: Find more plugins → add "Qeynos IMPACT" to a channel, play notes (each fires a kick); load "808 Long"/"House Punch"; enable Key Track to tune from the keyboard; fire rapid repeated notes to hear the declicked retrigger.
 2026-07-07 | EMBER | SHIPPED (full, [x]): spectral fader / temporal smoother. Added alloc-free streaming STFT engine to suite-core (`suite_core::stft`, realfft 3.5) — all crates revalidated green (_template, grit). EMBER: per-bin state machine (coef=1-exp(-T/τ), 8-band log-freq attack/decay curves, decay to 60s), phase-vocoder tails (tonal ring), 1/3-oct fitting envelope, freeze (τ→∞), gate, tail gain, latency-aligned dry/wet. Reports 2048-sample latency. Done-bar met on FIRST attempt (no Fable escalation): τ=10s noise tail +2s > -40 dBFS & frame-RMS monotone↓; freeze tail flat ±1 dB over 5s; mix=0 nulls vs latency-delayed dry < -80 dB. clap-validator PASS, pluginval s8 SUCCESS (44.1/48/96k, blocks 64..1024), CLAP installed. 5 presets, renders in renders/EMBER/. | FL: Find more plugins → add "Qeynos EMBER", load "Bloom Pad" on a pad/vocal (notes bloom & sustain past release); play a sustained note, tick Freeze, stop input → spectrum holds as a drone. Host reports +2048-sample latency (auto delay-comp).
 
+2026-07-07 | TRACER | SHIPPED (full, [x]): pitch-tracking multiband saturation. MPM pitch detector (new `suite_core::pitch`) on a mono-summed, anti-aliased, ~12 kHz-decimated stream (window 1024) → median-5 → ±35-cent hysteresis → Hz/ms slew → (f0, confidence). Time-varying LR4 crossover tree = cascaded 2nd-order Butterworth pairs built on the TPT SVF (stable under per-32-sample-block cutoff modulation), cutoffs = harmonic multiples of f0 (×1.5/×4/×8) × 2^SmartFreq, or per-crossover Fixed Hz; confidence < 0.6 freezes cutoffs; NaN/blow-up guard resets tree + 256-sample crossfade. Per band: drive → suite waveshaper bank → 2x OS → level, summed; optional constant-color drive (inverse ISO-226 11-pt LUT). MIDI mode (MidiConfig::Basic) replaces the detector with note-on f0. Done-bar met on FIRST attempt (no Fable escalation, no LR4 instability): (1) sliding-saw → band-1 centroid tracks f0 within ±1 semitone across the glide; (2) white noise → crossovers frozen (< 0.5 Hz drift over 1 s). Plus a param-fuzz stability test (48 dB drive, hard shaper, degenerate cutoffs → finite, ≤ 0 dBFS). clap-validator PASS, pluginval s8 SUCCESS across 44.1/48/96k blocks 64..1024 incl. Fuzz-parameters, CLAP installed. New suite-core APIs also: testsig::synth_vocal (replaces stub) + sliding_saw; all crates revalidated green via build.ps1 -All. 5 presets, 10 renders in renders/TRACER/. | FL: Find more plugins → add "Qeynos TRACER" on a monophonic pitched source (bass/808/vocal/lead); load "Sliding 808 Grit" and glide a note — the bands follow the pitch. For drums/bus set crossovers to Fixed or load "Fixed-Band Bus Saturator". Pitch Mode = MIDI to key the bands from notes.
+
 ## NOTES
+- New suite-core API (TRACER, 2026-07-07): `pitch` module. `pitch::Mpm::new(window, sr,
+  f0_min, f0_max)` + `analyze(&[f32]) -> PitchResult{ f0_hz, confidence }` — allocation-free
+  McLeod Pitch Method (NSDF type-II ACF, key-maximum peak pick @ k=0.85, parabolic interp;
+  confidence = interpolated NSDF peak height 0..1). `pitch::PitchTracker::new(sample_rate,
+  default_f0)` — streaming sample-in tracker: anti-aliased decimation to ~12 kHz, window
+  1024/hop 256, median-of-5 + ±35-cent hysteresis + Hz/ms slew; `push(x)`, `f0()`,
+  `confidence()`, `set_slew`, `set_confidence_gate`, `set_midi_note(Option<f32>)` (MIDI
+  bypass), `reset()`. `default_f0` is the frozen pitch used before the first confident
+  detect and whenever confidence < gate (0.6) — that freeze is what keeps crossovers still
+  on noise. `pitch::cents(a,b)` helper. PLUCK and CHORALE reuse this (chromagram/MIDI/held
+  tuning). Also new: `testsig::synth_vocal(freq, len, sr)` — saw + 5 Hz vibrato through 3
+  formant band-passes (F1 700 / F2 1220 / F3 2600, /a/-like), peak-normalized to 0.7;
+  REPLACES the old `synth_vocal_stub` (kept, now delegates). SEANCE reuses it.
+  `testsig::sliding_saw(f_start, f_end, amp, len, sr)` (exponential glissando 808 stand-in)
+  + `testsig::sliding_saw_f0(f_start, f_end, n, len)` for exact instantaneous-f0 in tests.
+  TRACER's time-varying LR4 was built on the TPT SVF (unconditionally stable under cutoff
+  modulation) rather than direct-form biquads — both done-bar tests + pluginval Fuzz passed
+  on the FIRST attempt, so the §8 Fable escalation valve was never triggered.
 - New suite-core API (IMPACT, 2026-07-07): `testsig::synth_kick(&KickSpec, len, sr) -> Vec<f32>`
   and `testsig::KickSpec { f_start, f_end, pitch_decay_s, amp_decay_s, click, sub_level,
   sub_ratio, drive }` (Default = 180→55 Hz, ~0.5 s tail, light click). This is IMPACT's own

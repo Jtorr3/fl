@@ -17,6 +17,7 @@ admin junction exists (see `CHECKPOINTS.md`).
 | GRIT | Distortion | Sidechained distortion — envelope- and waveshape-driven saturation, 4x oversampled, auto-gain, dry/wet | [docs/GRIT.md](docs/GRIT.md) |
 | EMBER | Spectral | Spectral fader / temporal smoother — per-bin STFT state machine, 8-band attack/decay curves, phase-vocoder tails, freeze; reports 2048-sample latency | [docs/EMBER.md](docs/EMBER.md) |
 | IMPACT | Instrument | Kick drum synth (MIDI) — exponential pitch/amp envelopes, sine/tri body, band-passed click + 3 embedded PCM transients, sub osc, waveshaper drive; phase-continuous declicked retrigger, key-track, Length macro | [docs/IMPACT.md](docs/IMPACT.md) |
+| TRACER | Distortion | Pitch-tracking multiband saturation — MPM f0 detection locks a time-varying LR4 crossover tree to the note; per-band waveshaper drive (2x OS), Smart Frequency, constant-color, confidence freeze, MIDI mode | [docs/TRACER.md](docs/TRACER.md) |
 
 ## Building
 
