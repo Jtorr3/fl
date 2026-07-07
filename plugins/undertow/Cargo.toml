@@ -1,0 +1,18 @@
+[package]
+name = "undertow"
+version = "0.1.0"
+edition = "2021"
+license = "ISC"
+description = "Qeynos UNDERTOW — kick-to-rumble generator (transient-strip → sat → small/dark FDN → LP → key-lockable resonant tune → kick-keyed ducker; sits on the kick track for hard/melodic techno low-end)"
+
+[lib]
+# `cdylib` for the CLAP/VST3 bundle; `lib` so `cargo test` and the harness can link the DSP.
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+nih_plug = { workspace = true }
+nih_plug_egui = { workspace = true }
+suite-core = { path = "../../suite-core" }
+
+[dev-dependencies]
+suite-core = { path = "../../suite-core" }
