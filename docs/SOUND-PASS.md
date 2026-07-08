@@ -138,3 +138,35 @@ and never triggered on real material), and completed the full 10-item checklist.
   gentle 3.5 k cut the user can decline (it is a SUGGEST/APPLY ghost, not automatic).
 - **Mono pad classification (item 7):** a pad collapsed to mono classifies as VOCAL because stereo
   width is the pad/vocal separator (by design, documented).
+
+### OVERSEER theme-fallback follow-up (2026-07-08, queued from the deep-dive audition)
+
+**Defect (CHECKPOINTS.md, diagnosed read-only during the audition pass):** the Master inferred
+its session theme ONLY from live OVERSEER *Node* reports on the bus. With just the Master on the
+mix bus and NO Nodes on tracks, `infer_theme()` returned `(Generic, 0.0)` immediately
+(`suite-core/src/classify.rs` — `if nodes.is_empty() { return Generic }`), so
+`theme_assist_targets(Generic)` was all-zero and the ASSIST knob + SUGGEST-ONLY button did nothing.
+A user running the Master alone on their mix (the common, discoverable setup) got an inert
+LEARN/ASSIST with no indication why — contradicting the OVERSEER-ENRICH intent that the Master
+"knows what it's managing innately".
+
+**Fix:** when no Node reports are available, the Master now falls back to inferring the theme from
+its OWN mix-bus analysis (the `FeatureSummary` it already computes each block from its input — no
+new per-sample cost). New `suite_core::classify::infer_theme_from_mix(&FeatureSummary, &MixAnalysis)`
+classifies dark-techno / dnb-breaks / ambient / house from the mix's own sub-weight, spectral tilt,
+onset rate, sustain and width plus the transport tempo. Both Master call sites
+(`master.rs::update_assist` block-rate, `lib.rs::master_enrich_ui` editor-rate) route to it only
+when `nodes.is_empty()`; when Nodes ARE present the existing per-instrument `infer_theme` path is
+unchanged (Nodes give better context). Mix-only classification is coarser than Node reports, so it
+is gated on a higher confidence floor (`MIX_FALLBACK_CONF_FLOOR = 0.5` vs `CONF_MARGIN = 0.4`): a
+murky mix stays Generic rather than guess wrong, but a clearly-characterised mix classifies.
+
+**Regression evidence** (`plugins/overseer/src/audit.rs::audit_master_theme_fallback_from_mix` +
+`suite-core` `classify::tests::mix_fallback_*`): a kick+reese mix (no Nodes) infers **DARK-TECHNO @
+1.00**; a break+pad mix at 174 BPM infers **DNB-BREAKS @ 0.60**; the DARK-TECHNO assist targets are
+non-zero; applying ASSIST at 0.3 firms the rendered master low end (−67.19 → −67.00 dB @ 45–90 Hz)
+and rolls the high shelf off (EQ transfer: 12 kHz +0.00 → −0.34 dB, 45 Hz +0.00 → +0.25 dB) —
+measurably toward the DARK-TECHNO reference; a murky/silent mix stays Generic; and the Node-present
+`infer_theme` path is byte-unchanged. `process()` stays alloc-free (the self-analysis summary is
+already computed; inference is block/editor-rate). All deep-dive fixes + null/latency/PDC contracts
+re-verified GREEN (`cargo test -p overseer` 48/48, `--workspace` 0 failures, `build.ps1 -All` 30/30).

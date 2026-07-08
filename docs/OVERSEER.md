@@ -124,6 +124,16 @@ OVERSEER doesn't need to be *told* what a track is — it listens.
 - The Master aggregates the live Nodes' types/features with its own mix analysis (transport
   tempo, spectral tilt, onset density, dynamic range) into a **THEME**: DARK-TECHNO,
   DNB-BREAKS, AMBIENT, HOUSE-GROOVE, or GENERIC (with confidence, shown on the GUI).
+- **Master-alone fallback:** the Master no longer needs Nodes to have an opinion. When there
+  are **no** OVERSEER Node instances reporting on the bus (just the Master on the mix bus —
+  the common setup), it infers the theme from its **own mix-bus analysis** — the sub-weight,
+  spectral tilt, onset rate, sustain and width it already extracts from its input each block,
+  plus the transport tempo (`classify::infer_theme_from_mix`). So dropping a Master on a dark
+  kick-and-reese mix reads **DARK-TECHNO** and the ASSIST knob + SUGGEST moves come alive with
+  no Nodes placed. Placing Nodes **refines** it: whenever any Node reports, the Master switches
+  back to the richer per-instrument `infer_theme` path (Nodes carry per-track context the summed
+  mix can't). Mix-only inference is held to a higher confidence floor than the Node path, so an
+  ambiguous mix stays GENERIC (advisory only) rather than guess wrong.
 - **ASSIST** knob (0 = display only, default **30 %**) scales how far theme-derived targets
   nudge the master EQ tilt, multiband-comp character (glue vs punch) and limiter drive.
   **SUGGEST-ONLY** keeps the theme advisory. Assist is a **bit-exact identity at strength 0**
