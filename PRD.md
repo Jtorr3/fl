@@ -351,7 +351,7 @@ Phase 4 — remaining automations
 
 POLISH phase (user feedback 2026-07-07; PRESET-SYSTEM + OVERSEER-ENRICH pulled
 forward to after HARD CHECKPOINT 2 — see above)
-- [ ] PRESET-EXPANSION (deep factory banks, 15-30 purpose-named presets per plugin)
+- [x] PRESET-EXPANSION (deep factory banks, 15-30 purpose-named presets per plugin)
 - [ ] BUILT-IN-MANUALS (in-GUI usage manual panel per plugin, embedded from docs/)
 - [ ] PEDAL-UI (LOCKED: CONSOLE v2 — pedal + amber CRT terminal; usability guardrails in SPECS override aesthetics)
 **FINAL CHECKPOINT**
