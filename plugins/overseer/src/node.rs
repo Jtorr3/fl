@@ -7,6 +7,7 @@
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
+use suite_core::classify::FeatureExtractor;
 use suite_core::dsp::{DelayLine, OnePole, Oversampler2x};
 use suite_core::loudness::LoudnessMeter;
 
@@ -52,6 +53,8 @@ pub struct NodeMeters {
     pub out_rms: AtomicU32,
     pub lufs_m: AtomicU32,
     pub gr_db: AtomicU32,
+    /// Live sample rate (f32 bits) — published for the GUI's LEARN capture sizing.
+    pub sr: AtomicU32,
 }
 
 impl Default for NodeMeters {
@@ -64,6 +67,7 @@ impl Default for NodeMeters {
             out_rms: AtomicU32::new(ninf),
             lufs_m: AtomicU32::new(ninf),
             gr_db: AtomicU32::new(0.0f32.to_bits()),
+            sr: AtomicU32::new(48_000.0f32.to_bits()),
         }
     }
 }
@@ -117,6 +121,10 @@ pub struct NodeCore {
     lufs: LoudnessMeter,
     slot: Arc<Slot>,
     pub meters: Arc<NodeMeters>,
+    // OVERSEER-ENRICH: rolling audio-feature extractor tapping the Node's own INPUT. Feeds
+    // the bus feature/type publishing + the LEARN capture. Allocation-free at block rate;
+    // never alters the audio.
+    extractor: FeatureExtractor,
     // Dry-path latency compensation for the oversampled saturation stage (keeps partial
     // mix free of comb filtering); reported to the host as latency.
     dry_delay: [DelayLine; 2],
@@ -146,6 +154,7 @@ impl NodeCore {
     pub fn new(fs: f32, slot: Arc<Slot>, meters: Arc<NodeMeters>) -> Self {
         // Empirically-measured saturation-oversampler group delay for exact dry alignment.
         let latency = Oversampler2x::measure_group_delay();
+        store_f32(&meters.sr, fs);
         let sm = || {
             let mut p = OnePole::new();
             p.set_time(SMOOTH_MS, fs);
@@ -159,6 +168,7 @@ impl NodeCore {
             lufs: LoudnessMeter::new_momentary(fs, 2),
             slot,
             meters,
+            extractor: FeatureExtractor::new(fs),
             dry_delay: [DelayLine::new(latency), DelayLine::new(latency)],
             latency,
             sm_drive: sm(),
@@ -197,6 +207,7 @@ impl NodeCore {
             d.reset();
         }
         self.lufs.reset();
+        self.extractor.reset();
         self.primed = false;
     }
 
@@ -279,6 +290,21 @@ impl NodeCore {
     /// Process a stereo block in place. `configure` must have been called for this block.
     pub fn process_block(&mut self, l: &mut [f32], r: &mut [f32]) {
         let n = l.len().min(r.len());
+
+        // OVERSEER-ENRICH: tap the INPUT (before the DSP mutates the buffers) for feature
+        // extraction + LEARN. All lock-free / allocation-free; the audio is untouched.
+        let req = self.slot.take_learn_req();
+        if req > 0 {
+            self.extractor.begin_capture(req);
+        }
+        self.extractor.process_block(&l[..n], &r[..n]);
+        self.slot.set_features(&self.extractor.summary());
+        self.slot.set_capturing(self.extractor.capturing());
+        self.slot.set_capture_prog(self.extractor.capture_progress());
+        if let Some(cap) = self.extractor.take_capture() {
+            self.slot.publish_learn_result(&cap);
+        }
+
         let mut in_peak = 0.0f32;
         let mut in_sq = 0.0f32;
         let mut out_peak = 0.0f32;

@@ -1,6 +1,6 @@
 # STATUS
 
-CURRENT: OVERSEER-ENRICH | STEP: 1 (suite_core: Preset.category + classify module + PresetBar sections) | ATTEMPTS: 0 | START-COMMIT: 0be9168 | LAST-ACTION: starting OVERSEER-ENRICH v2 (auto-classification, theme inference, LEARN buttons, context defaults, thematic type-filtered preset banks). Read PRD §0/§1.4/§1.5/§3, SPECS "OVERSEER-ENRICH — v2" in full, STATUS PRESET-SYSTEM handoff NOTES.
+CURRENT: OVERSEER-ENRICH | STEP: 2 (Node: type param, feature publish to bus, LEARN, context defaults, ghost suggestions) | ATTEMPTS: 0 | START-COMMIT: 0be9168 | LAST-ACTION: STEP 1 DONE (committed) — suite_core classify module (all fixtures green), Preset.category, PresetBar.filter. Now wiring the Node.
 PUSH-PENDING: no
 DONE: BOOTSTRAP, GRIT, EMBER, IMPACT, TRACER, OVERSEER, W8-VITALGEN, W4-SESSION-BOOTSTRAP, HARD-CHECKPOINT-1, DRIFT, WIRE, OUROBOROS, SWARM, SMUDGE, MURMUR, UNDERTOW, SNAP, SEANCE, W9-VOXRIP, VOXKEY, VOXFIT, UI-CORE-FIX, ASCEND, W1-RUMBLE-BASSLINE, W2-BREAK-CHOP, W3-DARK-PROGRESSION, HARD-CHECKPOINT-2, PRESET-SYSTEM
 DESCOPED: GRIT Mode C (spectral STFT) → DEFERRED.md; OVERSEER Ozone hosting + tier-2 bus (by spec/design) → DEFERRED.md; W4 tempo application (no MCP command exists) → DEFERRED.md; WIRE true-per-bandwidth Opus internal-rate + real FEC/PLC (opus-rs 12k/24k paths buggy; PRD §5-sanctioned pre-LP approximation) → DEFERRED.md (NOT an attempt-budget descope; WIRE shipped full)

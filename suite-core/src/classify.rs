@@ -212,6 +212,47 @@ pub struct FeatureSummary {
     pub level_db: f32,
 }
 
+impl FeatureSummary {
+    /// Number of scalar fields (bus-publishing array width).
+    pub const NFIELDS: usize = 12;
+
+    /// Flatten to a fixed array for lock-free publishing over the bus.
+    pub fn to_array(&self) -> [f32; 12] {
+        [
+            self.low_ratio,
+            self.centroid_hz,
+            self.tilt,
+            self.onset_rate,
+            self.crest,
+            self.pitched_ratio,
+            self.pitch_conf,
+            self.pitch_hz,
+            self.sibilance_ratio,
+            self.sustain,
+            self.width,
+            self.level_db,
+        ]
+    }
+
+    /// Inverse of [`FeatureSummary::to_array`].
+    pub fn from_array(a: &[f32; 12]) -> Self {
+        Self {
+            low_ratio: a[0],
+            centroid_hz: a[1],
+            tilt: a[2],
+            onset_rate: a[3],
+            crest: a[4],
+            pitched_ratio: a[5],
+            pitch_conf: a[6],
+            pitch_hz: a[7],
+            sibilance_ratio: a[8],
+            sustain: a[9],
+            width: a[10],
+            level_db: a[11],
+        }
+    }
+}
+
 impl Default for FeatureSummary {
     fn default() -> Self {
         Self {

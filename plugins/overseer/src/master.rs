@@ -5,15 +5,133 @@
 //! dry/wet `mix` nulls cleanly at 0. The Master GUI additionally reads the live Node slots
 //! off the bus and can write overrides into them (handled in `lib.rs`).
 
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 
+use suite_core::classify::{FeatureExtractor, FeatureSummary, SessionTheme};
 use suite_core::dsp::{OnePole, Oversampler4x};
 use suite_core::loudness::LoudnessMeter;
 
 use crate::dynamics::{Limiter, MultibandComp};
+use crate::enrich::AssistTargets;
 use crate::eq::{EqSettings, FourBandEq};
 use crate::node::load_f32;
+
+/// Published-feature array width ([`FeatureSummary::NFIELDS`]).
+const NFEAT: usize = 12;
+
+/// Cross-thread state shared between the Master's audio core and its editor (OVERSEER-ENRICH
+/// theme inference + assist + LEARN). Audio publishes the master mix features + transport
+/// tempo and runs the LEARN capture; the GUI tick infers the theme and publishes the assist
+/// targets that the audio applies. All lock-free atomics.
+pub struct MasterShared {
+    // audio → GUI
+    feat: [AtomicU32; NFEAT],
+    tempo: AtomicU32,
+    sr: AtomicU32,
+    // GUI → audio
+    active_theme: AtomicU32,
+    theme_conf: AtomicU32,
+    assist: [AtomicU32; 4], // eq_tilt, eq_low, comp_character, limiter_drive
+    // LEARN capture (GUI requests, audio runs, GUI polls the generation)
+    learn_req: AtomicU32,
+    learn_gen: AtomicU32,
+    capturing: AtomicBool,
+    capture_prog: AtomicU32,
+}
+
+impl Default for MasterShared {
+    fn default() -> Self {
+        Self {
+            feat: std::array::from_fn(|_| AtomicU32::new(0.0f32.to_bits())),
+            tempo: AtomicU32::new(0.0f32.to_bits()),
+            sr: AtomicU32::new(48_000.0f32.to_bits()),
+            active_theme: AtomicU32::new(SessionTheme::Generic.index()),
+            theme_conf: AtomicU32::new(0.0f32.to_bits()),
+            assist: std::array::from_fn(|_| AtomicU32::new(0.0f32.to_bits())),
+            learn_req: AtomicU32::new(0),
+            learn_gen: AtomicU32::new(0),
+            capturing: AtomicBool::new(false),
+            capture_prog: AtomicU32::new(0.0f32.to_bits()),
+        }
+    }
+}
+
+impl MasterShared {
+    pub fn set_features(&self, f: &FeatureSummary) {
+        let a = f.to_array();
+        for (i, v) in a.iter().enumerate() {
+            store_f32(&self.feat[i], *v);
+        }
+    }
+    pub fn features(&self) -> FeatureSummary {
+        let mut a = [0.0f32; NFEAT];
+        for (i, s) in self.feat.iter().enumerate() {
+            a[i] = load_f32(s);
+        }
+        FeatureSummary::from_array(&a)
+    }
+    pub fn set_tempo(&self, bpm: f32) {
+        store_f32(&self.tempo, bpm);
+    }
+    pub fn tempo(&self) -> f32 {
+        load_f32(&self.tempo)
+    }
+    pub fn set_sr(&self, sr: f32) {
+        store_f32(&self.sr, sr);
+    }
+    pub fn sr(&self) -> f32 {
+        load_f32(&self.sr)
+    }
+    pub fn set_theme(&self, theme: SessionTheme, conf: f32) {
+        self.active_theme.store(theme.index(), Ordering::Relaxed);
+        store_f32(&self.theme_conf, conf);
+    }
+    pub fn theme(&self) -> (SessionTheme, f32) {
+        (
+            SessionTheme::from_index(self.active_theme.load(Ordering::Relaxed)),
+            load_f32(&self.theme_conf),
+        )
+    }
+    pub fn set_assist(&self, t: &AssistTargets) {
+        store_f32(&self.assist[0], t.eq_tilt_db);
+        store_f32(&self.assist[1], t.eq_low_db);
+        store_f32(&self.assist[2], t.comp_character);
+        store_f32(&self.assist[3], t.limiter_drive_db);
+    }
+    pub fn assist_targets(&self) -> AssistTargets {
+        AssistTargets {
+            eq_tilt_db: load_f32(&self.assist[0]),
+            eq_low_db: load_f32(&self.assist[1]),
+            comp_character: load_f32(&self.assist[2]),
+            limiter_drive_db: load_f32(&self.assist[3]),
+        }
+    }
+    pub fn request_learn(&self, n: usize) {
+        self.learn_req.store(n as u32, Ordering::Relaxed);
+    }
+    pub fn take_learn_req(&self) -> usize {
+        self.learn_req.swap(0, Ordering::Relaxed) as usize
+    }
+    pub fn set_capturing(&self, on: bool) {
+        self.capturing.store(on, Ordering::Relaxed);
+    }
+    pub fn capturing(&self) -> bool {
+        self.capturing.load(Ordering::Relaxed)
+    }
+    pub fn set_capture_prog(&self, p: f32) {
+        store_f32(&self.capture_prog, p);
+    }
+    pub fn capture_prog(&self) -> f32 {
+        load_f32(&self.capture_prog)
+    }
+    pub fn bump_learn_gen(&self) {
+        self.learn_gen.fetch_add(1, Ordering::Relaxed);
+    }
+    pub fn learn_gen(&self) -> u32 {
+        self.learn_gen.load(Ordering::Relaxed)
+    }
+}
 
 /// Control sub-block length for block-advanced smoothing of the EQ-gain, band-comp and
 /// ceiling coefficients (mix is smoothed per sample).
@@ -140,6 +258,11 @@ pub struct MasterCore {
     dpos: usize,
     pub meters: Arc<MasterMeters>,
 
+    // OVERSEER-ENRICH: master-bus mix analysis + LEARN capture. Taps the INPUT; never alters
+    // the audio. Publishes features to `shared` for the GUI's theme inference.
+    extractor: FeatureExtractor,
+    shared: Arc<MasterShared>,
+
     // --- Param smoothing (MAJOR 3) --------------------------------------------------
     sm_mix: OnePole,      // per sample
     sm_ceiling: OnePole,  // per CTRL_CHUNK
@@ -154,7 +277,8 @@ pub struct MasterCore {
 }
 
 impl MasterCore {
-    pub fn new(fs: f32, meters: Arc<MasterMeters>) -> Self {
+    pub fn new(fs: f32, meters: Arc<MasterMeters>, shared: Arc<MasterShared>) -> Self {
+        shared.set_sr(fs);
         let limiter = Limiter::new(fs);
         let latency = limiter.lookahead_samples();
         let sm = || {
@@ -174,6 +298,8 @@ impl MasterCore {
             dry_r: vec![0.0; latency.max(1) + 1],
             dpos: 0,
             meters,
+            extractor: FeatureExtractor::new(fs),
+            shared,
             sm_mix: sm(),
             sm_ceiling: sm(),
             sm_low_gain: sm(),
@@ -210,7 +336,13 @@ impl MasterCore {
             *v = 0.0;
         }
         self.dpos = 0;
+        self.extractor.reset();
         self.primed = false;
+    }
+
+    /// Access the shared theme/assist state (GUI wiring).
+    pub fn shared(&self) -> &Arc<MasterShared> {
+        &self.shared
     }
 
     fn snap_smoothers(&mut self) {
@@ -288,6 +420,22 @@ impl MasterCore {
     /// Process a stereo block in place.
     pub fn process_block(&mut self, l: &mut [f32], r: &mut [f32]) {
         let n = l.len().min(r.len());
+
+        // OVERSEER-ENRICH: tap the INPUT mix for theme analysis + LEARN (lock-free; audio
+        // untouched). The GUI reads these features to infer the session theme.
+        let req = self.shared.take_learn_req();
+        if req > 0 {
+            self.extractor.begin_capture(req);
+        }
+        self.extractor.process_block(&l[..n], &r[..n]);
+        self.shared.set_features(&self.extractor.summary());
+        self.shared.set_capturing(self.extractor.capturing());
+        self.shared.set_capture_prog(self.extractor.capture_progress());
+        if self.extractor.take_capture().is_some() {
+            // The GUI reads the (rolling) features + live node reports at commit time.
+            self.shared.bump_learn_gen();
+        }
+
         let mut out_peak = 0.0f32;
         let mut true_peak = 0.0f32;
         let mut out_sq = 0.0f32;

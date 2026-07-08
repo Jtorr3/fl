@@ -19,6 +19,13 @@
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
+use suite_core::classify::{classify, FeatureSummary, InstrumentType};
+
+/// Number of published feature scalars ([`FeatureSummary::NFIELDS`]).
+pub const NUM_FEAT: usize = 12;
+/// Sentinel published in `override_type` when the Node is on AUTO (no manual/learned pin).
+const TYPE_AUTO: u32 = u32::MAX;
+
 /// Overridable Node-strip parameters the Master can remote-control. Order is the index
 /// space used across the override area, the param mirror, and the Master GUI grid.
 pub const OVR_THRESHOLD: usize = 0;
@@ -65,6 +72,30 @@ pub struct Slot {
 
     /// Block counter; advances every Node `process` block (liveness).
     heartbeat: AtomicU64,
+
+    // ---- OVERSEER-ENRICH: auto-classification + LEARN ----------------------
+    /// Published rolling feature summary (written by the Node each block, read by the
+    /// Master + the Node GUI for classification/theme inference).
+    feat: [AtomicU32; NUM_FEAT],
+    /// The Node's *override* type: a concrete [`InstrumentType`] index when the user has
+    /// pinned a type or a LEARN has locked one, else [`TYPE_AUTO`] (Master/GUI classify from
+    /// features). Written by the Node each block from its param + learn state.
+    override_type: AtomicU32,
+    /// GUI → audio: begin a LEARN capture of this many samples (0 = idle). Consumed once.
+    learn_req: AtomicU32,
+    /// Bumped by the audio thread each time a LEARN capture finalises (GUI polls it).
+    learn_gen: AtomicU32,
+    /// The finalised LEARN feature summary (valid once `learn_gen` changes).
+    learn_result: [AtomicU32; NUM_FEAT],
+    /// True while a LEARN capture is accumulating (drives the GUI progress ring).
+    capturing: AtomicBool,
+    /// Capture progress in `0..1`.
+    capture_prog: AtomicU32,
+    /// GUI → audio: a LEARN has locked a type (persisted with the project). When set the
+    /// audio thread publishes `learned_type` as the override and stops relying on Auto.
+    learn_locked: AtomicBool,
+    /// The type a LEARN locked in (meaningful when `learn_locked`).
+    learned_type: AtomicU32,
 }
 
 impl Slot {
@@ -81,7 +112,111 @@ impl Slot {
             ovr_ts: AtomicU64::new(0),
             local_ts: AtomicU64::new(0),
             heartbeat: AtomicU64::new(0),
+            feat: std::array::from_fn(|_| AtomicU32::new(0.0f32.to_bits())),
+            override_type: AtomicU32::new(TYPE_AUTO),
+            learn_req: AtomicU32::new(0),
+            learn_gen: AtomicU32::new(0),
+            learn_result: std::array::from_fn(|_| AtomicU32::new(0.0f32.to_bits())),
+            capturing: AtomicBool::new(false),
+            capture_prog: AtomicU32::new(0.0f32.to_bits()),
+            learn_locked: AtomicBool::new(false),
+            learned_type: AtomicU32::new(0),
         }
+    }
+
+    // ---- OVERSEER-ENRICH: features + classification ------------------------
+    /// Publish the rolling feature summary (Node audio thread).
+    pub fn set_features(&self, f: &FeatureSummary) {
+        let a = f.to_array();
+        for (i, v) in a.iter().enumerate() {
+            store_f32(&self.feat[i], *v);
+        }
+    }
+    /// Read the published feature summary.
+    pub fn features(&self) -> FeatureSummary {
+        let mut a = [0.0f32; NUM_FEAT];
+        for (i, s) in self.feat.iter().enumerate() {
+            a[i] = load_f32(s);
+        }
+        FeatureSummary::from_array(&a)
+    }
+    /// Publish the override type (a concrete pinned/learned type, or `None` for AUTO).
+    pub fn set_override_type(&self, ty: Option<InstrumentType>) {
+        let v = ty.map(|t| t.index()).unwrap_or(TYPE_AUTO);
+        self.override_type.store(v, Ordering::Relaxed);
+    }
+    /// The override type if the Node pinned/learned one, else `None` (AUTO).
+    pub fn override_type(&self) -> Option<InstrumentType> {
+        let v = self.override_type.load(Ordering::Relaxed);
+        if v == TYPE_AUTO {
+            None
+        } else {
+            Some(InstrumentType::from_index(v))
+        }
+    }
+    /// The Node's *effective* type as seen by the Master: the override if pinned/learned,
+    /// else the live auto-classification of its published features.
+    pub fn resolved_type(&self) -> (InstrumentType, f32) {
+        match self.override_type() {
+            Some(t) => (t, 1.0),
+            None => classify(&self.features()),
+        }
+    }
+
+    // ---- OVERSEER-ENRICH: LEARN capture control ----------------------------
+    /// GUI: request a LEARN capture of `n` samples.
+    pub fn request_learn(&self, n: usize) {
+        self.learn_req.store(n as u32, Ordering::Relaxed);
+    }
+    /// Audio: take a pending LEARN request (returns samples, resetting to idle).
+    pub fn take_learn_req(&self) -> usize {
+        self.learn_req.swap(0, Ordering::Relaxed) as usize
+    }
+    pub fn set_capturing(&self, on: bool) {
+        self.capturing.store(on, Ordering::Relaxed);
+    }
+    pub fn capturing(&self) -> bool {
+        self.capturing.load(Ordering::Relaxed)
+    }
+    pub fn set_capture_prog(&self, p: f32) {
+        store_f32(&self.capture_prog, p);
+    }
+    pub fn capture_prog(&self) -> f32 {
+        load_f32(&self.capture_prog)
+    }
+    /// Audio: publish a finalised LEARN summary and bump the generation.
+    pub fn publish_learn_result(&self, f: &FeatureSummary) {
+        let a = f.to_array();
+        for (i, v) in a.iter().enumerate() {
+            store_f32(&self.learn_result[i], *v);
+        }
+        self.learn_gen.fetch_add(1, Ordering::Relaxed);
+    }
+    pub fn learn_gen(&self) -> u32 {
+        self.learn_gen.load(Ordering::Relaxed)
+    }
+    pub fn learn_result(&self) -> FeatureSummary {
+        let mut a = [0.0f32; NUM_FEAT];
+        for (i, s) in self.learn_result.iter().enumerate() {
+            a[i] = load_f32(s);
+        }
+        FeatureSummary::from_array(&a)
+    }
+    /// GUI: lock (or clear) a learned type. Persisted with the project.
+    pub fn set_learn_lock(&self, ty: Option<InstrumentType>) {
+        match ty {
+            Some(t) => {
+                self.learned_type.store(t.index(), Ordering::Relaxed);
+                self.learn_locked.store(true, Ordering::Relaxed);
+            }
+            None => self.learn_locked.store(false, Ordering::Relaxed),
+        }
+    }
+    pub fn learn_locked(&self) -> bool {
+        self.learn_locked.load(Ordering::Relaxed)
+    }
+    pub fn learned_type(&self) -> InstrumentType {
+        InstrumentType::from_index(self.learned_type.load(Ordering::Relaxed))
     }
 
     // ---- label -------------------------------------------------------------

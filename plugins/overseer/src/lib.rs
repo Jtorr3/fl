@@ -30,15 +30,21 @@ use std::sync::{Arc, RwLock};
 
 pub mod bus;
 pub mod dynamics;
+pub mod enrich;
 pub mod eq;
 pub mod master;
 pub mod node;
 pub mod presets;
 
 use bus::{Slot, NUM_OVERRIDES, OVR_DRIVE, OVR_NAMES, OVR_RATIO, OVR_THRESHOLD, OVR_TRIM, OVR_WIDTH};
+use enrich::{
+    apply_assist, context_defaults, suggest_from_features, theme_assist_targets, type_bank_category,
+    LearnPersist, TypeParam,
+};
 use eq::EqSettings;
 use master::{BandComp, MasterCore, MasterMeters, MasterSettings};
 use node::{load_f32, NodeCore, NodeMeters, NodeSettings};
+use suite_core::classify::{classify, infer_theme, InstrumentType, MixAnalysis, NodeReport, SessionTheme};
 use suite_core::presets::{load_all, Preset};
 
 // ---------------------------------------------------------------------------
@@ -148,6 +154,15 @@ pub struct NodeParams {
     #[persist = "label"]
     pub label: RwLock<String>,
 
+    /// OVERSEER-ENRICH: instrument type. `Auto` (default) follows the classifier; a concrete
+    /// type pins it and applies context-tuned defaults.
+    #[id = "insttype"]
+    pub inst_type: EnumParam<TypeParam>,
+
+    /// OVERSEER-ENRICH: persisted LEARN state (locked type + ghost suggestions).
+    #[persist = "learn"]
+    pub learn: RwLock<LearnPersist>,
+
     #[id = "lowfreq"]
     pub low_freq: FloatParam,
     #[id = "lowgain"]
@@ -196,8 +211,10 @@ impl Default for NodeParams {
     fn default() -> Self {
         let d = NodeSettings::default();
         Self {
-            editor_state: EguiState::from_size(560, 620),
+            editor_state: EguiState::from_size(560, 700),
             label: RwLock::new("NODE".to_string()),
+            inst_type: EnumParam::new("Instrument Type", TypeParam::Auto),
+            learn: RwLock::new(LearnPersist::default()),
 
             low_freq: hz_param("Low Freq", d.eq.low_freq),
             low_gain: gain_param("Low Gain", d.eq.low_gain),
@@ -263,6 +280,12 @@ impl NodeParams {
 
 fn apply_node_preset(params: &NodeParams, setter: &ParamSetter, p: &Preset) {
     let s = presets::node_settings_from_preset(p);
+    apply_node_settings(params, setter, &s);
+}
+
+/// Apply a [`NodeSettings`] to the live params through the host (shared by factory presets
+/// and OVERSEER-ENRICH context defaults).
+fn apply_node_settings(params: &NodeParams, setter: &ParamSetter, s: &NodeSettings) {
     set_f(setter, &params.low_freq, s.eq.low_freq);
     set_f(setter, &params.low_gain, s.eq.low_gain);
     set_f(setter, &params.b1_freq, s.eq.b1_freq);
@@ -283,6 +306,150 @@ fn apply_node_preset(params: &NodeParams, setter: &ParamSetter, p: &Preset) {
     set_f(setter, &params.width, s.width);
     set_f(setter, &params.trim, s.trim_db);
     set_f(setter, &params.mix, s.mix);
+}
+
+/// OVERSEER-ENRICH Node UI: instrument-type dropdown + guessed-type badge, LEARN button
+/// (progress + commit → lock + ghost suggestions), and the APPLY-suggestion row. Returns the
+/// current *effective* instrument type so the caller can filter the preset bank by it.
+fn node_enrich_ui(
+    ui: &mut egui::Ui,
+    params: &NodeParams,
+    setter: &ParamSetter,
+    slot: &Arc<Slot>,
+    meters: &Arc<NodeMeters>,
+) -> InstrumentType {
+    use suite_core::ui::{ACCENT, TEXT_DIM};
+
+    let feats = slot.features();
+    let (auto_ty, auto_conf) = classify(&feats);
+    let pinned = params.inst_type.value().to_instrument();
+    let learned = if slot.learn_locked() {
+        Some(slot.learned_type())
+    } else {
+        None
+    };
+    let (eff_ty, eff_conf, src) = if let Some(t) = pinned {
+        (t, 1.0, "PINNED")
+    } else if let Some(t) = learned {
+        (t, 1.0, "LEARNED")
+    } else {
+        (auto_ty, auto_conf, "AUTO")
+    };
+
+    // Poll for a finished LEARN capture (the audio thread bumps learn_gen on commit).
+    let gen_id = egui::Id::new(("ov-node-learngen", slot.id));
+    let cur_gen = slot.learn_gen();
+    let last_gen: Option<u32> = ui.ctx().memory(|m| m.data.get_temp(gen_id));
+    if let Some(lg) = last_gen {
+        if lg != cur_gen {
+            let cap = slot.learn_result();
+            let (lty, _lc) = classify(&cap);
+            let commit_ty = if lty == InstrumentType::Generic {
+                auto_ty
+            } else {
+                lty
+            };
+            slot.set_learn_lock(Some(commit_ty));
+            let sug = suggest_from_features(&cap);
+            if let Ok(mut lp) = params.learn.write() {
+                lp.locked = true;
+                lp.ty = commit_ty.index();
+                lp.suggestion = Some(sug);
+            }
+            apply_node_settings(params, setter, &context_defaults(commit_ty));
+        }
+    }
+    ui.ctx().memory_mut(|m| m.data.insert_temp(gen_id, cur_gen));
+
+    // Type dropdown + guessed-type badge.
+    ui.horizontal(|ui| {
+        ui.label(egui::RichText::new("TYPE").color(TEXT_DIM).small());
+        let cur = params.inst_type.value();
+        egui::ComboBox::from_id_salt(("node-type", slot.id))
+            .selected_text(format!("{cur:?}"))
+            .width(90.0)
+            .show_ui(ui, |ui| {
+                for (i, name) in TypeParam::variants().iter().enumerate() {
+                    let variant = TypeParam::from_index(i);
+                    if ui.selectable_label(cur == variant, *name).clicked() {
+                        setter.begin_set_parameter(&params.inst_type);
+                        setter.set_parameter(&params.inst_type, variant);
+                        setter.end_set_parameter(&params.inst_type);
+                        if let Some(t) = variant.to_instrument() {
+                            apply_node_settings(params, setter, &context_defaults(t));
+                        }
+                    }
+                }
+            });
+        let (cr, cg, cb) = eff_ty.color_rgb();
+        ui.label(
+            egui::RichText::new(format!(" {} ", eff_ty.label()))
+                .background_color(egui::Color32::from_rgb(cr, cg, cb))
+                .color(egui::Color32::BLACK)
+                .small(),
+        );
+        ui.label(egui::RichText::new(src).color(TEXT_DIM).small());
+        if src == "AUTO" {
+            ui.label(
+                egui::RichText::new(format!("{:.0}%", eff_conf * 100.0))
+                    .color(ACCENT)
+                    .small(),
+            );
+        }
+    });
+
+    // LEARN button + progress.
+    ui.horizontal(|ui| {
+        if slot.capturing() {
+            let p = slot.capture_prog();
+            ui.add(
+                egui::ProgressBar::new(p)
+                    .desired_width(150.0)
+                    .text(format!("LEARNING {:.0}%", p * 100.0)),
+            );
+        } else if ui
+            .button("LEARN")
+            .on_hover_text("Play the most representative ~8 s; commits type + suggestions")
+            .clicked()
+        {
+            let sr = load_f32(&meters.sr).max(1.0);
+            slot.request_learn((8.0 * sr) as usize);
+        }
+        if slot.learn_locked() && ui.button("Clear Learn").clicked() {
+            slot.set_learn_lock(None);
+            if let Ok(mut lp) = params.learn.write() {
+                lp.locked = false;
+                lp.suggestion = None;
+            }
+        }
+    });
+
+    // Ghost suggestions + APPLY.
+    let sug = params.learn.read().ok().and_then(|lp| lp.suggestion);
+    if let Some(s) = sug {
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new("SUGGEST").color(TEXT_DIM).small());
+            ui.label(
+                egui::RichText::new(format!(
+                    "Low {:+.1} dB · Thresh {:.1} dB · Ratio {:.1}:1",
+                    s.low_gain, s.threshold, s.ratio
+                ))
+                .color(ACCENT)
+                .small(),
+            );
+            if ui
+                .button("APPLY")
+                .on_hover_text("Apply the ghost suggestions to the strip")
+                .clicked()
+            {
+                set_f(setter, &params.low_gain, s.low_gain);
+                set_f(setter, &params.threshold, s.threshold);
+                set_f(setter, &params.ratio, s.ratio);
+            }
+        });
+    }
+
+    eff_ty
 }
 
 pub struct OverseerNode {
@@ -397,13 +564,16 @@ impl Plugin for OverseerNode {
                             }
                         });
 
-                        // Preset bar: factory + user presets, save/save-as/delete, dirty dot.
-                        suite_core::ui::PresetBar::new("overseer-node", presets.as_slice()).show(
-                            ui,
-                            &*params,
-                            setter,
-                            |setter, p| apply_node_preset(&params, setter, p),
-                        );
+                        // OVERSEER-ENRICH: instrument type, LEARN, ghost suggestions.
+                        let eff_ty = node_enrich_ui(ui, &params, setter, &slot, &meters);
+
+                        // Preset bar: factory + user presets, filtered by the current type's
+                        // bank; save/save-as/delete, dirty dot.
+                        suite_core::ui::PresetBar::new("overseer-node", presets.as_slice())
+                            .filter(Some(type_bank_category(eff_ty)))
+                            .show(ui, &*params, setter, |setter, p| {
+                                apply_node_preset(&params, setter, p)
+                            });
 
                         // Meters row.
                         ui.horizontal(|ui| {
@@ -528,6 +698,15 @@ impl Plugin for OverseerNode {
         if let Ok(label) = self.params.label.read() {
             self.slot.set_label(&label);
         }
+        // Restore a persisted LEARN lock into the shared slot (OVERSEER-ENRICH).
+        if let Ok(lp) = self.params.learn.read() {
+            if lp.locked {
+                self.slot
+                    .set_learn_lock(Some(InstrumentType::from_index(lp.ty)));
+            } else {
+                self.slot.set_learn_lock(None);
+            }
+        }
         true
     }
 
@@ -545,6 +724,15 @@ impl Plugin for OverseerNode {
         let _ftz = suite_core::dsp::ScopedFtz::enable();
 
         let s = self.params.snapshot();
+
+        // OVERSEER-ENRICH: publish the effective type override to the bus (pinned param wins,
+        // then a LEARN lock, else AUTO → the Master/GUI classify from features).
+        let ty_override = match self.params.inst_type.value().to_instrument() {
+            Some(t) => Some(t),
+            None if self.slot.learn_locked() => Some(self.slot.learned_type()),
+            None => None,
+        };
+        self.slot.set_override_type(ty_override);
 
         // Local-touch detection: if any of the 5 overridable local params moved since the
         // last block (GUI drag or host automation), steal control back from the Master.
@@ -603,6 +791,17 @@ impl Vst3Plugin for OverseerNode {
 pub struct MasterParams {
     #[persist = "editor-state"]
     editor_state: Arc<EguiState>,
+
+    /// OVERSEER-ENRICH: assist strength (0 = display only, default 30%). Scales theme-derived
+    /// nudges to the master EQ tilt / MB comp character / limiter drive.
+    #[id = "assist"]
+    pub assist: FloatParam,
+    /// OVERSEER-ENRICH: SUGGEST-ONLY — keep the theme advisory (no audio nudges).
+    #[id = "suggestonly"]
+    pub suggest_only: BoolParam,
+    /// OVERSEER-ENRICH: persisted theme lock (a LEARN locks the inferred theme).
+    #[persist = "theme"]
+    pub theme_lock: RwLock<enrich::ThemeLock>,
 
     #[id = "lowfreq"]
     pub low_freq: FloatParam,
@@ -668,7 +867,14 @@ impl Default for MasterParams {
     fn default() -> Self {
         let d = MasterSettings::default();
         Self {
-            editor_state: EguiState::from_size(760, 680),
+            editor_state: EguiState::from_size(760, 760),
+
+            assist: FloatParam::new("Assist", 0.30, FloatRange::Linear { min: 0.0, max: 1.0 })
+                .with_unit(" %")
+                .with_value_to_string(formatters::v2s_f32_percentage(0))
+                .with_string_to_value(formatters::s2v_f32_percentage()),
+            suggest_only: BoolParam::new("Suggest Only", false),
+            theme_lock: RwLock::new(enrich::ThemeLock::default()),
 
             low_freq: hz_param("Low Freq", d.eq.low_freq),
             low_gain: gain_param("Low Gain", d.eq.low_gain),
@@ -789,6 +995,168 @@ fn apply_master_preset(params: &MasterParams, setter: &ParamSetter, p: &Preset) 
     set_f(setter, &params.mix, s.mix);
 }
 
+/// OVERSEER-ENRICH Master UI: aggregate live Node reports + the master mix analysis into a
+/// THEME, publish it + the assist targets for the audio thread, and draw the theme readout,
+/// ASSIST knob, SUGGEST-ONLY toggle, LEARN button and summary card. Returns the active theme
+/// so the caller can filter the Master preset bank by it.
+fn master_enrich_ui(
+    ui: &mut egui::Ui,
+    params: &MasterParams,
+    setter: &ParamSetter,
+    shared: &Arc<master::MasterShared>,
+) -> SessionTheme {
+    use suite_core::ui::{labeled_slider, ACCENT, TEXT_DIM};
+
+    // Gather the live Node reports (GUI thread → locking + allocation are fine here).
+    let slots = bus::bus().live_slots();
+    let mut reports: Vec<NodeReport> = Vec::with_capacity(slots.len());
+    for s in slots.iter() {
+        let (ty, _c) = s.resolved_type();
+        reports.push(NodeReport {
+            ty,
+            features: s.features(),
+        });
+    }
+    let mfeat = shared.features();
+    let onset_density = reports
+        .iter()
+        .map(|r| r.features.onset_rate)
+        .fold(0.0f32, |a, v| a + v)
+        .max(mfeat.onset_rate);
+    let mix = MixAnalysis {
+        tempo_bpm: shared.tempo(),
+        tilt: mfeat.tilt,
+        onset_density,
+        dynamic_range_db: 20.0 * mfeat.crest.max(1.0).log10(),
+    };
+
+    let locked = params
+        .theme_lock
+        .read()
+        .ok()
+        .filter(|t| t.locked)
+        .map(|t| SessionTheme::from_index(t.theme));
+    let (theme, conf) = match locked {
+        Some(t) => (t, 1.0),
+        None => infer_theme(&reports, &mix),
+    };
+    // Publish theme + assist targets for the audio thread.
+    shared.set_theme(theme, conf);
+    shared.set_assist(&theme_assist_targets(theme));
+
+    // Poll a finished Master LEARN → lock the theme.
+    let gid = egui::Id::new("ov-master-learngen");
+    let cur_gen = shared.learn_gen();
+    let last: Option<u32> = ui.ctx().memory(|m| m.data.get_temp(gid));
+    if let Some(lg) = last {
+        if lg != cur_gen {
+            if let Ok(mut tl) = params.theme_lock.write() {
+                tl.locked = true;
+                tl.theme = theme.index();
+            }
+        }
+    }
+    ui.ctx().memory_mut(|m| m.data.insert_temp(gid, cur_gen));
+
+    // Theme readout row.
+    ui.horizontal(|ui| {
+        ui.label(egui::RichText::new("THEME").color(TEXT_DIM).small());
+        ui.label(egui::RichText::new(theme.label()).color(ACCENT).strong());
+        ui.label(
+            egui::RichText::new(format!("{:.0}%", conf * 100.0))
+                .color(TEXT_DIM)
+                .small(),
+        );
+        if locked.is_some() {
+            ui.label(
+                egui::RichText::new(" LOCKED ")
+                    .background_color(ACCENT)
+                    .color(egui::Color32::BLACK)
+                    .small(),
+            );
+            if ui.button("Clear").clicked() {
+                if let Ok(mut tl) = params.theme_lock.write() {
+                    tl.locked = false;
+                }
+            }
+        }
+    });
+
+    // Assist controls.
+    ui.horizontal(|ui| {
+        labeled_slider(ui, "ASSIST", &params.assist, setter);
+        let mut so = params.suggest_only.value();
+        if ui.checkbox(&mut so, "SUGGEST ONLY").changed() {
+            setter.begin_set_parameter(&params.suggest_only);
+            setter.set_parameter(&params.suggest_only, so);
+            setter.end_set_parameter(&params.suggest_only);
+        }
+        if shared.capturing() {
+            let p = shared.capture_prog();
+            ui.add(
+                egui::ProgressBar::new(p)
+                    .desired_width(140.0)
+                    .text(format!("LEARNING {:.0}%", p * 100.0)),
+            );
+        } else if ui
+            .button("LEARN THEME")
+            .on_hover_text("Play the fullest ~12 s; locks the theme + assist targets")
+            .clicked()
+        {
+            let sr = shared.sr().max(1.0);
+            shared.request_learn((12.0 * sr) as usize);
+        }
+    });
+
+    // Summary card: theme, per-track types, the assist moves.
+    egui::Frame::group(ui.style()).show(ui, |ui| {
+        ui.label(
+            egui::RichText::new(format!("SESSION: {}", theme.label()))
+                .color(ACCENT)
+                .small(),
+        );
+        if reports.is_empty() {
+            ui.label(
+                egui::RichText::new("no live nodes")
+                    .color(TEXT_DIM)
+                    .small(),
+            );
+        } else {
+            ui.horizontal_wrapped(|ui| {
+                for (s, rep) in slots.iter().zip(reports.iter()) {
+                    let (cr, cg, cb) = rep.ty.color_rgb();
+                    ui.label(
+                        egui::RichText::new(format!(" {}·{} ", s.label(), rep.ty.label()))
+                            .background_color(egui::Color32::from_rgb(cr, cg, cb))
+                            .color(egui::Color32::BLACK)
+                            .small(),
+                    );
+                }
+            });
+        }
+        let t = theme_assist_targets(theme);
+        ui.label(
+            egui::RichText::new(format!(
+                "moves: EQ tilt {:+.1} dB · low {:+.1} dB · comp {} · lim drive {:+.1} dB",
+                t.eq_tilt_db,
+                t.eq_low_db,
+                if t.comp_character > 0.0 {
+                    "glue"
+                } else if t.comp_character < 0.0 {
+                    "punch"
+                } else {
+                    "flat"
+                },
+                t.limiter_drive_db,
+            ))
+            .color(TEXT_DIM)
+            .small(),
+        );
+    });
+
+    theme
+}
+
 pub struct OverseerMaster {
     params: Arc<MasterParams>,
     meters: Arc<MasterMeters>,
@@ -796,17 +1164,21 @@ pub struct OverseerMaster {
     factory_presets: Arc<Vec<Preset>>,
     /// GUI → audio: reset the integrated-LUFS meter on the next block.
     lufs_reset: Arc<AtomicBool>,
+    /// OVERSEER-ENRICH: theme/assist state shared between the core and the editor.
+    shared: Arc<master::MasterShared>,
 }
 
 impl Default for OverseerMaster {
     fn default() -> Self {
         let meters = Arc::new(MasterMeters::default());
+        let shared = Arc::new(master::MasterShared::default());
         Self {
             params: Arc::new(MasterParams::default()),
-            core: MasterCore::new(48_000.0, meters.clone()),
+            core: MasterCore::new(48_000.0, meters.clone(), shared.clone()),
             meters,
             factory_presets: Arc::new(load_all(presets::MASTER_PRESET_JSON)),
             lufs_reset: Arc::new(AtomicBool::new(false)),
+            shared,
         }
     }
 }
@@ -843,13 +1215,14 @@ impl Plugin for OverseerMaster {
         let presets = self.factory_presets.clone();
         let meters = self.meters.clone();
         let lufs_reset = self.lufs_reset.clone();
+        let shared = self.shared.clone();
         create_egui_editor(
             self.params.editor_state.clone(),
             (),
             |ctx, _| suite_core::ui::apply_theme(ctx),
             move |egui_ctx, setter, _state| {
                 suite_core::ui::apply_theme(egui_ctx);
-                suite_core::ui::ScaledWindow::new("qeynos-overseer-master-window", Vec2::new(760.0, 680.0))
+                suite_core::ui::ScaledWindow::new("qeynos-overseer-master-window", Vec2::new(760.0, 760.0))
                     .min_size(Vec2::new(680.0, 560.0))
                     .show(egui_ctx, egui_state.as_ref(), |ui| {
                         use suite_core::ui::labeled_slider as row;
@@ -867,13 +1240,16 @@ impl Plugin for OverseerMaster {
                         );
                         ui.add_space(6.0);
 
-                        // Preset bar: factory + user presets, save/save-as/delete, dirty dot.
-                        suite_core::ui::PresetBar::new("overseer-master", presets.as_slice()).show(
-                            ui,
-                            &*params,
-                            setter,
-                            |setter, p| apply_master_preset(&params, setter, p),
-                        );
+                        // OVERSEER-ENRICH: theme inference, assist, LEARN, summary card.
+                        let theme = master_enrich_ui(ui, &params, setter, &shared);
+
+                        // Preset bar: factory + user presets, filtered by the session theme;
+                        // save/save-as/delete, dirty dot.
+                        suite_core::ui::PresetBar::new("overseer-master", presets.as_slice())
+                            .filter(Some(theme.bank_category()))
+                            .show(ui, &*params, setter, |setter, p| {
+                                apply_master_preset(&params, setter, p)
+                            });
                         ui.horizontal(|ui| {
                             if ui.button("RESET LUFS").clicked() {
                                 lufs_reset.store(true, Ordering::Relaxed);
@@ -1032,6 +1408,15 @@ impl Plugin for OverseerMaster {
                                 let (peak, rms, lufs) = slot.meters();
                                 ui.group(|ui| {
                                     ui.horizontal(|ui| {
+                                        // OVERSEER-ENRICH: type-colored badge per Node.
+                                        let (rty, _rc) = slot.resolved_type();
+                                        let (cr, cg, cb) = rty.color_rgb();
+                                        ui.label(
+                                            egui::RichText::new(format!(" {} ", rty.label()))
+                                                .background_color(egui::Color32::from_rgb(cr, cg, cb))
+                                                .color(egui::Color32::BLACK)
+                                                .small(),
+                                        );
                                         ui.label(
                                             egui::RichText::new(slot.label())
                                                 .color(suite_core::ui::ACCENT)
@@ -1097,7 +1482,11 @@ impl Plugin for OverseerMaster {
         buffer_config: &BufferConfig,
         context: &mut impl InitContext<Self>,
     ) -> bool {
-        self.core = MasterCore::new(buffer_config.sample_rate, self.meters.clone());
+        self.core = MasterCore::new(
+            buffer_config.sample_rate,
+            self.meters.clone(),
+            self.shared.clone(),
+        );
         context.set_latency_samples(self.core.latency_samples());
         true
     }
@@ -1110,7 +1499,7 @@ impl Plugin for OverseerMaster {
         &mut self,
         buffer: &mut Buffer,
         _aux: &mut AuxiliaryBuffers,
-        _context: &mut impl ProcessContext<Self>,
+        context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
         // Denormal mitigation for the whole process scope (FTZ/DAZ), restored on drop.
         let _ftz = suite_core::dsp::ScopedFtz::enable();
@@ -1118,7 +1507,20 @@ impl Plugin for OverseerMaster {
         if self.lufs_reset.swap(false, Ordering::Relaxed) {
             self.core.reset_lufs();
         }
-        let s = self.params.snapshot();
+        // Publish transport tempo for theme inference (GUI-thread consumer).
+        let tempo = context.transport().tempo.unwrap_or(0.0) as f32;
+        self.shared.set_tempo(tempo);
+
+        let base = self.params.snapshot();
+        // OVERSEER-ENRICH assist: scale the theme-derived nudges by the assist strength (0 =
+        // display only; SUGGEST-ONLY forces 0). apply_assist is BIT-EXACT identity at 0, so
+        // assist=0 changes nothing in the audio path (the done-bar null test).
+        let strength = if self.params.suggest_only.value() {
+            0.0
+        } else {
+            self.params.assist.value()
+        };
+        let s = apply_assist(&base, &self.shared.assist_targets(), strength);
         self.core.configure(&s);
         let main = buffer.as_slice();
         if main.len() >= 2 {
@@ -1168,7 +1570,11 @@ mod tests {
     const SR: f32 = 48_000.0;
 
     fn new_master() -> MasterCore {
-        MasterCore::new(SR, Arc::new(MasterMeters::default()))
+        MasterCore::new(
+            SR,
+            Arc::new(MasterMeters::default()),
+            Arc::new(master::MasterShared::default()),
+        )
     }
 
     /// A neutral Master settings: flat EQ, ratio-1 comp, limiter parked at 0 dB ceiling.
@@ -1514,5 +1920,183 @@ mod tests {
         assert!(l.iter().chain(r.iter()).all(|v| v.is_finite()));
         let peak = l.iter().chain(r.iter()).fold(0.0f32, |m, &v| m.max(v.abs()));
         assert!(peak <= 10f32.powf(-12.0 / 20.0) + 1e-3, "ceiling violated: {peak}");
+    }
+
+    // ===================================================================
+    // OVERSEER-ENRICH done-bars (plugin/bus level)
+    // ===================================================================
+
+    /// A four-on-the-floor kick train (default kick every 0.25 s).
+    fn kick_train(secs: f32) -> Vec<f32> {
+        let n = (SR * secs) as usize;
+        let mut out = vec![0.0f32; n];
+        let period = (SR * 0.25) as usize;
+        let one = testsig::synth_kick_stub((SR * 0.24) as usize, SR);
+        let mut t = 0;
+        while t < n {
+            for (i, &v) in one.iter().enumerate() {
+                if t + i < n {
+                    out[t + i] += v;
+                }
+            }
+            t += period;
+        }
+        out
+    }
+
+    /// A slow, wide, sustained chord pad (decorrelated L/R).
+    fn wide_pad(secs: f32) -> (Vec<f32>, Vec<f32>) {
+        let n = (SR * secs) as usize;
+        let freqs = [220.0f32, 261.63, 329.63];
+        let mut lp_l = suite_core::dsp::Svf::new();
+        let mut lp_r = suite_core::dsp::Svf::new();
+        lp_l.set(1200.0, 0.707, SR);
+        lp_r.set(1200.0, 0.707, SR);
+        let mut l = vec![0.0f32; n];
+        let mut r = vec![0.0f32; n];
+        for i in 0..n {
+            let t = i as f32 / SR;
+            let mut sl = 0.0f32;
+            let mut sr_ = 0.0f32;
+            for (k, &fr) in freqs.iter().enumerate() {
+                sl += (2.0 * (fr * t).fract() - 1.0) * 0.2;
+                sr_ += (2.0 * ((fr * 1.003) * t + 0.25 * (k as f32 + 1.0)).fract() - 1.0) * 0.2;
+            }
+            let env = (t / 0.5).min(1.0);
+            l[i] = lp_l.process(sl * env).lp;
+            r[i] = lp_r.process(sr_ * env).lp;
+        }
+        (l, r)
+    }
+
+    /// Stream a stereo signal through a fresh Node core (default settings) and return its slot
+    /// with published features.
+    fn stream_node(label: &str, l: &[f32], r: &[f32]) -> Arc<Slot> {
+        let slot = bus::bus().register(label);
+        let meters = Arc::new(NodeMeters::default());
+        let mut core = NodeCore::new(SR, slot.clone(), meters);
+        let s = NodeSettings::default();
+        for (cl, cr) in l.chunks(512).zip(r.chunks(512)) {
+            let mut a = cl.to_vec();
+            let mut b = cr.to_vec();
+            core.configure(&s);
+            core.process_block(&mut a, &mut b);
+        }
+        slot
+    }
+
+    /// Done-bar: **assist at 0 changes NOTHING in the audio path** (null vs the pre-enrich
+    /// render). A locked theme's assist targets present, scaled to zero → bit-identical output.
+    #[test]
+    fn assist_at_zero_is_audio_null_vs_base() {
+        let base = MasterSettings::default();
+        let targets = theme_assist_targets(SessionTheme::DarkTechno);
+        let assist0 = apply_assist(&base, &targets, 0.0);
+
+        let mix = kick_train(1.5);
+        let (mut a_l, mut a_r) = (mix.clone(), mix.clone());
+        let (mut b_l, mut b_r) = (mix.clone(), mix.clone());
+        let mut core_a = new_master();
+        process_stereo(&mut core_a, &base, &mut a_l, &mut a_r);
+        let mut core_b = new_master();
+        process_stereo(&mut core_b, &assist0, &mut b_l, &mut b_r);
+
+        let resid = null_residual_db(&a_l, &b_l);
+        assert!(resid < -120.0, "assist=0 not null vs pre-enrich base: {resid:.1} dB");
+    }
+
+    /// Done-bar: kick + rumble + pad Node streams through the Bus at 130 BPM → DARK-TECHNO.
+    #[test]
+    fn techno_session_over_bus_infers_dark_techno() {
+        let n = (SR * 4.0) as usize;
+        let kick = kick_train(4.0);
+        let ks = stream_node("BUS-KICK", &kick, &kick);
+        let rumble = testsig::sine(45.0, 0.5, n, SR);
+        let rs = stream_node("BUS-RUMBLE", &rumble, &rumble);
+        let (pl, pr) = wide_pad(4.0);
+        let ps = stream_node("BUS-PAD", &pl, &pr);
+
+        // Build reports from THESE slots (not live_slots(): the global bus is shared across
+        // the whole test binary, so other tests' slots would pollute an enumeration).
+        let reports = [
+            NodeReport {
+                ty: ks.resolved_type().0,
+                features: ks.features(),
+            },
+            NodeReport {
+                ty: rs.resolved_type().0,
+                features: rs.features(),
+            },
+            NodeReport {
+                ty: ps.resolved_type().0,
+                features: ps.features(),
+            },
+        ];
+        assert_eq!(ks.resolved_type().0, InstrumentType::Kick, "bus kick misclassified");
+        let mix = MixAnalysis {
+            tempo_bpm: 130.0,
+            tilt: -0.3,
+            onset_density: 4.0,
+            dynamic_range_db: 10.0,
+        };
+        let (theme, conf) = infer_theme(&reports, &mix);
+        assert_eq!(theme, SessionTheme::DarkTechno, "got {theme:?} @ {conf}");
+        assert!(conf >= 0.4);
+    }
+
+    /// Done-bar: the Node LEARN window captures exactly N seconds through the bus and commits
+    /// the type played DURING the window (KICK), even if a different fixture (VOCAL) follows.
+    #[test]
+    fn node_learn_over_bus_commits_window_type() {
+        let slot = bus::bus().register("BUS-LEARN");
+        let meters = Arc::new(NodeMeters::default());
+        let mut core = NodeCore::new(SR, slot.clone(), meters);
+        let s = NodeSettings::default();
+        let n = (SR * 2.0) as usize;
+        slot.request_learn(n);
+        let gen0 = slot.learn_gen();
+
+        let kick = kick_train(2.5);
+        let mut fed = 0;
+        for chunk in kick.chunks(512) {
+            let mut a = chunk.to_vec();
+            let mut b = chunk.to_vec();
+            core.configure(&s);
+            core.process_block(&mut a, &mut b);
+            fed += chunk.len();
+            if fed >= n + 1024 {
+                break;
+            }
+        }
+        assert_ne!(slot.learn_gen(), gen0, "LEARN did not finalise");
+        assert_eq!(
+            classify(&slot.learn_result()).0,
+            InstrumentType::Kick,
+            "committed type must match the fixture during the window"
+        );
+        let gen1 = slot.learn_gen();
+
+        // Play VOCAL after commit — no new capture result may appear.
+        let vocal = testsig::synth_vocal(180.0, (SR * 2.0) as usize, SR);
+        for chunk in vocal.chunks(512) {
+            let mut a = chunk.to_vec();
+            let mut b = chunk.to_vec();
+            core.configure(&s);
+            core.process_block(&mut a, &mut b);
+        }
+        assert_eq!(slot.learn_gen(), gen1, "post-commit audio produced a new capture");
+    }
+
+    /// Done-bar: an old project (no type param, no learn persist saved) loads cleanly on AUTO.
+    #[test]
+    fn node_defaults_to_auto_and_unlocked() {
+        let p = NodeParams::default();
+        assert_eq!(p.inst_type.value(), TypeParam::Auto);
+        assert!(!p.learn.read().unwrap().locked);
+        assert!(p.learn.read().unwrap().suggestion.is_none());
+        // Master theme lock also defaults to unlocked.
+        let m = MasterParams::default();
+        assert!(!m.theme_lock.read().unwrap().locked);
+        assert_eq!(m.assist.value(), 0.30);
     }
 }
