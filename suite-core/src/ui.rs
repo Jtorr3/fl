@@ -132,29 +132,66 @@ pub fn theme_prefs(slug: &str) -> ThemePrefs {
         .unwrap_or_default()
 }
 
-/// Persist one plugin's prefs (read-modify-write the shared map; last writer wins, which is
-/// fine for a UI preference). Best-effort — IO failure is swallowed (the in-session egui-memory
-/// copy still reflects the toggle so the UI stays responsive).
+/// Persist one plugin's prefs. Re-reads the file and merges (so a second open editor never
+/// clobbers this file's other entries via a stale per-context cache), preserves any unknown
+/// entries, and writes via a temp-file + atomic rename so a crash mid-write can't truncate the
+/// file. A parse failure LEAVES THE EXISTING FILE UNTOUCHED rather than wiping every plugin's
+/// prefs — this one toggle is only lost on disk; the in-session egui-memory copy still reflects
+/// it. Best-effort: IO failure is swallowed. GUI-thread only.
 pub fn save_theme_prefs(slug: &str, prefs: ThemePrefs) {
     let Some(path) = ui_prefs_path() else {
         return;
     };
-    let mut map = load_ui_prefs();
-    map.insert(slug.to_string(), (prefs.console, prefs.crt_motion));
-    let obj: serde_json::Map<String, serde_json::Value> = map
-        .into_iter()
-        .map(|(slug, (console, motion))| {
-            (
-                slug,
-                serde_json::json!({ "console": console, "crt_motion": motion }),
-            )
-        })
-        .collect();
+    let existing = std::fs::read_to_string(&path).ok();
+    let Some(text) = merge_prefs_text(existing.as_deref(), slug, prefs) else {
+        return; // corrupt existing file → keep it, don't destroy the other plugins' prefs.
+    };
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    if let Ok(text) = serde_json::to_string_pretty(&serde_json::Value::Object(obj)) {
-        let _ = std::fs::write(&path, text);
+    write_atomic(&path, &text);
+}
+
+/// Pure merge step, factored out so it is unit-testable without touching disk. `existing` is the
+/// current file contents (`None` when absent). Returns the new file text to write, or `None` to
+/// leave the existing file untouched (a corrupt-but-present file must not be wiped, or every
+/// other plugin loses its prefs).
+fn merge_prefs_text(existing: Option<&str>, slug: &str, prefs: ThemePrefs) -> Option<String> {
+    let mut obj = match existing {
+        Some(text) if !text.trim().is_empty() => {
+            match serde_json::from_str::<serde_json::Value>(text) {
+                Ok(serde_json::Value::Object(o)) => o,
+                Ok(_) => serde_json::Map::new(), // valid JSON but not an object → replace it
+                Err(_) => return None,           // corrupt → keep the old file
+            }
+        }
+        _ => serde_json::Map::new(), // missing / empty → start fresh
+    };
+    obj.insert(
+        slug.to_string(),
+        serde_json::json!({ "console": prefs.console, "crt_motion": prefs.crt_motion }),
+    );
+    serde_json::to_string_pretty(&serde_json::Value::Object(obj)).ok()
+}
+
+/// Write `text` to `path` via a uniquely-named temp file + rename, so a crash mid-write leaves the
+/// previous file intact instead of a half-written one. The temp name carries the pid + a nanosecond
+/// nonce so two editors in the same process don't collide on it.
+fn write_atomic(path: &std::path::Path, text: &str) {
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let tmp = path.with_file_name(format!("ui_prefs.{}.{}.tmp", std::process::id(), nonce));
+    if std::fs::write(&tmp, text.as_bytes()).is_err() {
+        let _ = std::fs::remove_file(&tmp);
+        return;
+    }
+    // std::fs::rename replaces an existing destination on Windows (MoveFileEx) and POSIX.
+    if std::fs::rename(&tmp, path).is_err() {
+        // Fall back to a direct write, then clean up the temp file.
+        let _ = std::fs::write(path, text.as_bytes());
+        let _ = std::fs::remove_file(&tmp);
     }
 }
 
@@ -195,11 +232,10 @@ fn set_theme_channel(ctx: &egui::Context, prefs: ThemePrefs) {
 /// `"qeynos-overseer-node-window"` -> `"overseer-node"`). The slug is the prefs key and the
 /// preset folder slug — one stable identity per editor.
 fn slug_from_window_id(id: &str) -> String {
-    id.strip_prefix("qeynos-")
-        .unwrap_or(id)
-        .strip_suffix("-window")
-        .unwrap_or(id)
-        .to_string()
+    // Each strip must fall back to ITS OWN input: chaining `.unwrap_or(id)` on the suffix strip
+    // would discard a successful prefix strip whenever the suffix is absent.
+    let no_prefix = id.strip_prefix("qeynos-").unwrap_or(id);
+    no_prefix.strip_suffix("-window").unwrap_or(no_prefix).to_string()
 }
 
 /// Apply the suite's minimal-dark visuals to an egui context. Call once per frame
@@ -377,13 +413,19 @@ fn paint_enclosure(ui: &egui::Ui) {
 
     // Machined body.
     painter.rect_filled(rect, round, ENCLOSURE);
-    // Amber brand strip along the very top edge (2 px; content's leading add_space clears it).
-    let strip = egui::Rect::from_min_max(rect.min, egui::pos2(rect.max.x, rect.min.y + 2.0));
-    painter.rect_filled(strip, round, ACCENT);
-    // Top highlight and bottom shadow bands.
+    // Amber brand strip along the top edge (2 px; content's leading add_space clears it). Inset
+    // by the corner radius on each side so it doesn't overhang the rounded corners as floating
+    // amber nubs — it now sits flush between the two top screws.
+    let strip = egui::Rect::from_min_max(
+        egui::pos2(rect.min.x + round, rect.min.y),
+        egui::pos2(rect.max.x - round, rect.min.y + 2.0),
+    );
+    painter.rect_filled(strip, 0.0, ACCENT);
+    // Top highlight and bottom shadow bands. The top highlight is inset the same way so its square
+    // corners don't poke past the rounded body.
     let hi = egui::Rect::from_min_max(
-        egui::pos2(rect.min.x, rect.min.y + 2.0),
-        egui::pos2(rect.max.x, rect.min.y + 5.0),
+        egui::pos2(rect.min.x + round, rect.min.y + 2.0),
+        egui::pos2(rect.max.x - round, rect.min.y + 5.0),
     );
     painter.rect_filled(hi, 0.0, ENCLOSURE_HI);
     let lo = egui::Rect::from_min_max(
@@ -606,7 +648,9 @@ fn knob_face<P: Param>(ui: &mut egui::Ui, param: &P, setter: &ParamSetter) {
         if console {
             // Tick-ring collar just outside the cap (machined-knob look). Static ⇒ cheap.
             let ring_r = radius + 2.0;
-            const RING_TICKS: usize = 21;
+            // 20 divisions (21 ticks) so majors at k%5==0 land on BOTH arc endpoints (k=0 and
+            // k=20) — a symmetric ring. 21 divisions left a lone minor tick at the max endpoint.
+            const RING_TICKS: usize = 20;
             for k in 0..=RING_TICKS {
                 let a = a0 + (k as f32 / RING_TICKS as f32) * (a1 - a0);
                 let major = k % 5 == 0;
@@ -859,24 +903,30 @@ pub fn crt_frame<R>(
         }
     }
 
-    // Content clipped to the inner glass.
+    // Content clipped to the inner glass — INTERSECTED with the parent's clip rect. In egui a
+    // child's clip REPLACES the parent's, so intersecting is required: without it, a bay nested in
+    // a ScrollArea (NERVE, etc.) would discard the ScrollArea's viewport clip and its content would
+    // paint outside the scroll viewport (over the preset bar). See the regression test below.
+    let parent_clip = ui.clip_rect();
     let mut child = ui.new_child(
         egui::UiBuilder::new()
             .max_rect(inner)
             .layout(egui::Layout::top_down(egui::Align::LEFT)),
     );
-    child.set_clip_rect(inner);
+    child.set_clip_rect(inner.intersect(parent_clip));
     let _salt = id_salt; // reserved for future per-bay state; keeps the API stable.
     let r = add_contents(&mut child);
 
-    // Blinking cursor, motion only.
+    // Blinking cursor, motion only. Painted in the bottom frame margin (the 8 px `rect.shrink`
+    // gap BELOW the content `inner`), never inside `inner` — so it can't overdraw the last
+    // telemetry row or an interactive pad/meter that fills the bay (CHAMBER/FLYBY/SHAPESHIFT).
     if console && motion && ui.is_rect_visible(rect) {
         let ctx = ui.ctx();
         let t = ctx.input(|i| i.time);
         if (t * 1.6).fract() < 0.5 {
             let cur = egui::Rect::from_min_size(
-                egui::pos2(inner.left(), inner.bottom() - 11.0),
-                egui::vec2(7.0, 10.0),
+                egui::pos2(inner.left(), inner.bottom() + 1.0),
+                egui::vec2(7.0, 5.0),
             );
             ui.painter().rect_filled(cur, 0.0, PHOSPHOR);
         }
@@ -889,7 +939,10 @@ pub fn crt_frame<R>(
 /// pairs). This is the honest, cheap telemetry every plugin without a dedicated scope shows —
 /// the SAME live values that appear on its knobs (guardrail #3), in monospace so columns align.
 pub fn crt_lines(ui: &mut egui::Ui, id_salt: &str, title: &str, lines: &[(&str, String)]) {
-    let height = 22.0 + lines.len() as f32 * 16.0 + 8.0;
+    // 16 px frame margin (shrink(8) top+bottom) + ~22 px title row + 16 px per line, with a few
+    // px of slack so the last row (and the blinking cursor in the bottom margin) never clip. The
+    // old formula (30 + 16n) left the inner rect a few px shorter than the content it hosted.
+    let height = 22.0 + lines.len() as f32 * 16.0 + 16.0;
     crt_frame(ui, id_salt, height, |ui| {
         let console = console_on(ui.ctx());
         let title_col = if console { PHOSPHOR } else { TEXT_DIM };
@@ -920,6 +973,19 @@ pub fn crt_lines(ui: &mut egui::Ui, id_salt: &str, title: &str, lines: &[(&str, 
             });
         }
     });
+}
+
+/// Repaint cadence for a live scope / animated telemetry bay. Honors the per-plugin CRT-motion
+/// pref (guardrail #2) and the ~8 fps idle guarantee (guardrail #6): free-run at display rate only
+/// while CRT motion is enabled; otherwise fall back to a slow ~8 fps tick so an idle editor stops
+/// spinning the CPU. Call once per frame from a bay that would otherwise `request_repaint()`
+/// unconditionally.
+pub fn scope_repaint(ctx: &egui::Context) {
+    if crt_motion_on(ctx) {
+        ctx.request_repaint();
+    } else {
+        ctx.request_repaint_after(std::time::Duration::from_millis(125));
+    }
 }
 
 // ===========================================================================
@@ -1664,6 +1730,76 @@ mod tests {
         for &n in &[0.0_f32, 0.33, 0.5, 0.8, 1.0] {
             roundtrip_normalized(&p, n);
         }
+    }
+
+    // --- crt_frame clip regression (FINAL CHECKPOINT major #1). The bay's child UI clip must
+    //     be INTERSECTED with the parent's clip, not replace it, or a bay nested in a ScrollArea
+    //     paints outside the scroll viewport. Exercised headlessly. ---
+    #[test]
+    fn crt_frame_child_clip_stays_within_parent() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+        let ctx = egui::Context::default();
+        let captured: Rc<Cell<Option<(egui::Rect, egui::Rect)>>> = Rc::new(Cell::new(None));
+        let cap = captured.clone();
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                // Simulate a ScrollArea viewport clip much shorter than the requested bay height.
+                let viewport = egui::Rect::from_min_max(
+                    egui::pos2(0.0, 0.0),
+                    egui::pos2(200.0, 60.0),
+                );
+                ui.set_clip_rect(viewport);
+                crt_frame(ui, "test-bay", 300.0, |child| {
+                    cap.set(Some((child.clip_rect(), viewport)));
+                });
+            });
+        });
+        let (child_clip, parent_clip) = captured.get().expect("crt_frame body must run");
+        let eps = 0.5;
+        assert!(
+            child_clip.min.x >= parent_clip.min.x - eps
+                && child_clip.min.y >= parent_clip.min.y - eps
+                && child_clip.max.x <= parent_clip.max.x + eps
+                && child_clip.max.y <= parent_clip.max.y + eps,
+            "bay child clip {child_clip:?} escaped the parent (ScrollArea) clip {parent_clip:?}"
+        );
+    }
+
+    // --- Prefs merge/atomic-write behavior (FINAL CHECKPOINT minor). A save must preserve other
+    //     plugins' entries and must NOT wipe the file when it can't be parsed. ---
+    #[test]
+    fn prefs_merge_preserves_others_and_survives_corruption() {
+        let existing = r#"{"grit":{"console":true,"crt_motion":true},"nerve":{"console":false,"crt_motion":true}}"#;
+        let out = merge_prefs_text(
+            Some(existing),
+            "grit",
+            ThemePrefs { console: false, crt_motion: false },
+        )
+        .expect("valid existing file merges");
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        // The other plugin's entry survives untouched.
+        assert_eq!(v["nerve"]["console"], serde_json::json!(false));
+        assert_eq!(v["nerve"]["crt_motion"], serde_json::json!(true));
+        // This plugin's entry is updated.
+        assert_eq!(v["grit"]["console"], serde_json::json!(false));
+        assert_eq!(v["grit"]["crt_motion"], serde_json::json!(false));
+        // A corrupt existing file is LEFT ALONE (None → caller keeps the old file, no wipe).
+        assert!(merge_prefs_text(Some("{ not json"), "grit", ThemePrefs::default()).is_none());
+        // Missing / empty file starts fresh.
+        assert!(merge_prefs_text(None, "grit", ThemePrefs::default()).is_some());
+        assert!(merge_prefs_text(Some("   "), "grit", ThemePrefs::default()).is_some());
+    }
+
+    // --- slug_from_window_id: each strip falls back to its own input (FINAL CHECKPOINT minor). ---
+    #[test]
+    fn slug_strip_falls_back_independently() {
+        assert_eq!(slug_from_window_id("qeynos-grit-window"), "grit");
+        assert_eq!(slug_from_window_id("qeynos-overseer-node-window"), "overseer-node");
+        // Prefix present, suffix absent → the successful prefix strip must be kept.
+        assert_eq!(slug_from_window_id("qeynos-weird"), "weird");
+        // Neither affix present.
+        assert_eq!(slug_from_window_id("plain"), "plain");
     }
 
     #[test]
