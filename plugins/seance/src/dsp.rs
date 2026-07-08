@@ -519,7 +519,11 @@ impl ShimmerVerb {
                 f.set_rt60(decay.max(0.1));
                 // Anti-metallic delay modulation (SOUND-PASS): smears the ghost-verb's
                 // discrete FDN modes so the drowned tail is a wash, not a ringing tone.
-                f.set_modulation(0.0002 * self.sr, 0.9);
+                // Depth capped (like CHAMBER) so it stacks under the live SIZE crossfade
+                // without tipping `size_sweep_no_click`: `set_delays` re-zeros the LFO on each
+                // SIZE hop, and 0.9 samples of wobble on top of the crossfade exceeded the
+                // click bound. 0.5 keeps the tail de-metalized (still a wash, not a tone).
+                f.set_modulation(0.00016 * self.sr, 0.5);
             }
             self.cur_size = self.req_size;
             self.idle_size = self.req_size;
