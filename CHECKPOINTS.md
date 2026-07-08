@@ -254,3 +254,14 @@
       eyeball categories/BPM/key, then `--apply`. Confirm the undo manifest restores the tree
       (`sample_librarian.py undo <manifest>`). First run downloads librosa/soundfile into a uv
       env (~26 pkgs).
+
+## W7 — REFERENCE-GAP (2026-07-08)
+- [ ] **Optional real-track audition (no hardware dependency — fully offline-tested + a
+      real end-to-end CLI run was verified this session).** W7 is a pure analysis tool; its
+      24-check offline gate covers LUFS/spectrum/width/kick-f0 on synthesized fixtures and the
+      self-contained HTML output, and a real run over synthesized ref/mix WAVs produced a valid
+      7.4 KB report (kick 54.7 Hz≈A1, LUFS delta +4.7 LU, low-band spectral gaps flagged). When
+      convenient, run it on a real reference vs one of your renders under renders\:
+      `uv run --python 3.12 tools\reference_gap.py "<reference>.wav" "renders\<mix>.wav" --key <root>`
+      and open the generated `*_refgap.html`. First run downloads pyloudnorm/numpy/scipy/soundfile
+      into a uv env.

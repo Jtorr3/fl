@@ -347,7 +347,7 @@ Phase 3 — remainder
 - [x] CARVE - [x] NERVE - [x] HALT - [x] BANDAID - [x] PATINA - [x] X-RAY - [x] CHORALE
 
 Phase 4 — remaining automations
-- [x] W5-PROJECT-JANITOR - [x] W6-SAMPLE-LIBRARIAN - [ ] W7-REFERENCE-GAP
+- [x] W5-PROJECT-JANITOR - [x] W6-SAMPLE-LIBRARIAN - [x] W7-REFERENCE-GAP
 
 POLISH phase (user feedback 2026-07-07; PRESET-SYSTEM + OVERSEER-ENRICH pulled
 forward to after HARD CHECKPOINT 2 — see above)
