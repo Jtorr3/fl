@@ -352,7 +352,7 @@ Phase 4 — remaining automations
 POLISH phase (user feedback 2026-07-07; PRESET-SYSTEM + OVERSEER-ENRICH pulled
 forward to after HARD CHECKPOINT 2 — see above)
 - [x] PRESET-EXPANSION (deep factory banks, 15-30 purpose-named presets per plugin)
-- [ ] BUILT-IN-MANUALS (in-GUI usage manual panel per plugin, embedded from docs/)
+- [x] BUILT-IN-MANUALS (in-GUI usage manual panel per plugin, embedded from docs/)
 - [ ] SUITE-TRIAGE (user directive 2026-07-08, BEFORE PEDAL-UI: Fable audit of ALL
   plugins for (a) feasibility/correctness bugs — "some seem a little broken" — and
   (b) real-world necessity/usefulness — "some seem almost useless". Calibration from
