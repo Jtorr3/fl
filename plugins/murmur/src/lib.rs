@@ -228,6 +228,29 @@ impl Plugin for Murmur {
                         );
                         ui.separator();
 
+                        // CONSOLE v2 CRT telemetry bay — honest live state (the same values
+                        // shown on the knobs below; GUI-thread reads only, process() untouched).
+                        // In THEME-OFF this degrades to a plain readout panel.
+                        suite_core::ui::crt_lines(
+                            ui,
+                            "murmur-crt",
+                            "MURMUR · REVERB",
+                            &[
+                                ("ROOM", format!("size {} · decay {}", params.size, params.decay)),
+                                ("COLOR", format!("{} · rand {}", params.color, params.randomness)),
+                                (
+                                    "TRIG",
+                                    format!(
+                                        "sens {} · {}",
+                                        params.sensitivity,
+                                        if params.freeze.value() { "FROZEN" } else { "live" },
+                                    ),
+                                ),
+                                ("OUT", format!("width {} · mix {}", params.width, params.mix)),
+                            ],
+                        );
+                        ui.add_space(4.0);
+
                         egui::ScrollArea::vertical().show(ui, |ui| {
                             ui.label(egui::RichText::new("ROOM").color(suite_core::ui::TEXT_DIM).small());
                             egui::Grid::new("murmur-room")

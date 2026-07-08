@@ -479,9 +479,13 @@ impl Plugin for Shapeshift {
                         );
                         ui.separator();
 
-                        // The XY morph pad: drag the user point, watch the orbit dot.
+                        // The XY morph pad: drag the user point, watch the orbit dot — housed in
+                        // the CONSOLE v2 CRT bay (glass + scanlines when console is on, plain panel
+                        // in THEME-OFF). The pad stays fully draggable inside the glass.
                         let phase = orbit_meter.load(Ordering::Relaxed);
-                        xy_pad(ui, &params, setter, phase);
+                        suite_core::ui::crt_frame(ui, "shapeshift-crt", 316.0, |ui| {
+                            xy_pad(ui, &params, setter, phase);
+                        });
 
                         ui.add_space(6.0);
                         egui::ScrollArea::vertical().show(ui, |ui| {
@@ -669,13 +673,27 @@ fn xy_pad(ui: &mut egui::Ui, params: &ShapeshiftParams, setter: &ParamSetter, ph
     }
 
     // --- Paint ---
+    // CONSOLE re-skin: on the CRT glass the opaque panel backing is dropped (glass shows
+    // through) and decorative marks glow phosphor amber; THEME-OFF keeps the original panel +
+    // accent. The user point and the orbit dot stay visually distinct (they identify two
+    // different positions) — user point solid amber, orbit dot a bright near-white halo.
+    let console = suite_core::ui::console_on(ui.ctx());
+    let accent = if console { suite_core::ui::PHOSPHOR } else { suite_core::ui::ACCENT };
+    let dim = if console { suite_core::ui::PHOSPHOR_DIM } else { suite_core::ui::TEXT_DIM };
+    let grid_col = if console {
+        suite_core::ui::PHOSPHOR_DIM.linear_multiply(0.35)
+    } else {
+        egui::Color32::from_rgb(34, 37, 42)
+    };
     if ui.is_rect_visible(rect) {
         let painter = ui.painter_at(rect);
-        painter.rect_filled(rect, 4.0, suite_core::ui::PANEL);
+        if !console {
+            painter.rect_filled(rect, 4.0, suite_core::ui::PANEL);
+        }
         painter.rect_stroke(
             rect,
             4.0,
-            egui::Stroke::new(1.0, egui::Color32::from_rgb(40, 43, 48)),
+            egui::Stroke::new(1.0, if console { suite_core::ui::PHOSPHOR_DIM } else { egui::Color32::from_rgb(40, 43, 48) }),
             egui::StrokeKind::Middle,
         );
         // Corner labels (which shaper each corner uses). Each label is placed at its DSP corner
@@ -699,18 +717,18 @@ fn xy_pad(ui: &mut egui::Ui, params: &ShapeshiftParams, setter: &ParamSetter, ph
                 anchor,
                 text,
                 egui::FontId::proportional(11.0),
-                suite_core::ui::TEXT_DIM,
+                dim,
             );
         }
         // Faint grid quadrants.
         let mid = xy_to_screen(rect, 0.5, 0.5);
         painter.line_segment(
             [egui::pos2(rect.left(), mid.y), egui::pos2(rect.right(), mid.y)],
-            egui::Stroke::new(1.0, egui::Color32::from_rgb(34, 37, 42)),
+            egui::Stroke::new(1.0, grid_col),
         );
         painter.line_segment(
             [egui::pos2(mid.x, rect.top()), egui::pos2(mid.x, rect.bottom())],
-            egui::Stroke::new(1.0, egui::Color32::from_rgb(34, 37, 42)),
+            egui::Stroke::new(1.0, grid_col),
         );
 
         // Orbit path + moving dot (when the orbit is on).
@@ -727,17 +745,17 @@ fn xy_pad(ui: &mut egui::Ui, params: &ShapeshiftParams, setter: &ParamSetter, ph
                 .collect();
             painter.add(egui::Shape::line(
                 pts,
-                egui::Stroke::new(1.0, suite_core::ui::ACCENT.linear_multiply(0.4)),
+                egui::Stroke::new(1.0, accent.linear_multiply(0.4)),
             ));
             let (ox, oy) = dsp::orbit_offset(shape, phase, radius);
             let dot = xy_to_screen(rect, (ux + ox).clamp(0.0, 1.0), (uy + oy).clamp(0.0, 1.0));
             painter.circle_filled(dot, 5.0, egui::Color32::from_rgb(240, 240, 245));
-            painter.circle_stroke(dot, 7.0, egui::Stroke::new(1.5, suite_core::ui::ACCENT));
+            painter.circle_stroke(dot, 7.0, egui::Stroke::new(1.5, accent));
         }
 
         // The user point.
         let up = xy_to_screen(rect, ux, uy);
-        painter.circle_filled(up, 6.0, suite_core::ui::ACCENT);
+        painter.circle_filled(up, 6.0, accent);
         painter.circle_stroke(up, 6.0, egui::Stroke::new(1.0, suite_core::ui::BG));
     }
     // Keep the orbit dot animating while the editor is open.

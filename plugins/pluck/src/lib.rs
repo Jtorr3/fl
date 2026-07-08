@@ -508,8 +508,12 @@ impl Plugin for Pluck {
                         );
                         ui.separator();
 
-                        // String-activity display: six bars.
-                        string_activity(ui, &activity);
+                        // String-activity display: six bars, housed in the CONSOLE v2 CRT bay
+                        // (glass + scanlines when console is on; plain panel in THEME-OFF).
+                        // The bars themselves keep functioning identically inside the glass.
+                        suite_core::ui::crt_frame(ui, "pluck-crt", 58.0, |ui| {
+                            string_activity(ui, &activity);
+                        });
                         ui.add_space(6.0);
 
                         egui::Grid::new("pluck-tuning")
@@ -639,12 +643,18 @@ impl Drop for Pluck {
 /// Six vertical activity bars showing per-string energy (cheap; optional GUI extra).
 fn string_activity(ui: &mut egui::Ui, activity: &[AtomicF32]) {
     ui.ctx().request_repaint();
+    // CONSOLE re-skin: on the CRT glass the opaque panel backing is dropped (glass shows
+    // through) and the energy bars glow phosphor amber; THEME-OFF keeps the panel + accent.
+    let console = suite_core::ui::console_on(ui.ctx());
     let n = activity.len();
     let avail = ui.available_width().min(360.0);
     let size = Vec2::new(avail, 42.0);
     let (rect, _resp) = ui.allocate_exact_size(size, egui::Sense::hover());
     let painter = ui.painter_at(rect);
-    painter.rect_filled(rect, 3.0, suite_core::ui::PANEL);
+    if !console {
+        painter.rect_filled(rect, 3.0, suite_core::ui::PANEL);
+    }
+    let bar_col = if console { suite_core::ui::PHOSPHOR } else { suite_core::ui::ACCENT };
     let gap = 4.0;
     let bw = (rect.width() - gap * (n as f32 + 1.0)) / n as f32;
     for i in 0..n {
@@ -655,7 +665,7 @@ fn string_activity(ui: &mut egui::Ui, activity: &[AtomicF32]) {
             egui::pos2(x0, rect.bottom() - 3.0 - h),
             egui::pos2(x0 + bw, rect.bottom() - 3.0),
         );
-        painter.rect_filled(bar, 2.0, suite_core::ui::ACCENT);
+        painter.rect_filled(bar, 2.0, bar_col);
     }
 }
 

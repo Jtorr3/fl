@@ -373,6 +373,29 @@ impl Plugin for Ascend {
                         );
                         ui.separator();
 
+                        // CONSOLE v2 CRT telemetry bay — honest live state, including the live
+                        // transport countdown atomics read above (GUI-thread reads only,
+                        // process() untouched). In THEME-OFF this degrades to a plain readout.
+                        suite_core::ui::crt_lines(
+                            ui,
+                            "ascend-crt",
+                            "ASCEND · TENSION",
+                            &[
+                                (
+                                    "STATUS",
+                                    if playing {
+                                        format!("PLAY · {:.2} bars", bars)
+                                    } else {
+                                        "STOP · TRIGGER free-run".to_string()
+                                    },
+                                ),
+                                ("TARGET", format!("{}{} · {}", params.key, params.octave, params.sync)),
+                                ("SWEEP", format!("{} -> {} · rise {}", params.fstart, params.fend, params.rise)),
+                                ("OUT", format!("bal {} · lvl {}", params.balance, params.level)),
+                            ],
+                        );
+                        ui.add_space(4.0);
+
                         egui::ScrollArea::vertical().show(ui, |ui| {
                             ui.label(egui::RichText::new("TARGET").color(suite_core::ui::TEXT_DIM).small());
                             egui::Grid::new("ascend-target").num_columns(2).spacing([16.0, 6.0]).show(ui, |ui| {

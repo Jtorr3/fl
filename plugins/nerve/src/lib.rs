@@ -569,27 +569,38 @@ fn editor_ui(
     ui.separator();
 
     egui::ScrollArea::vertical().show(ui, |ui| {
-        // Live scopes for the 8 streams.
-        ui.label(egui::RichText::new("STREAMS").color(TEXT_DIM).small());
-        ui.horizontal_wrapped(|ui| {
-            let names = [
-                "S1·LFO A", "S2·LFO B", "S3·LFO C", "S4·LFO D", "S5·Env A", "S6·Env B",
-                "S7·S&H A", "S8·S&H B",
-            ];
-            for (i, name) in names.iter().enumerate() {
-                let v = scopes[i].load(std::sync::atomic::Ordering::Relaxed);
-                ui.vertical(|ui| {
-                    ui.label(egui::RichText::new(*name).color(TEXT_DIM).small());
-                    // Bipolar streams map -1..1 -> 0..1; env streams already 0..1.
-                    let norm = ((v + 1.0) * 0.5).clamp(0.0, 1.0);
-                    ui.add(
-                        egui::widgets::ProgressBar::new(norm)
-                            .desired_width(70.0)
-                            .fill(ACCENT)
-                            .text(format!("{v:+.2}")),
-                    );
-                });
-            }
+        // Live scopes for the 8 published streams — housed in the CONSOLE v2 CRT telemetry bay
+        // (glass + scanlines when console is on; plain readout in THEME-OFF). Per-stream identity
+        // is TEXTUAL (S1·LFO A … S8·S&H B), not colour-coded — every bar already shares one
+        // accent — so moving the fill to phosphor amber on the glass loses no meaning. Height is
+        // sized for the two-row wrap the min window width produces, so nothing clips. This is a
+        // pure visual wrap: the bus publish/claim path in process() is untouched.
+        let console = suite_core::ui::console_on(ui.ctx());
+        let title_col = if console { suite_core::ui::PHOSPHOR } else { TEXT_DIM };
+        let lbl_col = if console { suite_core::ui::PHOSPHOR_DIM } else { TEXT_DIM };
+        let fill = if console { suite_core::ui::PHOSPHOR } else { ACCENT };
+        suite_core::ui::crt_frame(ui, "nerve-crt", 118.0, |ui| {
+            ui.label(egui::RichText::new("STREAMS").color(title_col).monospace().small().strong());
+            ui.horizontal_wrapped(|ui| {
+                let names = [
+                    "S1·LFO A", "S2·LFO B", "S3·LFO C", "S4·LFO D", "S5·Env A", "S6·Env B",
+                    "S7·S&H A", "S8·S&H B",
+                ];
+                for (i, name) in names.iter().enumerate() {
+                    let v = scopes[i].load(std::sync::atomic::Ordering::Relaxed);
+                    ui.vertical(|ui| {
+                        ui.label(egui::RichText::new(*name).color(lbl_col).small());
+                        // Bipolar streams map -1..1 -> 0..1; env streams already 0..1.
+                        let norm = ((v + 1.0) * 0.5).clamp(0.0, 1.0);
+                        ui.add(
+                            egui::widgets::ProgressBar::new(norm)
+                                .desired_width(70.0)
+                                .fill(fill)
+                                .text(format!("{v:+.2}")),
+                        );
+                    });
+                }
+            });
         });
         ui.separator();
 
