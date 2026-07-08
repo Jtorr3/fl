@@ -1,0 +1,17 @@
+[package]
+name = "nerve"
+version = "0.1.0"
+edition = "2021"
+license = "ISC"
+description = "Qeynos NERVE — suite modulation bus source (4 LFOs, 2 env followers, 2 random S&H, 4 macros -> 8 tier-2 bus streams)"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+nih_plug = { workspace = true }
+nih_plug_egui = { workspace = true }
+suite-core = { path = "../../suite-core" }
+
+[dev-dependencies]
+suite-core = { path = "../../suite-core" }

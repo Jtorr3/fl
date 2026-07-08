@@ -547,8 +547,14 @@ pub fn new_instance_id() -> u64 {
     static COUNTER: AtomicU64 = AtomicU64::new(1);
     let pid = std::process::id() as u64;
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-    // High 32 bits = pid, low 32 = counter; never zero.
-    ((pid << 32) | (n & 0xFFFF_FFFF)) | 1
+    // High 32 bits = pid (>=1 for any real process), low 32 = a distinct counter. Do NOT
+    // fold in a `| 1` — that would collapse consecutive counter values onto one id.
+    let v = (pid << 32) | (n & 0xFFFF_FFFF);
+    if v == 0 {
+        n.max(1)
+    } else {
+        v
+    }
 }
 
 #[cfg(test)]
