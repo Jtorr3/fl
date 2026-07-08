@@ -124,3 +124,69 @@ future stable-id scheme can lift this without breaking state reproducibility.
 
 ## Presets
 Slow Swell Bus · 16th Pump · Chaos Pair · Macro Desk · Breathe · Techno Pump 1/8.
+
+<!-- BUILT-IN-MANUALS: canonical sections rendered in-GUI by the '?' button (parsed by suite_core::manual). -->
+
+## What It Is
+
+NERVE is the suite's modulation source: it generates 8 continuous control streams — 4 LFOs, 2
+envelope followers, 2 random sample-and-hold, plus 4 hand macros — and publishes them to a
+suite-wide bus. Any parameter of any other Qeynos plugin can then "listen" to a stream from its
+MOD section, so one NERVE becomes a global mod matrix that moves filters, drives, mixes and sizes
+everywhere. It passes audio through bit-exact (zero latency), so drop it inline to follow a track.
+
+## Signal Flow
+
+```
+ 4 LFOs  (Rate/Sync·Div, Shape, Depth) ─┐
+ 2 env followers (Env1/Env2 Atk·Rel·Depth, of NERVE's input) ─┤
+ 2 random S&H (S&H1/S&H2 Rate·Slew·Depth) ────────────────────┤→ 8 streams ─→ tier-2 BUS ─→ any plugin's MOD section
+ 4 macros (Macro 1–4, summed into S1–S4) ─────────────────────┘        (%TEMP%\qeynos-bus)
+```
+
+## Controls
+
+Each LFO A–D shares five controls:
+
+- **Rate** — LFO frequency, 0.01–20 Hz (used when free-running).
+- **Sync** — tempo-sync toggle; on = the LFO locks to host tempo and uses **Div** instead of **Rate**.
+- **Div** — synced note division (4 bars … 1/16) used when **Sync** is on.
+- **Shape** — waveform: Sine / Triangle / Saw Up / Saw Down / Square / S&H / Smooth Rnd / Exp Pulse.
+- **Depth** — output amount of that LFO's stream, 0–100 %.
+
+Hand macros (bipolar, summed into streams S1–S4):
+
+- **Macro 1** — hand controller for stream 1, −1…+1.
+- **Macro 2** — hand controller for stream 2, −1…+1.
+- **Macro 3** — hand controller for stream 3, −1…+1.
+- **Macro 4** — hand controller for stream 4, −1…+1.
+
+Envelope followers (follow the level of NERVE's own input):
+
+- **Env1 Atk** — follower A attack, 0.1–200 ms.
+- **Env1 Rel** — follower A release, 5–1000 ms.
+- **Env1 Depth** — follower A output amount, 0–100 %.
+- **Env2 Atk** — follower B attack, 0.1–200 ms.
+- **Env2 Rel** — follower B release, 5–1000 ms.
+- **Env2 Depth** — follower B output amount, 0–100 %.
+
+Random sample & hold:
+
+- **S&H1 Rate** — generator A step rate, 0.01–20 Hz.
+- **S&H1 Slew** — generator A glide between steps, 0–100 % (0 = hard steps).
+- **S&H1 Depth** — generator A output amount, 0–100 %.
+- **S&H2 Rate** — generator B step rate, 0.01–20 Hz.
+- **S&H2 Slew** — generator B glide between steps, 0–100 %.
+- **S&H2 Depth** — generator B output amount, 0–100 %.
+
+## Recipes
+
+1. **Dark-techno sidechain pump — "Warehouse Sidechain"** — LFO A **Sync on**, **Div 1/4**,
+   **Shape Saw Down**, **Depth 100 %**. In the target plugin's MOD section pick this NERVE, signal
+   **S1**, and set a negative depth on its **Mix** or gain → a tight tempo-locked 1/4 pump across the suite.
+2. **Atmospheric-DnB drift — "Underwater Cathedral"** — LFO A **Shape Smooth Rnd**, **Rate 0.04 Hz**,
+   **Depth 100 %**, with a slow sine on LFO C. Route **S1** to a reverb size or filter cutoff for
+   slow, non-repeating movement under pads and Rhodes.
+3. **Vocal-rip glitch — "Datamosh"** — **S&H1 Rate 16 Hz**, **S&H1 Slew 0** (hard steps),
+   **S&H1 Depth 100 %**, plus a stepped LFO A (**Shape S&H**). Route **S7** to a ripped vocal's
+   pitch or filter cutoff for Sewerslvt-style stutter modulation.

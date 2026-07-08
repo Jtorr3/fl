@@ -24,6 +24,9 @@ pub mod presets;
 use dsp::{ChamberCore, Material, Settings, AUTO_ORDER, MAX_ORDER};
 use suite_core::presets::{load_all, Preset};
 
+/// Usage manual embedded from docs, rendered in-GUI by the '?' button (BUILT-IN-MANUALS).
+pub const MANUAL_DOC: &str = include_str!("../../../docs/CHAMBER.md");
+
 // ---------------------------------------------------------------------------
 // Param-facing enums
 // ---------------------------------------------------------------------------
@@ -418,6 +421,7 @@ impl Plugin for Chamber {
                         ui.heading(
                             egui::RichText::new("QEYNOS · CHAMBER").color(suite_core::ui::ACCENT),
                         );
+                        suite_core::ui::manual_button(ui, "chamber", "CHAMBER", MANUAL_DOC);
                         ui.label(
                             egui::RichText::new(
                                 "image-source space simulator — drag the source & listener",
@@ -755,6 +759,15 @@ mod render_tests {
     use suite_core::harness::{assert_universal, render_path, write_wav};
     use suite_core::presets::load_all;
     use suite_core::testsig;
+
+    /// BUILT-IN-MANUALS cross-check: the embedded manual documents every param and has recipes.
+    #[test]
+    fn manual_covers_all_params_and_has_recipes() {
+        suite_core::manual::assert_manual_covers_params(
+            crate::MANUAL_DOC,
+            &crate::ChamberParams::default(),
+        );
+    }
 
     /// Render each factory preset over pink noise and a chirp, write the WAVs (L channel) into
     /// renders/CHAMBER/, and assert the universal properties on each channel.

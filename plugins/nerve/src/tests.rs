@@ -7,6 +7,15 @@ use std::path::PathBuf;
 use suite_core::bus::{new_instance_id, Bus, PluginKind};
 use suite_core::modlisten::{Curve, ModRoutes, Route};
 
+/// BUILT-IN-MANUALS cross-check: the embedded manual documents every param and has recipes.
+#[test]
+fn manual_covers_all_params_and_has_recipes() {
+    suite_core::manual::assert_manual_covers_params(
+        crate::MANUAL_DOC,
+        &crate::NerveParams::default(),
+    );
+}
+
 fn temp_path(tag: &str) -> PathBuf {
     std::env::temp_dir().join(format!(
         "qeynos-bus-nerve-{}-{}-{}",

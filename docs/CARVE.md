@@ -135,3 +135,51 @@ Glue Duck** for subtle glue. Set **Threshold** so the duck only triggers on the 
 sidechain, **Sensitivity** and **Max Depth** for how hard, **Tilt** to aim the cut, and
 **Attack/Release** for the feel. Flip **Listen = Delta** to hear exactly what's being removed
 while you dial it in; **Mix = 0** is an exact bypass.
+
+<!-- BUILT-IN-MANUALS: canonical sections rendered in-GUI by the '?' button (parsed by suite_core::manual). -->
+
+## What It Is
+
+A spectral ducker: a sidechain input carves *its own* frequencies out of the main signal, opening
+a frequency-matched pocket instead of ducking the whole broadband level. Route a kick, a vocal or
+a music bed into the sidechain and CARVE cuts only the main's matching bands — so two elements
+stop fighting for the same range while everything else stays untouched.
+
+## Signal Flow
+
+```
+ sidechain ─ STFT 2048/512 ─ per ⅓-oct band energy ─ soft-knee(vs Threshold, Sensitivity) ─┐
+                                                     × Amount × Max Depth × Tilt            │
+                                                     → Attack/Release smoothing             ▼
+ main L/R ─ STFT 2048/512 ─ bins ×= per-band gain ─ iSTFT ─ wet ─┐               per-band gains
+ dry ─ delay(2048) ─────────────────────────────────────────────┴─ out = dry + Mix·(wet − dry) · Out
+                                                    (Listen: Off / Sidechain / Delta)
+```
+
+## Controls
+
+- **Amount** — overall duck depth, 0–100 %; scales every band's reduction at once (smoothed).
+- **Max Depth** — maximum reduction at full sidechain energy, 0–24 dB.
+- **Threshold** — sidechain band level (≈ dBFS) at which ducking begins, −90…0 dB (soft-knee centre).
+- **Tilt** — bias the cut toward lows (−1) or highs (+1), 0 = flat; never changes the maximum depth.
+- **Attack** — how fast the duck engages, 1–50 ms.
+- **Release** — how fast the duck lets go, 20–500 ms.
+- **Sensitivity** — knee width + excess span, 0–100 %; low = gentle/wide, high = aggressive/narrow.
+- **Listen** — monitoring/output mode: **Off** (carved output) / **Sidechain** (hear the trigger) / **Delta** (hear only what's removed).
+- **Mix** — dry/wet blend, 0–100 %; **Mix = 0** passes the latency-matched dry through exactly.
+- **Out** — output trim, ±24 dB (smoothed).
+
+## Recipes
+
+1. **Dark-techno kick-vs-bass pocket — "Kick Vs Bass"** — put CARVE on the bass, send the kick to
+   its sidechain: **Amount 90 %**, **Max Depth 14 dB**, **Threshold −50 dB**, **Tilt −0.6** (ducks
+   only the sub/low-mid), **Attack 5 ms**, **Release 90 ms**, **Sensitivity 70 %**, **Mix 100 %**.
+   The kick punches a clean hole in the low end on every hit.
+2. **Atmospheric-DnB rolling duck — "Rolling Bassline Duck"** — a busier reese/rolling bass under
+   a break: **Amount 80 %**, **Max Depth 13 dB**, **Threshold −47 dB**, **Tilt −0.4**, **Attack 3 ms**,
+   **Release 80 ms**, **Sensitivity 65 %**. Fast, low-biased carving keeps the sub out of the kick
+   without dulling the mids.
+3. **Vocal-rip space — "Vocal Space"** — route a ripped a-cappella into the sidechain of a music
+   bed: **Amount 80 %**, **Max Depth 9 dB**, **Threshold −46 dB**, **Tilt +0.1**, **Attack 12 ms**,
+   **Release 180 ms**, **Sensitivity 55 %**, **Mix 100 %**. Carves a vocal-shaped pocket so the
+   lifted vocal sits forward without turning the bed down. Flip **Listen = Delta** to tune it by ear.

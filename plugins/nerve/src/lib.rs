@@ -27,6 +27,9 @@ use dsp::{Division, NerveCore, Settings, Shape, NUM_ENV, NUM_LFO, NUM_MACRO, NUM
 use suite_core::bus::{self, PluginKind, NUM_MOD_SIGNALS};
 use suite_core::presets::{load_all, Preset};
 
+/// Usage manual embedded from docs, rendered in-GUI by the '?' button (BUILT-IN-MANUALS).
+pub const MANUAL_DOC: &str = include_str!("../../../docs/NERVE.md");
+
 // ---------------------------------------------------------------------------
 // Param-facing enums
 // ---------------------------------------------------------------------------
@@ -532,6 +535,7 @@ fn editor_ui(
     ui.add_space(4.0);
     ui.horizontal(|ui| {
         ui.heading(egui::RichText::new("QEYNOS · NERVE").color(ACCENT));
+        suite_core::ui::manual_button(ui, "nerve", "NERVE", crate::MANUAL_DOC);
         ui.add_space(10.0);
         // Editable bus label — published live to the slot so listeners see a friendly name.
         let mut label = params.label.read().map(|g| g.clone()).unwrap_or_default();

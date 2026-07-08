@@ -12,6 +12,15 @@ use suite_core::dsp::Svf;
 use suite_core::stft::{Complex, Stft};
 use suite_core::testsig;
 
+/// BUILT-IN-MANUALS cross-check: the embedded manual documents every param and has recipes.
+#[test]
+fn manual_covers_all_params_and_has_recipes() {
+    suite_core::manual::assert_manual_covers_params(
+        crate::MANUAL_DOC,
+        &crate::CarveParams::default(),
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Signal helpers
 // ---------------------------------------------------------------------------

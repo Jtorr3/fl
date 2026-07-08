@@ -16,6 +16,15 @@ use suite_core::harness::{assert_universal, null_residual_db, render_path, write
 use suite_core::presets::load_all;
 use suite_core::testsig::{self, FakeTransport};
 
+/// BUILT-IN-MANUALS cross-check: the embedded manual documents every param and has recipes.
+#[test]
+fn manual_covers_all_params_and_has_recipes() {
+    suite_core::manual::assert_manual_covers_params(
+        crate::MANUAL_DOC,
+        &crate::HaltParams::default(),
+    );
+}
+
 const SR: f32 = 48_000.0;
 const BLOCK: usize = 512;
 

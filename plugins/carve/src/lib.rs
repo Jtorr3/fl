@@ -38,6 +38,9 @@ mod tests;
 use dsp::{CarveCore, ListenMode, Settings, N_DISPLAY};
 use suite_core::presets::{load_all, Preset};
 
+/// Usage manual embedded from docs, rendered in-GUI by the '?' button (BUILT-IN-MANUALS).
+pub const MANUAL_DOC: &str = include_str!("../../../docs/CARVE.md");
+
 // ---------------------------------------------------------------------------
 // Plugin + params
 // ---------------------------------------------------------------------------
@@ -298,6 +301,7 @@ impl Plugin for Carve {
                         ui.heading(
                             egui::RichText::new("QEYNOS · CARVE").color(suite_core::ui::ACCENT),
                         );
+                        suite_core::ui::manual_button(ui, "carve", "CARVE", MANUAL_DOC);
                         ui.label(
                             egui::RichText::new("spectral ducker — sidechain carves matching frequencies")
                                 .color(suite_core::ui::TEXT_DIM)

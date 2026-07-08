@@ -133,3 +133,60 @@ Small Dead Booth · Wood Room · Warehouse · Cathedral-ish · Tight Drum Room �
 Plus the universal assertions (finite, ≤ 0 dBFS, non-silent) on every preset render, an image
 count check (7/25/63), an extremes fuzz, and the CPU bench above. Renders are written to
 `renders/CHAMBER/`.
+
+<!-- BUILT-IN-MANUALS: canonical sections rendered in-GUI by the '?' button (parsed by suite_core::manual). -->
+
+## What It Is
+
+A physical shoebox-room reverb: set the room's size, drag a **source** and a **listener** around
+a top-down floor-plan, and CHAMBER synthesises the true early reflections plus a Sabine-tuned
+diffuse tail for that exact geometry. Because the direct path *is* the dry sound, **Mix = 0**
+passes audio through untouched — turn it up and your source is placed in a believable space, from
+a curtained vocal booth to a collapsing concrete cavern.
+
+## Signal Flow
+
+```
+ in ─┬─ image-source early reflections (order ≤ ER Order) ─┐
+     │     per image: delay r/c · gain 1/r·reflectⁿ · HF-damp · pan │
+     │                                                    ├─ ER/Late ─ Width ─ wet ─┐
+     └─ Pre-Delay ─ Sabine FDN late field (RT60) ─────────┘                         │
+                                                                                     ▼
+   out = (1 − Mix)·dry  +  Mix · wet · Out            (Mix = 0 ⇒ exact passthrough)
+```
+
+## Controls
+
+- **Width** — room left↔right size, 2–40 m (skewed). Bigger rooms give longer reflections and a wider image.
+- **Depth** — room front↔back size, 2–40 m. Sets the source→listener distance range.
+- **Height** — room floor↔ceiling size, 2–20 m. Taller rooms ring lower and longer.
+- **Source X** — the sound's left/right spot on the floor-plan, 0–100 % of Width; drag the amber dot.
+- **Source Y** — the sound's front/back spot on the floor-plan, 0–100 % of Depth.
+- **Source Height** — the source's vertical position, 0–100 % of room Height.
+- **Listener X** — the mic's left/right spot, 0–100 % of Width; drag the ringed handle.
+- **Listener Y** — the mic's front/back spot, 0–100 % of Depth.
+- **Listener Height** — the listener's vertical position, 0–100 % of room Height.
+- **Walls** — wall material: Concrete / Wood / Curtain / Glass — sets absorption + per-bounce HF darkness.
+- **Floor** — floor material (same four); a curtain floor deadens fast, concrete rings bright.
+- **Ceiling** — ceiling material (same four); the vertical bounces split between Floor and Ceiling.
+- **ER Order** — early-reflection image order: Auto / 3 / 2 / 1; higher = denser, more expensive reflections.
+- **ER/Late** — balance between the discrete early-reflection cluster and the diffuse FDN tail, 0–100 %.
+- **Distance** — inverse-distance rolloff exaggeration, 0.5–3.0; higher pushes the source further back.
+- **Pre-Delay** — extra gap before the late field, 0–200 ms; widens the sense of size/separation.
+- **RT60** — late-tail decay time: Auto (physical Sabine prediction) or a 0.1–12 s override.
+- **Width** — stereo width of the wet field, 0–200 % (mid/side); the room already widens with size, this trims it.
+- **Mix** — dry/wet blend, 0–100 %. **Mix = 0** is a bit-exact passthrough (the direct path is the dry).
+- **Out** — output trim, ±24 dB.
+
+## Recipes
+
+1. **Dark-techno concrete cavern — "Abandoned Reservoir"** — a 30 × 38 × 14 m all-concrete box,
+   **ER/Late 80 %**, **RT60 8.0 s**, **Distance 1.5**, **Pre-Delay 50 ms**, **Width 1.4**,
+   **Mix 48 %**, **Out −2 dB**. Drag the source far from the listener for a huge, sub-heavy tail
+   behind stabs and toms without washing out the low end.
+2. **Atmospheric-DnB wash — "Fog Bank"** — a 14 × 20 × 8 m curtain-lined room, **ER/Late 90 %**
+   (almost all diffuse), **RT60 6.0 s**, **Distance 1.3**, **Width 1.6**, **Mix 50 %**,
+   **Out −2 dB**. Sits pads, Rhodes and vocal chops in a slow, blooming grey haze.
+3. **Vocal-rip booth — "Vocal Isolation"** — a tiny 2.6 × 3.2 × 2.4 m curtain booth, **ER Order 3**,
+   **ER/Late 25 %** (mostly tight early reflections), **Width 0.7**, **Mix 28 %**. Gives a dry,
+   ripped a-cappella just enough believable room to sit in a mix without smearing consonants.

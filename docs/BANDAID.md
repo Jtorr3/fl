@@ -91,3 +91,54 @@ Attack** up for more thump, or **Low Sustain** down for a tighter kick. **Tighte
 **Pad Bloom** lifts the sustain of pads/keys. Set the two **Xover** knobs so each band covers
 the range you want to shape, tap **Solo** on a band to hear exactly what it contains, and pull
 **Mix** back to blend the effect under the dry. Neutral settings are a transparent bypass.
+
+<!-- BUILT-IN-MANUALS: canonical sections rendered in-GUI by the '?' button (parsed by suite_core::manual). -->
+
+## What It Is
+
+A 3-band (LR4) transient designer: split the signal into lows, mids and highs, then independently
+lift or tighten the **attack** (onset) and the **sustain** (body/tail) of each band, ±12 dB. Make
+a kick punch, dry up a boomy room tail, take the *tss* off hats, or let a pad bloom — and because
+neutral gains add exactly nothing, **Mix = 0** and all-flat settings are a bit-exact bypass.
+
+## Signal Flow
+
+```
+       ┌─ LP(Xover Low) ───────────────────── low  ─┐  per band:
+ in ─┬─┤  HP(Xover Low)·LP(Xover High) ────── mid  ─┤    detect = fastEnv − slowEnv (× Detector)
+     │ └─ HP(Xover High) ──────────────────── high ─┤    g_b = dB→lin(Attack·att_w + Sustain·sus_w)
+     │                                               │    (Solo: out = Σ soloed g_b·band_b)
+ dry ┴───────────────────────────────────────────────┴─ out = x + Mix·Σ(g_b − 1)·band_b · Out
+```
+
+## Controls
+
+- **Xover Low** — low↔mid crossover frequency, 20–800 Hz (LR4, 24 dB/oct).
+- **Xover High** — mid↔high crossover frequency, 800–8000 Hz; always kept above Xover Low.
+- **Low Attack** — gain on the low band's onsets, ±12 dB; up = more thump/punch.
+- **Low Sustain** — gain on the low band's body/tail, ±12 dB; down = a tighter, drier low end.
+- **Mid Attack** — gain on the mid band's onsets, ±12 dB.
+- **Mid Sustain** — gain on the mid band's body/tail, ±12 dB.
+- **High Attack** — gain on the high band's onsets, ±12 dB; down = softer transients (de-*tss*).
+- **High Sustain** — gain on the high band's body/tail, ±12 dB; up = more air/ring.
+- **Low Solo** — audition just the shaped low band (bypasses the dry).
+- **Mid Solo** — audition just the shaped mid band.
+- **High Solo** — audition just the shaped high band. Multiple solos sum.
+- **Detector** — scales the fast/slow envelope times together, 0.5–2.0; `<1` = faster/snappier, `>1` = slower/looser.
+- **Mix** — dry↔shaped blend, 0–100 %; **Mix = 0** is an exact bypass.
+- **Out** — output trim, ±24 dB.
+
+## Recipes
+
+1. **Dark-techno kick punch — "Warehouse Kick Punch"** — **Xover Low 110 Hz**, **Xover High 2400 Hz**,
+   **Low Attack +6 dB**, **Low Sustain −2 dB** (thump without boom), **Mid Attack +3 dB**,
+   **High Attack +1 dB**, **High Sustain −1 dB**, **Detector 0.9**, **Mix 100 %**. Snappier, harder
+   kicks and toms that cut through a dense mix.
+2. **Atmospheric-DnB pad bloom — "Atmos DnB Wash"** — **Xover Low 220 Hz**, **Xover High 2300 Hz**,
+   **Low/Mid/High Sustain +4 / +5 / +6 dB** (long, blooming tails), **attacks −1 / −2 / −3 dB**,
+   **Detector 2.0** (slow), **Mix 100 %**, **Out −1.5 dB**. Turns pads, Rhodes and washes into a
+   swelling atmospheric bed.
+3. **Vocal-rip de-click — "De-Click Foley"** — on a ripped a-cappella: **Xover Low 250 Hz**,
+   **Xover High 5000 Hz**, **Low/Mid/High Attack −4 / −5 / −6 dB** (softens plosives, mouth clicks
+   and edits), **Low/Mid/High Sustain +1 / +2 / +1 dB**, **Detector 0.7**, **Mix 100 %**, **Out +0.5 dB**.
+   Tap **High Solo** to isolate and check the sibilant clicks while you dial it in.

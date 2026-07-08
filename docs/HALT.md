@@ -130,3 +130,54 @@ transparent. Then:
 - **REVERSE** for reverse-fills; **HALF-SPEED** for a half-time drop.
 - Drive the modes from a MIDI clip (notes **C1..D#1**) to sequence a performance, or automate
   the mode buttons. Multiple at once → the last one wins.
+
+<!-- BUILT-IN-MANUALS: canonical sections rendered in-GUI by the '?' button (parsed by suite_core::manual). -->
+
+## What It Is
+
+A performance buffer FX: a 4-bar circular buffer is always recording, and four momentary modes
+replay the recent past live — **tape-stop**, **stutter**, **reverse** and **half-speed**. Idle it
+is a bit-exact passthrough; hold a mode (button, automation or MIDI note C1–D#1) for build-ups,
+drops, fills and glitch stutter edits, with a 5 ms crossfade on every transition so it never clicks.
+
+## Signal Flow
+
+```
+ in ─┬────────────────────────────────────────── dry ─────────────────────┐
+     └─ 4-bar circular capture (always recording) ─ read head(s) ─ wet ─────┤─ (1−Mix)/Mix ─ Out ─► out
+        momentary modes (last-pressed wins · 5 ms crossfades):             │
+          Tape Stop  rate 1→0 over Stop Time, Stop Curve, Release          │
+          Stutter    loop last Stutter Div · Stutter Decay · Pitch Step · Quantize
+          Reverse    read backward from trigger      Half Speed  read at rate 0.5
+```
+
+## Controls
+
+- **Tape Stop** — momentary button (MIDI C1): brakes playback rate 1→0 to a dead stop; hold to engage.
+- **Stutter** — momentary button (MIDI C#1): loops the recent past as a beat-repeat; hold to engage.
+- **Reverse** — momentary button (MIDI D1): plays the buffer backward from the trigger point.
+- **Half Speed** — momentary button (MIDI D#1): reads forward at rate 0.5 (down an octave, half tempo).
+- **Stutter Div** — stutter loop length: 1/4 / 1/8 / 1/16 / 1/32 / 1/64.
+- **Stutter Decay** — per-repeat level loss, 0–100 % (0 = a flat, non-fading roll).
+- **Pitch Step** — per-repeat transpose, −12…+12 st (the loop period stays exact — the read speeds up).
+- **Stop Time** — synced tape-stop duration: Free / 1 Beat / ½ Bar / 1 Bar / 2 Bar.
+- **Stop Free** — tape-stop duration when **Stop Time = Free**, 0.05–4 s.
+- **Stop Curve** — tape-stop deceleration shape, 0–1 (0 exp · 0.5 linear · 1 log).
+- **Release** — tape-stop release: **Ramp** (spin back up to speed, then rejoin) or **Instant** (jump straight back to live).
+- **Quantize** — snap the stutter loop anchor to the beat grid: Off / 1/16 / 1/8 / 1/4.
+- **Mix** — dry/wet blend, 0–100 % (usually 100 %); **Mix = 0** is an exact passthrough even while a mode is active.
+- **Out** — wet output trim, ±24 dB.
+
+Note: the four mode buttons are live performance state — presets store only the character knobs.
+
+## Recipes
+
+1. **Dark-techno power-down — "Warehouse Power-Down"** — at the end of a phrase, hold **Tape Stop**
+   with **Stop Time 2 Bar**, **Stop Curve 0.85** (slow-then-fast collapse), **Release Ramp**,
+   **Mix 100 %**, **Out −1 dB**. The whole groove brakes to a dead stop into the drop.
+2. **Atmospheric-DnB half-time drop — "Half-Time Haze"** — hold **Half Speed** across a bar for an
+   instant octave-down, half-tempo section; the preset sets **Stutter Decay 15 %**, **Stop Curve 0.65**,
+   **Mix 100 %**, **Out −0.5 dB**. Perfect for dropping a break into a hazy half-time.
+3. **Vocal-rip stutter chop — "Amen Skip 32nd"** — on a ripped vocal or break, hold **Stutter**:
+   **Stutter Div 1/32**, **Stutter Decay 15 %**, **Quantize 1/8** (locks the roll to the grid),
+   **Pitch Step 0**, **Mix 100 %**. Tap it rhythmically for glitchy beat-repeat stutters on the phrase.

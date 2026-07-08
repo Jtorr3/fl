@@ -24,6 +24,9 @@ pub mod presets;
 use dsp::{BandaidCore, Settings};
 use suite_core::presets::{load_all, Preset};
 
+/// Usage manual embedded from docs, rendered in-GUI by the '?' button (BUILT-IN-MANUALS).
+pub const MANUAL_DOC: &str = include_str!("../../../docs/BANDAID.md");
+
 /// Plain-number string→value parser for the dB / scale params stored as raw values (strips a
 /// trailing unit like " dB"). Mirrors CARVE's `num_s2v`.
 fn num_s2v() -> Arc<dyn Fn(&str) -> Option<f32> + Send + Sync> {
@@ -282,6 +285,7 @@ impl Plugin for Bandaid {
                         ui.heading(
                             egui::RichText::new("QEYNOS · BANDAID").color(suite_core::ui::ACCENT),
                         );
+                        suite_core::ui::manual_button(ui, "bandaid", "BANDAID", MANUAL_DOC);
                         ui.label(
                             egui::RichText::new(
                                 "multiband transient designer — LR4 3-band attack / sustain shaping",

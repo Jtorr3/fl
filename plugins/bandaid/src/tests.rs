@@ -15,6 +15,15 @@ use suite_core::harness::{
 };
 use suite_core::testsig::{self, KickSpec};
 
+/// BUILT-IN-MANUALS cross-check: the embedded manual documents every param and has recipes.
+#[test]
+fn manual_covers_all_params_and_has_recipes() {
+    suite_core::manual::assert_manual_covers_params(
+        crate::MANUAL_DOC,
+        &crate::BandaidParams::default(),
+    );
+}
+
 const SR: f32 = 48_000.0;
 const XLOW: f32 = 300.0;
 const XHIGH: f32 = 2500.0;

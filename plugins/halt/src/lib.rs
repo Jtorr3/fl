@@ -25,6 +25,9 @@ pub mod presets;
 use dsp::{HaltCore, QuantDiv, Settings, StutterDiv, TapeRelease, TapeSync, NUM_MODES};
 use suite_core::presets::{load_all, Preset};
 
+/// Usage manual embedded from docs, rendered in-GUI by the '?' button (BUILT-IN-MANUALS).
+pub const MANUAL_DOC: &str = include_str!("../../../docs/HALT.md");
+
 /// Lowest MIDI note that triggers a mode (C1 in FL's C5=60 convention). Notes base..base+3
 /// map to tape-stop / stutter / reverse / half-speed (within the C1..E1 region SPECS calls out).
 const MODE_BASE_NOTE: u8 = 36;
@@ -416,6 +419,7 @@ impl Plugin for Halt {
                         ui.heading(
                             egui::RichText::new("QEYNOS · HALT").color(suite_core::ui::ACCENT),
                         );
+                        suite_core::ui::manual_button(ui, "halt", "HALT", MANUAL_DOC);
                         ui.label(
                             egui::RichText::new(
                                 "performance buffer — tape-stop / stutter / reverse / half-speed",
