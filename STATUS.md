@@ -1,6 +1,6 @@
 # STATUS
 
-CURRENT: (none) | STEP: - | ATTEMPTS: 0 | LAST-ACTION: FLYBY SHIPPED (full, [x]) — doppler spatializer. cargo test -p flyby GREEN (9 tests: 4 done-bars + universal/null/render/smooth); build.ps1 flyby GREEN (clap-validator 0 failed, pluginval --strictness-level 8 0 failed, CLAP+VST3 installed). Next §7 item: CLEAVE (Phase 2b multi-slicer).
+CURRENT: CLEAVE | STEP: 1 | ATTEMPTS: 0 | LAST-ACTION: start(CLEAVE) — Phase 2b multi-slicer (Slice clone). First: promote fake-transport to suite_core::testsig (TransportFrame + FakeTransport), then build the cleave crate. Start commit at f2a9244.
 PUSH-PENDING: no
 DONE: BOOTSTRAP, GRIT, EMBER, IMPACT, TRACER, OVERSEER, W8-VITALGEN, W4-SESSION-BOOTSTRAP, HARD-CHECKPOINT-1, DRIFT, WIRE, OUROBOROS, SWARM, SMUDGE, MURMUR, UNDERTOW, SNAP, SEANCE, W9-VOXRIP, VOXKEY, VOXFIT, UI-CORE-FIX, ASCEND, W1-RUMBLE-BASSLINE, W2-BREAK-CHOP, W3-DARK-PROGRESSION, HARD-CHECKPOINT-2, PRESET-SYSTEM, OVERSEER-ENRICH, FLYBY
 DESCOPED: GRIT Mode C (spectral STFT) → DEFERRED.md; OVERSEER Ozone hosting + tier-2 bus (by spec/design) → DEFERRED.md; W4 tempo application (no MCP command exists) → DEFERRED.md; WIRE true-per-bandwidth Opus internal-rate + real FEC/PLC (opus-rs 12k/24k paths buggy; PRD §5-sanctioned pre-LP approximation) → DEFERRED.md (NOT an attempt-budget descope; WIRE shipped full)
