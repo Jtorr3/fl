@@ -557,11 +557,27 @@ struct BarState {
 pub struct PresetBar<'a> {
     plugin_id: &'a str,
     factory: &'a [Preset],
+    /// OVERSEER-ENRICH: when `Some(category)` the factory dropdown surfaces the presets
+    /// tagged with that category ([`Preset::category`]) first under a category heading — the
+    /// Node bar passes its current instrument type, the Master bar its inferred theme. The
+    /// rest of the factory bank is still listed under an OTHER heading (nothing is hidden).
+    filter: Option<String>,
 }
 
 impl<'a> PresetBar<'a> {
     pub fn new(plugin_id: &'a str, factory: &'a [Preset]) -> Self {
-        Self { plugin_id, factory }
+        Self {
+            plugin_id,
+            factory,
+            filter: None,
+        }
+    }
+
+    /// Filter the factory bank by a category tag (instrument type / session theme). `None`
+    /// (the default) shows one flat FACTORY list, exactly as before OVERSEER-ENRICH.
+    pub fn filter(mut self, category: Option<impl Into<String>>) -> Self {
+        self.filter = category.map(Into::into);
+        self
     }
 
     /// Draw the bar. `params` drives the generic snapshot/apply + dirty dot;
@@ -603,8 +619,10 @@ impl<'a> PresetBar<'a> {
                 .selected_text(selected)
                 .width(180.0)
                 .show_ui(ui, |ui| {
-                    ui.label(egui::RichText::new("FACTORY").color(ACCENT).small());
-                    for p in self.factory.iter() {
+                    // Factory bank. With a category filter (OVERSEER-ENRICH type/theme banks)
+                    // the matching presets are surfaced first under a category heading, then
+                    // the rest under OTHER; without a filter it is one flat FACTORY list.
+                    let choose = |ui: &mut egui::Ui, st: &mut BarState, p: &Preset| {
                         if ui.selectable_label(false, &p.name).clicked() {
                             apply_factory(setter, p);
                             st.baseline = snapshot_params(params);
@@ -612,6 +630,42 @@ impl<'a> PresetBar<'a> {
                             st.current_is_user = false;
                             st.delete_arm = false;
                             st.error.clear();
+                        }
+                    };
+                    match self.filter.as_deref() {
+                        Some(cat) => {
+                            ui.label(egui::RichText::new(cat).color(ACCENT).small());
+                            let mut matched = 0usize;
+                            for p in self.factory.iter() {
+                                if p.category.as_deref() == Some(cat) {
+                                    choose(ui, &mut st, p);
+                                    matched += 1;
+                                }
+                            }
+                            if matched == 0 {
+                                ui.label(
+                                    egui::RichText::new("(no bank for this type)")
+                                        .color(TEXT_DIM)
+                                        .small(),
+                                );
+                            }
+                            let has_other =
+                                self.factory.iter().any(|p| p.category.as_deref() != Some(cat));
+                            if has_other {
+                                ui.separator();
+                                ui.label(egui::RichText::new("OTHER").color(TEXT_DIM).small());
+                                for p in self.factory.iter() {
+                                    if p.category.as_deref() != Some(cat) {
+                                        choose(ui, &mut st, p);
+                                    }
+                                }
+                            }
+                        }
+                        None => {
+                            ui.label(egui::RichText::new("FACTORY").color(ACCENT).small());
+                            for p in self.factory.iter() {
+                                choose(ui, &mut st, p);
+                            }
                         }
                     }
                     ui.separator();

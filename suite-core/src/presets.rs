@@ -21,6 +21,13 @@ use std::path::PathBuf;
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Preset {
     pub name: String,
+    /// Optional thematic-bank tag (OVERSEER-ENRICH: instrument type for the Node bar,
+    /// session theme for the Master bar). `#[serde(default)]` keeps this back-compatible —
+    /// existing factory JSON and all user presets simply omit it (→ `None`), and it is not
+    /// serialized when absent, so user-preset files on disk are unchanged. Consumed as a
+    /// typed field so it never lands in the numeric `values` map.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
     /// Remaining JSON fields (all numeric) collected as parameter values.
     #[serde(flatten)]
     pub values: BTreeMap<String, f32>,
@@ -155,6 +162,7 @@ pub fn save_user(
     let path = dir.join(format!("{clean}.json"));
     let preset = Preset {
         name: clean,
+        category: None,
         values: values.clone(),
     };
     let json = serde_json::to_string_pretty(&preset)
@@ -204,6 +212,40 @@ mod tests {
         assert_eq!(p.get("drive"), Some(8.0));
         assert_eq!(p.get("mix"), Some(100.0));
         assert_eq!(p.get("missing"), None);
+    }
+
+    #[test]
+    fn category_is_backcompat_and_optional() {
+        // Legacy factory/user JSON with no category → None, and no numeric leakage.
+        let p = Preset::parse(r#"{ "name": "Legacy", "drive": 8.0 }"#).unwrap();
+        assert_eq!(p.category, None);
+        assert_eq!(p.get("drive"), Some(8.0));
+
+        // Tagged factory JSON → category is consumed as a typed field, not a value.
+        let t = Preset::parse(
+            r#"{ "name": "Warehouse Thump", "category": "KICK", "drive": 4.0, "width": 0.0 }"#,
+        )
+        .unwrap();
+        assert_eq!(t.category.as_deref(), Some("KICK"));
+        assert_eq!(t.get("category"), None, "category must not leak into values");
+        assert_eq!(t.get("drive"), Some(4.0));
+
+        // Round-trips through serde, and a None category is omitted from the output.
+        let none = Preset {
+            name: "N".into(),
+            category: None,
+            values: vals(&[("x", 1.0)]),
+        };
+        let js = serde_json::to_string(&none).unwrap();
+        assert!(!js.contains("category"), "None category must not serialize: {js}");
+        let some = Preset {
+            name: "S".into(),
+            category: Some("PAD".into()),
+            values: vals(&[("x", 1.0)]),
+        };
+        let js2 = serde_json::to_string(&some).unwrap();
+        assert!(js2.contains("\"category\":\"PAD\""));
+        assert_eq!(Preset::parse(&js2).unwrap().category.as_deref(), Some("PAD"));
     }
 
     #[test]
