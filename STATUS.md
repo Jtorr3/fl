@@ -1,6 +1,6 @@
 # STATUS
 
-CURRENT: PRESET-SYSTEM | STEP: 1 | ATTEMPTS: 0 | LAST-ACTION: start — suite-wide user preset save/load + preset bar, retrofit all 18 editors. Start commit from 93fc81e (all 18 crates green).
+CURRENT: PRESET-SYSTEM | STEP: 2-retrofit | ATTEMPTS: 0 | LAST-ACTION: suite-core disk tier (presets user save/load/list/delete + sanitize) + PresetBar widget + generic snapshot_params/apply_values done; 61 suite-core tests green incl real Documents path (C:SERSIGORONEDRIVEDOCUMENTS). NOW RETROFITTING 18 EDITORS.
 PUSH-PENDING: no
 DONE: BOOTSTRAP, GRIT, EMBER, IMPACT, TRACER, OVERSEER, W8-VITALGEN, W4-SESSION-BOOTSTRAP, HARD-CHECKPOINT-1, DRIFT, WIRE, OUROBOROS, SWARM, SMUDGE, MURMUR, UNDERTOW, SNAP, SEANCE, W9-VOXRIP, VOXKEY, VOXFIT, UI-CORE-FIX, ASCEND, W1-RUMBLE-BASSLINE, W2-BREAK-CHOP, W3-DARK-PROGRESSION, HARD-CHECKPOINT-2
 DESCOPED: GRIT Mode C (spectral STFT) → DEFERRED.md; OVERSEER Ozone hosting + tier-2 bus (by spec/design) → DEFERRED.md; W4 tempo application (no MCP command exists) → DEFERRED.md; WIRE true-per-bandwidth Opus internal-rate + real FEC/PLC (opus-rs 12k/24k paths buggy; PRD §5-sanctioned pre-LP approximation) → DEFERRED.md (NOT an attempt-budget descope; WIRE shipped full)

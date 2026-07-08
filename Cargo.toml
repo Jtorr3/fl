@@ -20,6 +20,10 @@ serde_json = "1"
 # Pure-Rust real FFT (wraps rustfft); no C, no CMake — safe on windows-gnu. Backs
 # suite_core::stft (EMBER, later SMUDGE/SEANCE/CARVE/DRIFT reuse it).
 realfft = "3"
+# Resolves the OneDrive-redirected Documents folder via the Windows known-folder API
+# (SHGetKnownFolderPath / FOLDERID_Documents) — NEVER a literal %USERPROFILE%\Documents.
+# Pure Rust (dirs-sys → windows-sys, already in the tree); backs the user-preset disk tier.
+dirs = "5"
 
 # Release profile tuned for real plugin bundles. thin LTO keeps cold-build time sane
 # while still inlining across crates.

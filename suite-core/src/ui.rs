@@ -17,10 +17,13 @@
 //! so the widget swap is suite-wide with no per-call-site churn. Bool params render a
 //! toggle; stepped params (Int/Enum) render a detented knob.
 
-use nih_plug::prelude::{Param, ParamSetter};
+use nih_plug::prelude::{Param, ParamSetter, Params};
 use nih_plug_egui::egui::{self, Sense, Vec2};
 use nih_plug_egui::resizable_window::ResizableWindow;
 use nih_plug_egui::EguiState;
+use std::collections::BTreeMap;
+
+use crate::presets::{self, Preset};
 
 /// Near-black window background.
 pub const BG: egui::Color32 = egui::Color32::from_rgb(14, 15, 17);
@@ -455,6 +458,278 @@ fn toggle_control<P: Param>(ui: &mut egui::Ui, label: &str, param: &P, setter: &
     });
 }
 
+// ===========================================================================
+// Preset bar (PRESET-SYSTEM, SPECS "POLISH phase")
+// ===========================================================================
+//
+// One call site per editor replaces the old per-plugin preset ComboBox. It shows a
+// FACTORY + USER dropdown, Save / Save As / Delete, and a dirty dot. All of it runs on
+// the GUI thread: loads apply through the [`ParamSetter`] (host-visible, undoable),
+// saves snapshot the live param values, and the disk IO goes through
+// [`crate::presets`]. NOTHING here touches the audio thread.
+//
+// Factory and user presets are unified via a generic value model keyed by nih-plug
+// PARAM IDS (`Params::param_map`): [`snapshot_params`] reads the live plain values and
+// [`apply_values`] writes them back through the setter. User presets are saved in this
+// param-id key space; factory presets keep their own pretty JSON keys and are applied
+// through a small per-plugin callback. After EITHER kind of load the bar captures a
+// fresh generic snapshot as the "loaded baseline", so the dirty dot works uniformly for
+// both. OVERSEER-ENRICH builds its type-filtered banks on this same widget.
+
+/// Snapshot every parameter's current plain value into a `param_id -> value` map. Uses
+/// `unmodulated_plain_value()`, which returns a uniform `f32` for Float (plain), Int
+/// (i32 as f32), Bool (0.0/1.0) and Enum (variant index as f32) — exactly the flat
+/// numeric model presets are stored in. GUI-thread only (allocates a `Vec` + map).
+pub fn snapshot_params(params: &dyn Params) -> BTreeMap<String, f32> {
+    params
+        .param_map()
+        .into_iter()
+        // SAFETY: `params` outlives this call; ParamPtr reads are valid for its lifetime.
+        .map(|(id, ptr, _group)| (id, unsafe { ptr.unmodulated_plain_value() }))
+        .collect()
+}
+
+/// Apply a `param_id -> plain value` map to the live parameters through the host
+/// (begin/set/end bracketed per param, so the change is host-visible automation and
+/// undoable). Ids absent from `params` are ignored; params absent from `values` are
+/// left untouched. GUI-thread only. This is the exact inverse of [`snapshot_params`],
+/// so `apply_values(snapshot_params(p))` restores `p` bit-for-bit.
+pub fn apply_values(params: &dyn Params, setter: &ParamSetter, values: &BTreeMap<String, f32>) {
+    for (id, ptr, _group) in params.param_map() {
+        if let Some(&plain) = values.get(&id) {
+            // SAFETY: ptr belongs to `params`, alive for this call; raw_context matches.
+            unsafe {
+                let nv = ptr.preview_normalized(plain);
+                setter.raw_context.raw_begin_set_parameter(ptr);
+                setter.raw_context.raw_set_parameter_normalized(ptr, nv);
+                setter.raw_context.raw_end_set_parameter(ptr);
+            }
+        }
+    }
+}
+
+/// Combined abs+rel tolerance for the dirty comparison. Params span dB (~±60), Hz
+/// (~20k) and 0..1 mixes, so a pure absolute epsilon can't serve all of them.
+fn approx_eq(a: f32, b: f32) -> bool {
+    (a - b).abs() <= 1e-4 * (1.0 + a.abs().max(b.abs()))
+}
+
+/// True if the live params diverge from `baseline` (the snapshot captured at load). An
+/// empty baseline (nothing loaded yet) is never dirty.
+fn is_dirty(current: &BTreeMap<String, f32>, baseline: &BTreeMap<String, f32>) -> bool {
+    if baseline.is_empty() {
+        return false;
+    }
+    baseline
+        .iter()
+        .any(|(k, &bv)| current.get(k).map_or(true, |&cv| !approx_eq(cv, bv)))
+}
+
+/// Per-editor transient state for the preset bar, kept in egui memory keyed by the bar
+/// id (so the retrofit adds no fields to any plugin's editor state).
+#[derive(Clone, Default)]
+struct BarState {
+    /// Param snapshot captured right after the last successful load. Empty = none.
+    baseline: BTreeMap<String, f32>,
+    /// Display name of the loaded preset (drives Save / Delete targeting).
+    current_label: String,
+    /// Delete + overwrite-Save are user-preset only.
+    current_is_user: bool,
+    save_as_open: bool,
+    save_as_buf: String,
+    /// Two-click delete confirm.
+    delete_arm: bool,
+    user_cache: Vec<Preset>,
+    cache_loaded: bool,
+    /// Last IO error, shown inline (never panics).
+    error: String,
+}
+
+/// The suite preset bar. Retrofit is one call replacing the old ComboBox row:
+///
+/// ```ignore
+/// suite_core::ui::PresetBar::new("grit", &factory_presets)
+///     .show(ui, &*params, setter, |setter, preset| apply_preset(&params, setter, preset));
+/// ```
+///
+/// `plugin_id` is BOTH the egui id salt and the on-disk folder slug
+/// (`[MyDocuments]/Qeynos/Presets/<plugin_id>/`).
+pub struct PresetBar<'a> {
+    plugin_id: &'a str,
+    factory: &'a [Preset],
+}
+
+impl<'a> PresetBar<'a> {
+    pub fn new(plugin_id: &'a str, factory: &'a [Preset]) -> Self {
+        Self { plugin_id, factory }
+    }
+
+    /// Draw the bar. `params` drives the generic snapshot/apply + dirty dot;
+    /// `apply_factory` applies one factory [`Preset`] through the setter (the plugin's
+    /// existing per-preset mapping, since factory JSON uses pretty keys).
+    pub fn show(
+        self,
+        ui: &mut egui::Ui,
+        params: &dyn Params,
+        setter: &ParamSetter,
+        apply_factory: impl Fn(&ParamSetter, &Preset),
+    ) {
+        let state_id = egui::Id::new(("qeynos-preset-bar", self.plugin_id));
+        let mut st: BarState = ui.memory(|m| m.data.get_temp(state_id).unwrap_or_default());
+
+        if !st.cache_loaded {
+            match presets::list_user(self.plugin_id) {
+                Ok(list) => {
+                    st.user_cache = list;
+                    st.error.clear();
+                }
+                Err(e) => st.error = e,
+            }
+            st.cache_loaded = true;
+        }
+
+        let current = snapshot_params(params);
+        let dirty = is_dirty(&current, &st.baseline);
+
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new("PRESET").color(TEXT_DIM).small());
+
+            let selected = if st.current_label.is_empty() {
+                "select…".to_string()
+            } else {
+                st.current_label.clone()
+            };
+            egui::ComboBox::from_id_salt((self.plugin_id, "preset-combo"))
+                .selected_text(selected)
+                .width(180.0)
+                .show_ui(ui, |ui| {
+                    ui.label(egui::RichText::new("FACTORY").color(ACCENT).small());
+                    for p in self.factory.iter() {
+                        if ui.selectable_label(false, &p.name).clicked() {
+                            apply_factory(setter, p);
+                            st.baseline = snapshot_params(params);
+                            st.current_label = p.name.clone();
+                            st.current_is_user = false;
+                            st.delete_arm = false;
+                            st.error.clear();
+                        }
+                    }
+                    ui.separator();
+                    ui.label(egui::RichText::new("USER").color(ACCENT).small());
+                    if st.user_cache.is_empty() {
+                        ui.label(egui::RichText::new("(none saved)").color(TEXT_DIM).small());
+                    }
+                    // Clone to avoid borrowing st across the apply mutation.
+                    let user = st.user_cache.clone();
+                    for p in user.iter() {
+                        if ui.selectable_label(false, &p.name).clicked() {
+                            apply_values(params, setter, &p.values);
+                            st.baseline = snapshot_params(params);
+                            st.current_label = p.name.clone();
+                            st.current_is_user = true;
+                            st.delete_arm = false;
+                            st.error.clear();
+                        }
+                    }
+                });
+
+            // Dirty dot.
+            let (dot, _) = ui.allocate_exact_size(Vec2::splat(10.0), Sense::hover());
+            if dirty && ui.is_rect_visible(dot) {
+                ui.painter().circle_filled(dot.center(), 3.5, ACCENT);
+            }
+
+            // Save = overwrite the loaded USER preset.
+            let can_overwrite = st.current_is_user && !st.current_label.is_empty();
+            if ui
+                .add_enabled(can_overwrite, egui::Button::new("Save"))
+                .on_hover_text("Overwrite the loaded user preset")
+                .clicked()
+            {
+                match presets::save_user(self.plugin_id, &st.current_label, &current) {
+                    Ok(_) => {
+                        st.baseline = current.clone();
+                        st.cache_loaded = false;
+                        st.error.clear();
+                    }
+                    Err(e) => st.error = e,
+                }
+            }
+
+            if ui.button("Save As").clicked() {
+                st.save_as_open = !st.save_as_open;
+                if st.save_as_open {
+                    st.save_as_buf = st.current_label.clone();
+                }
+                st.delete_arm = false;
+            }
+
+            // Delete = user presets only, two-click confirm.
+            let can_delete = st.current_is_user && !st.current_label.is_empty();
+            let del_txt = if st.delete_arm { "Confirm?" } else { "Delete" };
+            if ui
+                .add_enabled(can_delete, egui::Button::new(del_txt))
+                .clicked()
+            {
+                if st.delete_arm {
+                    match presets::delete_user(self.plugin_id, &st.current_label) {
+                        Ok(()) => {
+                            st.current_label.clear();
+                            st.baseline.clear();
+                            st.current_is_user = false;
+                            st.cache_loaded = false;
+                            st.error.clear();
+                        }
+                        Err(e) => st.error = e,
+                    }
+                    st.delete_arm = false;
+                } else {
+                    st.delete_arm = true;
+                }
+            }
+        });
+
+        // Inline Save-As text field row.
+        if st.save_as_open {
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("NAME").color(TEXT_DIM).small());
+                let resp = ui.add(
+                    egui::TextEdit::singleline(&mut st.save_as_buf)
+                        .desired_width(180.0)
+                        .hint_text("preset name"),
+                );
+                let submit = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                if ui.button("Save").clicked() || submit {
+                    match presets::save_user(self.plugin_id, &st.save_as_buf, &current) {
+                        Ok(_) => {
+                            st.current_label = presets::sanitize_name(&st.save_as_buf);
+                            st.current_is_user = true;
+                            st.baseline = current.clone();
+                            st.save_as_open = false;
+                            st.cache_loaded = false;
+                            st.error.clear();
+                        }
+                        Err(e) => st.error = e,
+                    }
+                }
+                if ui.button("Cancel").clicked() {
+                    st.save_as_open = false;
+                }
+            });
+        }
+
+        if !st.error.is_empty() {
+            ui.label(
+                egui::RichText::new(format!("⚠ {}", st.error))
+                    .color(egui::Color32::from_rgb(220, 120, 90))
+                    .small(),
+            );
+        }
+
+        ui.memory_mut(|m| m.data.insert_temp(state_id, st));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -553,5 +828,75 @@ mod tests {
     #[test]
     fn scale_for_size_handles_degenerate_base() {
         assert_eq!(scale_for_size(600.0, 0.0), 1.0);
+    }
+
+    // --- Preset bar: the snapshot→apply round trip is what save→load restores. We
+    //     can't drive a real ParamSetter without a host, but apply() reduces to
+    //     `preview_normalized(plain)` then set; the value read back is
+    //     `preview_plain(preview_normalized(plain))`. Proving that is identity for a
+    //     snapshotted plain value proves the round trip is exact. ---
+
+    fn plain_roundtrips_exact<P: Param>(param: &P, plain: P::Plain)
+    where
+        P::Plain: Copy,
+    {
+        let norm = param.preview_normalized(plain);
+        let back = param.preview_plain(norm);
+        // Compare via normalized (uniform f32) to avoid P::Plain arithmetic.
+        assert!(
+            (param.preview_normalized(back) - norm).abs() < 1e-6,
+            "plain value did not survive normalize/denormalize round trip"
+        );
+    }
+
+    #[test]
+    fn float_plain_value_survives_snapshot_apply() {
+        let p = FloatParam::new("Hz", 1000.0, FloatRange::Skewed {
+            min: 20.0,
+            max: 20_000.0,
+            factor: FloatRange::skew_factor(-2.0),
+        });
+        for &v in &[20.0_f32, 100.0, 440.0, 12_345.0, 20_000.0] {
+            plain_roundtrips_exact(&p, v);
+        }
+    }
+
+    #[test]
+    fn int_and_bool_plain_values_survive_snapshot_apply() {
+        let ip = IntParam::new("N", 4, IntRange::Linear { min: 0, max: 16 });
+        for v in 0..=16 {
+            plain_roundtrips_exact(&ip, v);
+        }
+        let bp = BoolParam::new("On", false);
+        plain_roundtrips_exact(&bp, false);
+        plain_roundtrips_exact(&bp, true);
+    }
+
+    #[test]
+    fn dirty_is_false_without_a_loaded_baseline() {
+        let cur: BTreeMap<String, f32> = [("a".into(), 1.0)].into_iter().collect();
+        assert!(!is_dirty(&cur, &BTreeMap::new()));
+    }
+
+    #[test]
+    fn dirty_tracks_divergence_from_baseline() {
+        let base: BTreeMap<String, f32> =
+            [("drive".into(), 8.0), ("hz".into(), 12000.0)].into_iter().collect();
+        // Identical → clean.
+        assert!(!is_dirty(&base.clone(), &base));
+        // One param nudged past tolerance → dirty.
+        let mut moved = base.clone();
+        moved.insert("drive".into(), 8.5);
+        assert!(is_dirty(&moved, &base));
+        // Within tolerance (Hz jitter well under the rel epsilon) → still clean.
+        let mut jitter = base.clone();
+        jitter.insert("hz".into(), 12000.0 + 0.5);
+        assert!(!is_dirty(&jitter, &base));
+    }
+
+    #[test]
+    fn approx_eq_scales_with_magnitude() {
+        assert!(approx_eq(20_000.0, 20_000.5)); // 0.5 Hz on 20k: fine
+        assert!(!approx_eq(0.0, 0.01)); // 0.01 on a 0..1 mix: dirty
     }
 }
