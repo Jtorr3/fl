@@ -16,7 +16,9 @@ use nih_plug_egui::{
 };
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, RwLock};
+use suite_core::bus::PluginKind;
 use suite_core::modlisten::ModRoutes;
+use suite_core::spectrum::SpectrumPublisher;
 
 pub mod dsp;
 pub mod presets;
@@ -85,6 +87,7 @@ pub struct Cleave {
     /// Published from `process` for the GUI playhead.
     cur_step: Arc<AtomicU32>,
     factory_presets: Arc<Vec<Preset>>,
+    spectrum: SpectrumPublisher,
 }
 
 #[derive(Params)]
@@ -189,6 +192,7 @@ impl Default for Cleave {
             grid_scratch: vec![StepData::default(); MAX_STEPS],
             cur_step: Arc::new(AtomicU32::new(0)),
             factory_presets: Arc::new(load_all(presets::PRESET_JSON)),
+            spectrum: SpectrumPublisher::new(),
         }
     }
 }
@@ -385,6 +389,7 @@ impl Plugin for Cleave {
         self.core = CleaveCore::new(buffer_config.sample_rate);
         // Dry path is zero-latency; the wet is a re-timed creative signal (no PDC).
         context.set_latency_samples(self.core.latency_samples());
+        self.spectrum.init(buffer_config.sample_rate, PluginKind::Generic, "CLEAVE");
         true
     }
 
@@ -461,7 +466,24 @@ impl Plugin for Cleave {
                 .store(self.core.current_step() as u32, Ordering::Relaxed);
         }
 
+        // Publish this instance's output spectrum to the suite bus (X-RAY reads it).
+        for mut xr_frame in buffer.iter_samples() {
+            let xr_n = xr_frame.len().max(1) as f32;
+            let mut xr_m = 0.0f32;
+            for xr_s in xr_frame.iter_mut() {
+                xr_m += *xr_s;
+            }
+            self.spectrum.feed(xr_m / xr_n);
+        }
+        self.spectrum.publish();
+
         ProcessStatus::Normal
+    }
+}
+
+impl Drop for Cleave {
+    fn drop(&mut self) {
+        self.spectrum.release();
     }
 }
 

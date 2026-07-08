@@ -15,7 +15,9 @@ use nih_plug_egui::{
     EguiState,
 };
 use std::sync::{Arc, RwLock};
+use suite_core::bus::PluginKind;
 use suite_core::modlisten::ModRoutes;
+use suite_core::spectrum::SpectrumPublisher;
 
 pub mod dsp;
 pub mod presets;
@@ -91,6 +93,7 @@ pub struct Grit {
     params: Arc<GritParams>,
     core: GritCore,
     factory_presets: Arc<Vec<Preset>>,
+    spectrum: SpectrumPublisher,
 }
 
 #[derive(Params)]
@@ -260,6 +263,7 @@ impl Default for Grit {
             params: Arc::new(GritParams::default()),
             core: GritCore::new(48_000.0),
             factory_presets: Arc::new(load_all(presets::PRESET_JSON)),
+            spectrum: SpectrumPublisher::new(),
         }
     }
 }
@@ -452,6 +456,8 @@ impl Plugin for Grit {
         self.core = GritCore::new(buffer_config.sample_rate);
         // Report the oversampler group delay the dry path is compensated by (PDC).
         context.set_latency_samples(self.core.latency_samples());
+        self.spectrum
+            .init(buffer_config.sample_rate, PluginKind::Generic, "GRIT");
         true
     }
 
@@ -527,7 +533,24 @@ impl Plugin for Grit {
             }
         }
 
+        // Publish this instance's output spectrum to the suite bus (X-RAY reads it).
+        for mut xr_frame in buffer.iter_samples() {
+            let xr_n = xr_frame.len().max(1) as f32;
+            let mut xr_m = 0.0f32;
+            for xr_s in xr_frame.iter_mut() {
+                xr_m += *xr_s;
+            }
+            self.spectrum.feed(xr_m / xr_n);
+        }
+        self.spectrum.publish();
+
         ProcessStatus::Normal
+    }
+}
+
+impl Drop for Grit {
+    fn drop(&mut self) {
+        self.spectrum.release();
     }
 }
 

@@ -22,7 +22,9 @@ pub mod presets;
 mod tests;
 
 use dsp::{RawControls, SeanceCore, CHOP_DIVISIONS, CHOP_PATTERNS};
+use suite_core::bus::PluginKind;
 use suite_core::presets::{load_all, Preset};
+use suite_core::spectrum::SpectrumPublisher;
 
 // ---------------------------------------------------------------------------
 // Plugin + params
@@ -32,6 +34,7 @@ pub struct Seance {
     params: Arc<SeanceParams>,
     core: SeanceCore,
     factory_presets: Arc<Vec<Preset>>,
+    spectrum: SpectrumPublisher,
 }
 
 #[derive(Params)]
@@ -220,6 +223,7 @@ impl Default for Seance {
             params: Arc::new(SeanceParams::default()),
             core: SeanceCore::new(48_000.0),
             factory_presets: Arc::new(load_all(presets::PRESET_JSON)),
+            spectrum: SpectrumPublisher::new(),
         }
     }
 }
@@ -397,6 +401,7 @@ impl Plugin for Seance {
     ) -> bool {
         self.core = SeanceCore::new(buffer_config.sample_rate);
         context.set_latency_samples(self.core.latency_samples());
+        self.spectrum.init(buffer_config.sample_rate, PluginKind::Generic, "SEANCE");
         true
     }
 
@@ -434,7 +439,24 @@ impl Plugin for Seance {
             }
         }
 
+        // Publish this instance's output spectrum to the suite bus (X-RAY reads it).
+        for mut xr_frame in buffer.iter_samples() {
+            let xr_n = xr_frame.len().max(1) as f32;
+            let mut xr_m = 0.0f32;
+            for xr_s in xr_frame.iter_mut() {
+                xr_m += *xr_s;
+            }
+            self.spectrum.feed(xr_m / xr_n);
+        }
+        self.spectrum.publish();
+
         ProcessStatus::Normal
+    }
+}
+
+impl Drop for Seance {
+    fn drop(&mut self) {
+        self.spectrum.release();
     }
 }
 

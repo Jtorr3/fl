@@ -16,7 +16,9 @@ use nih_plug_egui::{
 };
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, RwLock};
+use suite_core::bus::PluginKind;
 use suite_core::modlisten::ModRoutes;
+use suite_core::spectrum::SpectrumPublisher;
 
 pub mod dsp;
 pub mod presets;
@@ -308,6 +310,7 @@ pub struct Pluck {
     factory_presets: Arc<Vec<Preset>>,
     // Per-string activity envelope published to the GUI.
     activity: Arc<Vec<AtomicF32>>,
+    spectrum: SpectrumPublisher,
 }
 
 impl Default for Pluck {
@@ -322,6 +325,7 @@ impl Default for Pluck {
             held: [false; 128],
             factory_presets: Arc::new(load_all(presets::PRESET_JSON)),
             activity: Arc::new(activity),
+            spectrum: SpectrumPublisher::new(),
         }
     }
 }
@@ -543,6 +547,7 @@ impl Plugin for Pluck {
         self.core.set_sample_rate(buffer_config.sample_rate);
         // Zero processing latency (the strings/body are causal; wet-only latency, dry is direct).
         context.set_latency_samples(0);
+        self.spectrum.init(buffer_config.sample_rate, PluginKind::Generic, "PLUCK");
         true
     }
 
@@ -605,8 +610,25 @@ impl Plugin for Pluck {
             }
         }
 
+        // Publish this instance's output spectrum to the suite bus (X-RAY reads it).
+        for mut xr_frame in buffer.iter_samples() {
+            let xr_n = xr_frame.len().max(1) as f32;
+            let mut xr_m = 0.0f32;
+            for xr_s in xr_frame.iter_mut() {
+                xr_m += *xr_s;
+            }
+            self.spectrum.feed(xr_m / xr_n);
+        }
+        self.spectrum.publish();
+
         // KeepAlive: sympathetic/continuous modes and ringing tails outlast the input.
         ProcessStatus::KeepAlive
+    }
+}
+
+impl Drop for Pluck {
+    fn drop(&mut self) {
+        self.spectrum.release();
     }
 }
 

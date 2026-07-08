@@ -15,7 +15,9 @@ use nih_plug_egui::{
     EguiState,
 };
 use std::sync::{Arc, RwLock};
+use suite_core::bus::PluginKind;
 use suite_core::modlisten::ModRoutes;
+use suite_core::spectrum::SpectrumPublisher;
 
 pub mod dsp;
 pub mod presets;
@@ -51,6 +53,7 @@ pub struct Patina {
     params: Arc<PatinaParams>,
     core: PatinaCore,
     factory_presets: Arc<Vec<Preset>>,
+    spectrum: SpectrumPublisher,
 }
 
 #[derive(Params)]
@@ -190,6 +193,7 @@ impl Default for Patina {
             params: Arc::new(PatinaParams::default()),
             core: PatinaCore::new(48_000.0),
             factory_presets: Arc::new(load_all(presets::PRESET_JSON)),
+            spectrum: SpectrumPublisher::new(),
         }
     }
 }
@@ -347,6 +351,7 @@ impl Plugin for Patina {
     ) -> bool {
         self.core = PatinaCore::new(buffer_config.sample_rate);
         context.set_latency_samples(self.core.latency_samples());
+        self.spectrum.init(buffer_config.sample_rate, PluginKind::Generic, "PATINA");
         true
     }
 
@@ -395,7 +400,24 @@ impl Plugin for Patina {
             }
         }
 
+        // Publish this instance's output spectrum to the suite bus (X-RAY reads it).
+        for mut xr_frame in buffer.iter_samples() {
+            let xr_n = xr_frame.len().max(1) as f32;
+            let mut xr_m = 0.0f32;
+            for xr_s in xr_frame.iter_mut() {
+                xr_m += *xr_s;
+            }
+            self.spectrum.feed(xr_m / xr_n);
+        }
+        self.spectrum.publish();
+
         ProcessStatus::Normal
+    }
+}
+
+impl Drop for Patina {
+    fn drop(&mut self) {
+        self.spectrum.release();
     }
 }
 

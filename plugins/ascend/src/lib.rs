@@ -21,7 +21,9 @@ use nih_plug_egui::{
 };
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, RwLock};
+use suite_core::bus::PluginKind;
 use suite_core::modlisten::ModRoutes;
+use suite_core::spectrum::SpectrumPublisher;
 
 pub mod dsp;
 pub mod presets;
@@ -69,6 +71,7 @@ pub struct Ascend {
     last_trigger: bool,
     /// Last note-on note number (for key-track root).
     last_note: Option<u8>,
+    spectrum: SpectrumPublisher,
 }
 
 #[derive(Params)]
@@ -239,6 +242,7 @@ impl Default for Ascend {
             sample_rate: 48_000.0,
             last_trigger: false,
             last_note: None,
+            spectrum: SpectrumPublisher::new(),
         }
     }
 }
@@ -429,6 +433,7 @@ impl Plugin for Ascend {
     ) -> bool {
         self.sample_rate = buffer_config.sample_rate;
         self.engine = AscendEngine::new(buffer_config.sample_rate);
+        self.spectrum.init(buffer_config.sample_rate, PluginKind::Generic, "ASCEND");
         true
     }
 
@@ -524,7 +529,24 @@ impl Plugin for Ascend {
         self.shared.store_bars(self.engine.bars_remaining());
         self.shared.store_playing(playing);
 
+        // Publish this instance's output spectrum to the suite bus (X-RAY reads it).
+        for mut xr_frame in buffer.iter_samples() {
+            let xr_n = xr_frame.len().max(1) as f32;
+            let mut xr_m = 0.0f32;
+            for xr_s in xr_frame.iter_mut() {
+                xr_m += *xr_s;
+            }
+            self.spectrum.feed(xr_m / xr_n);
+        }
+        self.spectrum.publish();
+
         ProcessStatus::KeepAlive
+    }
+}
+
+impl Drop for Ascend {
+    fn drop(&mut self) {
+        self.spectrum.release();
     }
 }
 

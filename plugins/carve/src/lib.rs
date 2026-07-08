@@ -25,7 +25,9 @@ use nih_plug_egui::{
 };
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, RwLock};
+use suite_core::bus::PluginKind;
 use suite_core::modlisten::ModRoutes;
+use suite_core::spectrum::SpectrumPublisher;
 
 pub mod dsp;
 pub mod presets;
@@ -74,6 +76,7 @@ pub struct Carve {
     factory_presets: Arc<Vec<Preset>>,
     /// Per-display-band reduction (0..1) published to the GUI meter.
     meter: Arc<Vec<AtomicF32>>,
+    spectrum: SpectrumPublisher,
 }
 
 #[derive(Params)]
@@ -216,6 +219,7 @@ impl Default for Carve {
             core: CarveCore::new(48_000.0),
             factory_presets: Arc::new(load_all(presets::PRESET_JSON)),
             meter: Arc::new(meter),
+            spectrum: SpectrumPublisher::new(),
         }
     }
 }
@@ -364,6 +368,7 @@ impl Plugin for Carve {
     ) -> bool {
         self.core = CarveCore::new(buffer_config.sample_rate);
         context.set_latency_samples(self.core.latency() as u32);
+        self.spectrum.init(buffer_config.sample_rate, PluginKind::Generic, "CARVE");
         true
     }
 
@@ -438,7 +443,24 @@ impl Plugin for Carve {
             }
         }
 
+        // Publish this instance's output spectrum to the suite bus (X-RAY reads it).
+        for mut xr_frame in buffer.iter_samples() {
+            let xr_n = xr_frame.len().max(1) as f32;
+            let mut xr_m = 0.0f32;
+            for xr_s in xr_frame.iter_mut() {
+                xr_m += *xr_s;
+            }
+            self.spectrum.feed(xr_m / xr_n);
+        }
+        self.spectrum.publish();
+
         ProcessStatus::Normal
+    }
+}
+
+impl Drop for Carve {
+    fn drop(&mut self) {
+        self.spectrum.release();
     }
 }
 

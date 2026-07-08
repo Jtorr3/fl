@@ -25,7 +25,9 @@ pub mod dsp;
 pub mod presets;
 
 use dsp::{Settings, SwarmCore, SyncDivision};
+use suite_core::bus::PluginKind;
 use suite_core::presets::{load_all, Preset};
+use suite_core::spectrum::SpectrumPublisher;
 
 // ---------------------------------------------------------------------------
 // Param-facing division enum (mapped onto the pure-DSP enum).
@@ -89,6 +91,7 @@ pub struct Swarm {
     params: Arc<SwarmParams>,
     core: SwarmCore,
     factory_presets: Arc<Vec<Preset>>,
+    spectrum: SpectrumPublisher,
 }
 
 #[derive(Params)]
@@ -239,6 +242,7 @@ impl Default for Swarm {
             params: Arc::new(SwarmParams::default()),
             core: SwarmCore::new(48_000.0),
             factory_presets: Arc::new(load_all(presets::PRESET_JSON)),
+            spectrum: SpectrumPublisher::new(),
         }
     }
 }
@@ -428,6 +432,7 @@ impl Plugin for Swarm {
         self.core = SwarmCore::new(buffer_config.sample_rate);
         // A granulator is a time-smearing effect, not fixed latency ⇒ zero reported latency.
         context.set_latency_samples(self.core.latency_samples());
+        self.spectrum.init(buffer_config.sample_rate, PluginKind::Generic, "SWARM");
         true
     }
 
@@ -474,7 +479,24 @@ impl Plugin for Swarm {
             }
         }
 
+        // Publish this instance's output spectrum to the suite bus (X-RAY reads it).
+        for mut xr_frame in buffer.iter_samples() {
+            let xr_n = xr_frame.len().max(1) as f32;
+            let mut xr_m = 0.0f32;
+            for xr_s in xr_frame.iter_mut() {
+                xr_m += *xr_s;
+            }
+            self.spectrum.feed(xr_m / xr_n);
+        }
+        self.spectrum.publish();
+
         ProcessStatus::Normal
+    }
+}
+
+impl Drop for Swarm {
+    fn drop(&mut self) {
+        self.spectrum.release();
     }
 }
 

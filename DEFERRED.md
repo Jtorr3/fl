@@ -151,3 +151,25 @@ Each entry: item | feature | why | how to pick it back up.
   values), then apply the same 5-part GRIT recipe: persisted `mod_routes` field, `modulated_float`
   over the block settings before `configure`, and a `ui::mod_section` call in the editor. Nothing
   in `suite_core` needs to change — the API is complete and tested.
+
+## X-RAY spectrum-publishing — non-publishers deferred
+- **Decided 2026-07-08 (PRD §1.5 tractable-majority clause; X-RAY shipped with a publishing
+  MAJORITY — 25 plugins + X-RAY itself publish their 32-band output spectrum to the tier-2 bus).**
+- **What:** `suite_core::spectrum::{SpectrumTap, SpectrumPublisher}` + a uniform 4-part retrofit
+  (field, `init` in `initialize`, `feed`-loop + `publish` at the end of `process`, `release` in
+  `Drop`) were wired into: ascend, bandaid, carve, chamber, cleave, drift, ember, flyby, grit,
+  halt, impact, murmur, ouroboros, patina, pluck, seance, shapeshift, smudge, snap, swarm, tracer,
+  undertow, voxfit, voxkey, wire. These do NOT publish:
+  - **OVERSEER** — one bundle exporting TWO plugins (Node + Master) with its own tier-1 override
+    bus; a per-plugin spectrum publisher (which struct owns the slot, interaction with the
+    override/steal-back logic) needs care. Deferred to avoid regressing the tier-1 contract.
+  - **NERVE** — already claims a bus slot as a modulation *source* (kind Nerve, publishing 8 mod
+    streams). It is a transparent modulation utility, rarely the thing you analyze; publishing a
+    spectrum into the same slot would entangle two publish paths. Deferred.
+  - **_template** — the Phase 0 reference crate, kept intentionally minimal.
+- **Why acceptable:** X-RAY's value (see the whole session's spectral balance at once) is delivered
+  by the majority; the deferred three are exactly the structurally-unusual crates. The two-instance
+  done-bar and bit-exact passthrough both ship green.
+- **How to resume:** OVERSEER — pick the Node (post-processing) output to tap and give it its own
+  `SpectrumPublisher`; NERVE — either publish its input spectrum into its existing slot right after
+  `publish_mods`, or claim a second slot. `suite_core::spectrum` needs no change.

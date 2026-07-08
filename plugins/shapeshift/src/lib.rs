@@ -24,7 +24,9 @@ pub mod dsp;
 pub mod presets;
 
 use dsp::{Corner, OrbitShape, Settings, ShapeshiftCore, SyncDivision, NUM_CORNERS};
+use suite_core::bus::PluginKind;
 use suite_core::presets::{load_all, Preset};
+use suite_core::spectrum::SpectrumPublisher;
 
 // ---------------------------------------------------------------------------
 // Param-facing enums (nih-plug `Enum`), mapped onto the pure-DSP enums.
@@ -154,6 +156,7 @@ pub struct Shapeshift {
     /// Orbit phase published from `process` for the GUI moving dot.
     orbit_meter: Arc<AtomicF32>,
     factory_presets: Arc<Vec<Preset>>,
+    spectrum: SpectrumPublisher,
 }
 
 #[derive(Params)]
@@ -343,6 +346,7 @@ impl Default for Shapeshift {
             core: ShapeshiftCore::new(48_000.0),
             orbit_meter: Arc::new(AtomicF32::new(0.0)),
             factory_presets: Arc::new(load_all(presets::PRESET_JSON)),
+            spectrum: SpectrumPublisher::new(),
         }
     }
 }
@@ -531,6 +535,7 @@ impl Plugin for Shapeshift {
         self.core = ShapeshiftCore::new(buffer_config.sample_rate);
         // Report the oversampler group delay the dry path is compensated by (PDC).
         context.set_latency_samples(self.core.latency_samples());
+        self.spectrum.init(buffer_config.sample_rate, PluginKind::Generic, "SHAPESHIFT");
         true
     }
 
@@ -595,7 +600,24 @@ impl Plugin for Shapeshift {
             self.orbit_meter.store(self.core.orbit_phase(), Ordering::Relaxed);
         }
 
+        // Publish this instance's output spectrum to the suite bus (X-RAY reads it).
+        for mut xr_frame in buffer.iter_samples() {
+            let xr_n = xr_frame.len().max(1) as f32;
+            let mut xr_m = 0.0f32;
+            for xr_s in xr_frame.iter_mut() {
+                xr_m += *xr_s;
+            }
+            self.spectrum.feed(xr_m / xr_n);
+        }
+        self.spectrum.publish();
+
         ProcessStatus::Normal
+    }
+}
+
+impl Drop for Shapeshift {
+    fn drop(&mut self) {
+        self.spectrum.release();
     }
 }
 

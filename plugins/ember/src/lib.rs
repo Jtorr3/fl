@@ -22,7 +22,9 @@ pub mod dsp;
 pub mod presets;
 
 use dsp::{EmberCore, Settings, N_BANDS};
+use suite_core::bus::PluginKind;
 use suite_core::presets::{load_all, Preset};
+use suite_core::spectrum::SpectrumPublisher;
 
 /// Log-frequency center of factor band `idx` (0..N_BANDS-1), for GUI labels.
 fn band_center_hz(idx: usize) -> f32 {
@@ -46,6 +48,7 @@ pub struct Ember {
     params: Arc<EmberParams>,
     core: EmberCore,
     factory_presets: Arc<Vec<Preset>>,
+    spectrum: SpectrumPublisher,
 }
 
 #[derive(Params)]
@@ -193,6 +196,7 @@ impl Default for Ember {
             params: Arc::new(EmberParams::default()),
             core: EmberCore::new(48_000.0),
             factory_presets: Arc::new(load_all(presets::PRESET_JSON)),
+            spectrum: SpectrumPublisher::new(),
         }
     }
 }
@@ -360,6 +364,8 @@ impl Plugin for Ember {
     ) -> bool {
         self.core = EmberCore::new(buffer_config.sample_rate);
         context.set_latency_samples(self.core.latency() as u32);
+        self.spectrum
+            .init(buffer_config.sample_rate, PluginKind::Generic, "EMBER");
         true
     }
 
@@ -397,7 +403,24 @@ impl Plugin for Ember {
             }
         }
 
+        // Publish this instance's output spectrum to the suite bus (X-RAY reads it).
+        for mut xr_frame in buffer.iter_samples() {
+            let xr_n = xr_frame.len().max(1) as f32;
+            let mut xr_m = 0.0f32;
+            for xr_s in xr_frame.iter_mut() {
+                xr_m += *xr_s;
+            }
+            self.spectrum.feed(xr_m / xr_n);
+        }
+        self.spectrum.publish();
+
         ProcessStatus::Normal
+    }
+}
+
+impl Drop for Ember {
+    fn drop(&mut self) {
+        self.spectrum.release();
     }
 }
 

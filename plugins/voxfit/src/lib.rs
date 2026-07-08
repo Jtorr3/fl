@@ -22,7 +22,9 @@ pub mod presets;
 mod tests;
 
 use dsp::{Controls, VoxFitCore};
+use suite_core::bus::PluginKind;
 use suite_core::presets::{load_all, Preset};
+use suite_core::spectrum::SpectrumPublisher;
 
 // ---------------------------------------------------------------------------
 // Plugin + params
@@ -32,6 +34,7 @@ pub struct VoxFit {
     params: Arc<VoxFitParams>,
     core: VoxFitCore,
     factory_presets: Arc<Vec<Preset>>,
+    spectrum: SpectrumPublisher,
 }
 
 #[derive(Params)]
@@ -134,6 +137,7 @@ impl Default for VoxFit {
             params: Arc::new(VoxFitParams::default()),
             core: VoxFitCore::new(48_000.0),
             factory_presets: Arc::new(load_all(presets::PRESET_JSON)),
+            spectrum: SpectrumPublisher::new(),
         }
     }
 }
@@ -287,6 +291,7 @@ impl Plugin for VoxFit {
     ) -> bool {
         self.core = VoxFitCore::new(buffer_config.sample_rate);
         context.set_latency_samples(self.core.latency_samples());
+        self.spectrum.init(buffer_config.sample_rate, PluginKind::Generic, "VOXFIT");
         true
     }
 
@@ -322,7 +327,23 @@ impl Plugin for VoxFit {
             }
         }
 
+        // Publish this instance's output spectrum to the suite bus (X-RAY reads it).
+        for mut xr_frame in buffer.iter_samples() {
+            let xr_n = xr_frame.len().max(1) as f32;
+            let mut xr_m = 0.0f32;
+            for xr_s in xr_frame.iter_mut() {
+                xr_m += *xr_s;
+            }
+            self.spectrum.feed(xr_m / xr_n);
+        }
+        self.spectrum.publish();
         ProcessStatus::Normal
+    }
+}
+
+impl Drop for VoxFit {
+    fn drop(&mut self) {
+        self.spectrum.release();
     }
 }
 

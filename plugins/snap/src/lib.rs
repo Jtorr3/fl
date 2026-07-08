@@ -25,7 +25,9 @@ pub mod dsp;
 pub mod presets;
 
 use dsp::{Settings, SnapVoice, DECAY_REF_MS, KEYTRACK_REF_NOTE, MAX_TAPS};
+use suite_core::bus::PluginKind;
 use suite_core::presets::{load_all, Preset};
+use suite_core::spectrum::SpectrumPublisher;
 
 // ---------------------------------------------------------------------------
 // Plugin + params
@@ -35,6 +37,7 @@ pub struct Snap {
     params: Arc<SnapParams>,
     voice: SnapVoice,
     factory_presets: Arc<Vec<Preset>>,
+    spectrum: SpectrumPublisher,
 }
 
 #[derive(Params)]
@@ -159,6 +162,7 @@ impl Default for Snap {
             params: Arc::new(SnapParams::default()),
             voice: SnapVoice::new(48_000.0),
             factory_presets: Arc::new(load_all(presets::PRESET_JSON)),
+            spectrum: SpectrumPublisher::new(),
         }
     }
 }
@@ -322,6 +326,7 @@ impl Plugin for Snap {
         _context: &mut impl InitContext<Self>,
     ) -> bool {
         self.voice = SnapVoice::new(buffer_config.sample_rate);
+        self.spectrum.init(buffer_config.sample_rate, PluginKind::Generic, "SNAP");
         true
     }
 
@@ -387,7 +392,24 @@ impl Plugin for Snap {
             }
         }
 
+        // Publish this instance's output spectrum to the suite bus (X-RAY reads it).
+        for mut xr_frame in buffer.iter_samples() {
+            let xr_n = xr_frame.len().max(1) as f32;
+            let mut xr_m = 0.0f32;
+            for xr_s in xr_frame.iter_mut() {
+                xr_m += *xr_s;
+            }
+            self.spectrum.feed(xr_m / xr_n);
+        }
+        self.spectrum.publish();
+
         ProcessStatus::KeepAlive
+    }
+}
+
+impl Drop for Snap {
+    fn drop(&mut self) {
+        self.spectrum.release();
     }
 }
 
