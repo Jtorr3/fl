@@ -12,6 +12,7 @@ pub mod modlisten;
 pub mod pitch;
 pub mod presets;
 pub mod shift;
+pub mod spectrum;
 pub mod stft;
 pub mod testsig;
 
