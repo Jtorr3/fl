@@ -321,7 +321,7 @@ anything — key/tempo/character conforming; SEANCE's formant-preserving shift e
 is the shared core, built immediately before)
 - [x] W9-VOXRIP - [x] VOXKEY - [x] VOXFIT
 - [x] UI-CORE-FIX (knobs not sliders, uniform window scaling, working click-to-type — suite-wide retrofit; user-reported defects 2026-07-07)
-- [x] W1-RUMBLE-BASSLINE - [x] W2-BREAK-CHOP - [ ] W3-DARK-PROGRESSION
+- [x] W1-RUMBLE-BASSLINE - [x] W2-BREAK-CHOP - [x] W3-DARK-PROGRESSION
 **HARD CHECKPOINT**
 
 Pulled forward from POLISH (user priority 2026-07-07):

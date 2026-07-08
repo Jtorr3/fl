@@ -1,0 +1,532 @@
+"""DarkProgression - FL Studio Piano Roll script (Qeynos W3).
+
+Generates a DARK, in-key chord progression (natural minor / phrygian / harmonic
+minor) and, optionally, a HYPNOTIC arp lane riding above it - the Afterlife /
+melodic-techno vocabulary. Two lanes are written into the piano roll:
+
+  * CHORDS - a sustained pad in the lower register. Chords are built on scale
+             DEGREES (diatonic thirds), so every pitch is strictly in-key. With
+             Voice leading ON each chord after the first is re-voiced to the
+             INVERSION (+/- an octave) that minimises the summed semitone motion
+             from the previous chord (nearest-voice), with a deterministic
+             lowest-bass tiebreak - the chords "hold hands" instead of jumping.
+  * ARP    - an optional hypnotic arpeggio DERIVED FROM the current chord's
+             voicing, transposed to sit ABOVE the pad. Up / Down / Up-Down /
+             Random order, 8th- or 16th-note rate, 1-2 octave span, gate %, and
+             a seeded velocity/timing humanize.
+
+Progression presets (roman numerals are scale degrees of the chosen minor mode):
+  * Dark Pop   i - VI - III - VII   (the classic dark-pop loop)
+  * Hypnotic   i - i  - VI  - VII   (two bars of tonic before the lift)
+  * Tension    i - bII - i - VII     (phrygian flavour: bII is the b2 scale
+                                      degree, so use with the Phrygian scale)
+  * Wander     i - v  - VI  - iv
+  * Random     a seeded, deterministic dark-degree walk starting on the tonic.
+
+Suspensions: on NON-tonic chords a seeded, low-probability sus2/sus4 colour tone
+can replace the third (still strictly in-scale), for subtle harmonic movement.
+
+------------------------------------------------------------------------------
+Design choices (documented per the work order):
+
+* SELF-CONTAINED single file. FL Studio's piano-roll script sandbox blocks file
+  access, so an adjacent shared `.py` helper module can't be imported reliably -
+  everything lives here (same rule as W1 RumbleBassline / W2 BreakChop).
+
+* APPEND, not clear-and-write (W1 semantics). `apply()` ADDS the generated notes
+  to whatever is already in the piano roll, starting at the timeline SELECTION
+  start if one exists, else at tick 0. Clear the piano roll first (Ctrl+A,
+  Delete) for a fresh progression.
+
+* The generation logic is the PURE function `generate_progression(...)` (plus the
+  helpers `chord_voicings` / `progression_degrees`), which have NO dependency on
+  `flpianoroll` and return plain dicts / lists. FL only ever calls
+  `createDialog()` / `apply(form)`. This split lets the offline gate
+  (pyscripts/tests/test_darkprog.py) import and exercise the generator with a
+  mock `flpianoroll`, since FL cannot run piano-roll scripts headless. The
+  `import flpianoroll` is guarded so the module imports cleanly outside FL.
+
+* Chord timing is LOCKED to the bars-per-chord grid (a pad wants to sit still);
+  the seeded Timing humanize is applied to the ARP lane only. Velocity humanize
+  applies to both lanes.
+------------------------------------------------------------------------------
+"""
+
+import random
+
+# FL injects `flpianoroll` at runtime; guard the import so the module can also be
+# imported by the offline test harness (and by a mock) outside FL Studio.
+try:
+    import flpianoroll as flp
+except ImportError:  # running under the offline test gate / mock
+    flp = None
+
+
+# --------------------------------------------------------------------------- #
+# Music theory tables
+# --------------------------------------------------------------------------- #
+
+# Semitone offsets from the root for each supported (dark) scale/mode.
+SCALES = {
+    "minor":          [0, 2, 3, 5, 7, 8, 10],   # natural minor / Aeolian
+    "phrygian":       [0, 1, 3, 5, 7, 8, 10],   # b2 gives the dark flavour
+    "harmonic_minor": [0, 2, 3, 5, 7, 8, 11],
+}
+
+# Progression presets as 0-indexed SCALE DEGREES (0 = i/tonic ... 6 = VII).
+# `None` = generated deterministically from the seed (see progression_degrees).
+PRESETS = {
+    "dark_pop": [0, 5, 2, 6],   # i - VI - III - VII
+    "hypnotic": [0, 0, 5, 6],   # i - i  - VI  - VII
+    "tension":  [0, 1, 0, 6],   # i - bII - i - VII  (phrygian: degree 1 == b2)
+    "wander":   [0, 4, 5, 3],   # i - v  - VI  - iv
+    "random":   None,
+}
+
+# Dark-degree pool the Random preset walks (weighted toward VI/III/VII/iv/v).
+RANDOM_POOL = [5, 2, 6, 3, 4, 1]
+
+# Chord voicings as relative scale-degree stacks above the chord root.
+#   triad = root/3rd/5th ; 7th adds the 7th ; add9 adds the 9th up top (spread).
+VOICINGS = {
+    "triad": [0, 2, 4],
+    "7th":   [0, 2, 4, 6],
+    "add9":  [0, 2, 4, 8],   # 8 == the 2nd (9th) an octave up -> spread add9
+}
+# Index (within the voicing template) of the chord THIRD - the tone a suspension
+# replaces (rel degree 2 -> 1 for sus2, 3 for sus4).
+THIRD_POS = 1
+
+# Combo option lists (labels shown in FL) + the internal keys they map to.
+NOTE_NAMES = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
+OCTAVE_LABELS = ("1", "2", "3", "4", "5")
+SCALE_LABELS = ("Natural minor", "Phrygian", "Harmonic minor")
+SCALE_KEYS = ("minor", "phrygian", "harmonic_minor")
+PRESET_LABELS = ("Dark Pop i-VI-III-VII", "Hypnotic i-i-VI-VII",
+                 "Tension i-bII-i-VII", "Wander i-v-VI-iv", "Random-seeded")
+PRESET_KEYS = ("dark_pop", "hypnotic", "tension", "wander", "random")
+VOICING_LABELS = ("Triad", "7th", "add9 spread")
+VOICING_KEYS = ("triad", "7th", "add9")
+ARP_LABELS = ("Off", "Up", "Down", "Up-Down", "Random")
+ARP_KEYS = ("off", "up", "down", "updown", "random")
+RATE_LABELS = ("8th", "16th")
+RATE_KEYS = ("8th", "16th")
+BARS_PER_CHORD_LABELS = ("1", "2")
+TOTAL_BARS_LABELS = ("4", "8", "16")
+OCTAVE_SPAN_LABELS = ("1", "2")
+
+
+def note_name_to_midi(pitch_class, octave):
+    """MIDI number from a pitch-class index (C=0..B=11) and an octave.
+
+    Standard MIDI numbering (C-1 = 0), so C0 = 12 and the default C3 = 48 - a
+    dark-pad register. (FL *labels* octaves one higher than this scientific
+    convention, but Note.number is what matters and is what FL expects.)
+    """
+    return (int(octave) + 1) * 12 + int(pitch_class)
+
+
+# --------------------------------------------------------------------------- #
+# Degrees -> chord voicings (pure; the offline gate exercises these directly)
+# --------------------------------------------------------------------------- #
+
+def _deg_to_semi(offsets, degree):
+    """Semitone offset above the root for a (possibly >6) scale-degree index.
+
+    Degrees wrap the 7-note scale with an octave for every 7 steps, so a chord
+    built from relative degrees [0, 2, 4] over a base degree is always strictly
+    in-scale.
+    """
+    octv, idx = divmod(int(degree), 7)
+    return octv * 12 + offsets[idx]
+
+
+def progression_degrees(preset, chords_count, seed=1):
+    """Return the list of base scale degrees (length `chords_count`).
+
+    Named presets are cycled to fill the length; "random" walks RANDOM_POOL
+    deterministically from `seed`, always starting on the tonic (degree 0).
+    """
+    chords_count = max(1, int(chords_count))
+    if preset not in PRESETS:
+        raise ValueError("unknown preset: %r" % (preset,))
+    base = PRESETS[preset]
+    if base is not None:
+        return [base[i % len(base)] for i in range(chords_count)]
+    # Random-seeded: tonic first, then a no-immediate-repeat dark walk.
+    rng = random.Random(int(seed) ^ 0x5A17)
+    degs = [0]
+    while len(degs) < chords_count:
+        choice = rng.choice(RANDOM_POOL)
+        if choice == degs[-1]:
+            continue
+        degs.append(choice)
+    return degs[:chords_count]
+
+
+def _voicing_templates(degrees, voicing, sus_prob, seed):
+    """Per-chord relative-degree templates, applying seeded suspensions.
+
+    A suspension replaces the chord THIRD with a sus2 (rel degree 1) or sus4
+    (rel degree 3) and is only ever applied to NON-tonic chords (base degree
+    != 0), keeping the tone count constant (so voice leading still pairs up).
+    """
+    base_tmpl = VOICINGS[voicing]
+    rng = random.Random((int(seed) ^ 0x0D06) & 0x7FFFFFFF)
+    out = []
+    for deg in degrees:
+        tmpl = list(base_tmpl)
+        # Draw for EVERY chord (fixed RNG stream) but only apply off the tonic.
+        roll = rng.random()
+        pick = rng.random()
+        if deg % 7 != 0 and roll < sus_prob:
+            tmpl[THIRD_POS] = 1 if pick < 0.5 else 3   # sus2 vs sus4
+        out.append(tmpl)
+    return out
+
+
+def _motion(prev, cand):
+    """Summed nearest-voice semitone motion between two rendered chords.
+
+    Both are sorted ascending and paired position-by-position (voice = pitch
+    order), which is the nearest-voice assignment for equal-size chords.
+    """
+    a, b = sorted(prev), sorted(cand)
+    return sum(abs(x - y) for x, y in zip(a, b))
+
+
+def chord_voicings(root_midi, scale, degrees, voicing="triad",
+                   voice_leading=True, sus_prob=0.0, seed=1):
+    """Render each chord to a sorted list of MIDI pitches.
+
+    First chord is always ROOT POSITION. With `voice_leading` each subsequent
+    chord is re-voiced to the inversion (+/- one octave) minimising summed
+    semitone motion from the previous rendered chord; ties break to the lowest
+    bass. With `voice_leading=False` every chord is left in root position (the
+    reference the gate compares against).
+    """
+    if scale not in SCALES:
+        raise ValueError("unknown scale: %r" % (scale,))
+    if voicing not in VOICINGS:
+        raise ValueError("unknown voicing: %r" % (voicing,))
+    offsets = SCALES[scale]
+    templates = _voicing_templates(degrees, voicing, sus_prob, seed)
+
+    rendered = []
+    prev = None
+    for deg, tmpl in zip(degrees, templates):
+        root_pos = sorted(root_midi + _deg_to_semi(offsets, deg + rel)
+                          for rel in tmpl)
+        if prev is None or not voice_leading:
+            rendered.append(root_pos)
+            prev = root_pos
+            continue
+        best = None  # (cost, bass, candidate)
+        for rot in range(len(root_pos)):
+            inv = root_pos[rot:] + [p + 12 for p in root_pos[:rot]]
+            for octv in (-1, 0, 1):
+                cand = sorted(p + 12 * octv for p in inv)
+                key = (_motion(prev, cand), min(cand))
+                if best is None or key < best[0]:
+                    best = (key, cand)
+        rendered.append(best[1])
+        prev = best[1]
+    return rendered
+
+
+def total_motion(voicings):
+    """Sum of nearest-voice motion across consecutive chords (gate helper)."""
+    return sum(_motion(voicings[i - 1], voicings[i])
+               for i in range(1, len(voicings)))
+
+
+# --------------------------------------------------------------------------- #
+# Arp helpers
+# --------------------------------------------------------------------------- #
+
+def _arp_pool(chord_pitches, octaves):
+    """Chord tones lifted to sit ABOVE the pad, spanning `octaves` octaves.
+
+    Every pool pitch is a chord voicing pitch + a whole number of octaves, so it
+    is guaranteed (a) in the chord (same pitch class) and (b) above the pad's
+    highest note.
+    """
+    pad_top = max(chord_pitches)
+    lift = 12
+    while min(chord_pitches) + lift <= pad_top:
+        lift += 12
+    pool = set()
+    for o in range(max(1, int(octaves))):
+        for p in chord_pitches:
+            pool.add(p + lift + 12 * o)
+    return sorted(pool)
+
+
+def _arp_order(pool, mode, steps, rng):
+    """Sequence of `steps` pitches drawn from `pool` per the arp direction."""
+    n = len(pool)
+    if n == 0:
+        return []
+    seq = []
+    if mode == "up":
+        for s in range(steps):
+            seq.append(pool[s % n])
+    elif mode == "down":
+        for s in range(steps):
+            seq.append(pool[(n - 1) - (s % n)])
+    elif mode == "updown":
+        # triangle: 0..n-1..1 (endpoints not repeated), period 2n-2 (or 1).
+        cycle = list(range(n)) + list(range(n - 2, 0, -1)) if n > 1 else [0]
+        for s in range(steps):
+            seq.append(pool[cycle[s % len(cycle)]])
+    elif mode == "random":
+        for s in range(steps):
+            seq.append(rng.choice(pool))
+    else:
+        raise ValueError("unknown arp mode: %r" % (mode,))
+    return seq
+
+
+# --------------------------------------------------------------------------- #
+# The pure generator (importable & fully deterministic per seed)
+# --------------------------------------------------------------------------- #
+
+def generate_progression(
+    root_midi,
+    scale,
+    preset,
+    bars_per_chord,
+    total_bars,
+    ppq,
+    voicing="triad",
+    voice_leading=True,
+    arp_mode="off",
+    arp_rate="16th",
+    arp_octaves=1,
+    arp_gate_pct=70.0,
+    vel_base=90.0,
+    vel_humanize=8.0,
+    timing_humanize=3,
+    sus_prob=0.2,
+    seed=1,
+):
+    """Generate a dark chord progression (+ optional arp) as note-event dicts.
+
+    Parameters
+    ----------
+    root_midi       : int   MIDI number of the key root (see note_name_to_midi).
+    scale           : str   one of SCALES.
+    preset          : str   one of PRESET_KEYS.
+    bars_per_chord  : int   1 or 2.
+    total_bars      : int   total length in bars (e.g. 4 / 8 / 16).
+    ppq             : int   ticks per quarter note (from flp.score.PPQ).
+    voicing         : str   one of VOICING_KEYS.
+    voice_leading   : bool  nearest-voice inversions when True.
+    arp_mode        : str   one of ARP_KEYS ("off" = no arp lane).
+    arp_rate        : str   "8th" or "16th".
+    arp_octaves     : int   1 or 2 (arp octave span).
+    arp_gate_pct    : float arp note length as a % of the rate step.
+    vel_base        : float base velocity (%), applied to both lanes.
+    vel_humanize    : float +/- velocity jitter (%).
+    timing_humanize : int   +/- ARP timing jitter in ticks; clamped to <= 5.
+    sus_prob        : float probability of a sus2/sus4 on a non-tonic chord.
+    seed            : int   RNG seed -> fully deterministic output.
+
+    Returns
+    -------
+    dict with:
+        "notes"     : list of note-event dicts (chord lane + arp lane), each:
+            number, time, length, velocity,
+            nominal_time (pre-timing-humanize),
+            nominal_velocity (pre-velocity-humanize, 0..1),
+            nominal_length,
+            lane ("chord"|"arp"), chord_index, degree.
+        "degrees"   : the rendered scale-degree sequence.
+        "voicings"  : per-chord rendered MIDI pitch lists.
+        "chord_ticks": ticks per chord (== bars_per_chord * bar).
+    """
+    if scale not in SCALES:
+        raise ValueError("unknown scale: %r" % (scale,))
+    if preset not in PRESETS:
+        raise ValueError("unknown preset: %r" % (preset,))
+    if voicing not in VOICINGS:
+        raise ValueError("unknown voicing: %r" % (voicing,))
+    if arp_mode not in ARP_KEYS:
+        raise ValueError("unknown arp mode: %r" % (arp_mode,))
+    if arp_rate not in RATE_KEYS:
+        raise ValueError("unknown arp rate: %r" % (arp_rate,))
+
+    ppq = int(ppq)
+    bar_ticks = ppq * 4
+    bpc = 2 if int(bars_per_chord) >= 2 else 1
+    total_bars = max(bpc, int(total_bars))
+    chord_ticks = bpc * bar_ticks
+    chords_count = max(1, total_bars // bpc)
+
+    ht = min(5, max(0, int(timing_humanize)))         # bound arp jitter to +/-5
+    hv = max(0.0, float(vel_humanize)) / 100.0
+    base_v = max(0.02, min(1.0, float(vel_base) / 100.0))
+    gate = max(0.05, min(1.0, float(arp_gate_pct) / 100.0))
+    rate_step = ppq // 2 if arp_rate == "8th" else ppq // 4
+
+    degrees = progression_degrees(preset, chords_count, seed=seed)
+    voicings = chord_voicings(root_midi, scale, degrees, voicing=voicing,
+                              voice_leading=bool(voice_leading),
+                              sus_prob=float(sus_prob), seed=seed)
+
+    # Separate RNG streams so toggling the arp never perturbs chord velocities.
+    rng_cv = random.Random((int(seed) ^ 0x00C0) & 0x7FFFFFFF)
+    rng_av = random.Random((int(seed) ^ 0x0A11) & 0x7FFFFFFF)
+    rng_at = random.Random((int(seed) ^ 0x0A72) & 0x7FFFFFFF)
+    rng_ap = random.Random((int(seed) ^ 0x0A93) & 0x7FFFFFFF)
+
+    def _vel(rng, nominal):
+        jit = rng.uniform(-hv, hv) if hv > 0 else 0.0
+        return max(0.02, min(1.0, nominal + jit))
+
+    notes = []
+
+    # --- CHORD lane: sustained pad, locked to the grid --------------------- #
+    for i, (deg, pitches) in enumerate(zip(degrees, voicings)):
+        start = i * chord_ticks
+        for p in pitches:
+            notes.append({
+                "number": int(p),
+                "time": int(start),
+                "length": int(chord_ticks),
+                "velocity": _vel(rng_cv, base_v),
+                "nominal_time": int(start),
+                "nominal_velocity": base_v,
+                "nominal_length": int(chord_ticks),
+                "lane": "chord",
+                "chord_index": i,
+                "degree": int(deg),
+            })
+
+    # --- ARP lane: hypnotic arpeggio above the pad ------------------------- #
+    if arp_mode != "off" and rate_step >= 1:
+        arp_len = max(1, int(round(rate_step * gate)))
+        steps_per_chord = chord_ticks // rate_step
+        for i, pitches in enumerate(voicings):
+            start = i * chord_ticks
+            pool = _arp_pool(pitches, arp_octaves)
+            seq = _arp_order(pool, arp_mode, steps_per_chord, rng_ap)
+            for s, pitch in enumerate(seq):
+                nominal_t = start + s * rate_step
+                t = nominal_t
+                if ht > 0:
+                    t = max(0, nominal_t + rng_at.randint(-ht, ht))
+                notes.append({
+                    "number": int(pitch),
+                    "time": int(t),
+                    "length": int(arp_len),
+                    "velocity": _vel(rng_av, base_v),
+                    "nominal_time": int(nominal_t),
+                    "nominal_velocity": base_v,
+                    "nominal_length": int(arp_len),
+                    "lane": "arp",
+                    "chord_index": i,
+                    "degree": int(degrees[i]),
+                })
+
+    notes.sort(key=lambda n: (n["nominal_time"], n["lane"], n["number"]))
+    return {
+        "notes": notes,
+        "degrees": degrees,
+        "voicings": voicings,
+        "chord_ticks": chord_ticks,
+    }
+
+
+# --------------------------------------------------------------------------- #
+# FL Studio dialog + apply glue (only runs inside FL)
+# --------------------------------------------------------------------------- #
+
+def createDialog():
+    """Build the ScriptDialog FL shows before running the script."""
+    form = flp.ScriptDialog(
+        "Dark Progression",
+        "Generate a dark, in-key chord progression (minor / phrygian / harmonic "
+        "minor) with nearest-voice voice-leading, plus an optional hypnotic arp "
+        "riding above the pad (Afterlife / melodic-techno). Notes are APPENDED at "
+        "the timeline selection start (or tick 0). Same Seed -> identical result.",
+    )
+    form.AddInputCombo("Root", ",".join(NOTE_NAMES), 0)            # C
+    form.AddInputCombo("Octave", ",".join(OCTAVE_LABELS), 2)      # 3 -> C3
+    form.AddInputCombo("Scale", ",".join(SCALE_LABELS), 0)       # Natural minor
+    form.AddInputCombo("Progression", ",".join(PRESET_LABELS), 0)  # Dark Pop
+    form.AddInputCombo("Bars per chord", ",".join(BARS_PER_CHORD_LABELS), 0)  # 1
+    form.AddInputCombo("Total bars", ",".join(TOTAL_BARS_LABELS), 1)          # 8
+    form.AddInputCombo("Chord voicing", ",".join(VOICING_LABELS), 0)         # Triad
+    form.AddInputCheckbox("Voice leading", True)
+    form.AddInputCombo("Arp", ",".join(ARP_LABELS), 0)           # Off
+    form.AddInputCombo("Arp rate", ",".join(RATE_LABELS), 1)     # 16th
+    form.AddInputCombo("Arp octave span", ",".join(OCTAVE_SPAN_LABELS), 0)   # 1
+    form.AddInputKnobInt("Arp gate %", 70, 5, 100)
+    form.AddInputKnobInt("Suspension %", 20, 0, 100)
+    form.AddInputKnobInt("Velocity base %", 90, 20, 100)
+    form.AddInputKnobInt("Velocity humanize +/-", 8, 0, 40)
+    form.AddInputKnobInt("Timing humanize +/- ticks", 3, 0, 5)
+    form.AddInputKnobInt("Seed", 1, 0, 9999)
+    return form
+
+
+def _selection_start_ticks():
+    """Timeline selection start (ticks) if a selection exists, else 0."""
+    try:
+        sel = flp.score.getTimelineSelection()   # (start, end) in ticks
+    except Exception:
+        return 0
+    try:
+        start, end = sel[0], sel[1]
+    except (TypeError, IndexError):
+        return 0
+    if end is not None and end > start and start >= 0:
+        return int(start)
+    return 0
+
+
+def apply(form):
+    """FL calls this with the filled-in dialog; write the progression + arp."""
+    root = note_name_to_midi(
+        int(form.GetInputValue("Root")),
+        OCTAVE_LABELS[int(form.GetInputValue("Octave"))],
+    )
+    scale = SCALE_KEYS[int(form.GetInputValue("Scale"))]
+    preset = PRESET_KEYS[int(form.GetInputValue("Progression"))]
+    bpc = int(BARS_PER_CHORD_LABELS[int(form.GetInputValue("Bars per chord"))])
+    total = int(TOTAL_BARS_LABELS[int(form.GetInputValue("Total bars"))])
+    voicing = VOICING_KEYS[int(form.GetInputValue("Chord voicing"))]
+    voice_leading = bool(form.GetInputValue("Voice leading"))
+    arp_mode = ARP_KEYS[int(form.GetInputValue("Arp"))]
+    arp_rate = RATE_KEYS[int(form.GetInputValue("Arp rate"))]
+    arp_octaves = int(OCTAVE_SPAN_LABELS[int(form.GetInputValue("Arp octave span"))])
+
+    result = generate_progression(
+        root_midi=root,
+        scale=scale,
+        preset=preset,
+        bars_per_chord=bpc,
+        total_bars=total,
+        ppq=int(flp.score.PPQ),
+        voicing=voicing,
+        voice_leading=voice_leading,
+        arp_mode=arp_mode,
+        arp_rate=arp_rate,
+        arp_octaves=arp_octaves,
+        arp_gate_pct=float(form.GetInputValue("Arp gate %")),
+        vel_base=float(form.GetInputValue("Velocity base %")),
+        vel_humanize=float(form.GetInputValue("Velocity humanize +/-")),
+        timing_humanize=int(form.GetInputValue("Timing humanize +/- ticks")),
+        sus_prob=float(form.GetInputValue("Suspension %")) / 100.0,
+        seed=int(form.GetInputValue("Seed")),
+    )
+
+    start = _selection_start_ticks()
+    for nd in result["notes"]:
+        n = flp.Note()
+        n.number = int(nd["number"])
+        n.time = int(start + nd["time"])
+        n.length = int(nd["length"])
+        n.velocity = float(nd["velocity"])
+        flp.score.addNote(n)

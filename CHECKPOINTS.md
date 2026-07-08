@@ -134,6 +134,27 @@
       note API has no reverse flag — documented). Same Seed → identical result. If the
       script isn't in the menu, rescan/restart FL or check FL's *File settings → user
       data folder* matches the OneDrive-redirected Documents path.
+- [ ] **W3-DARK-PROGRESSION (shipped 2026-07-07): run the piano-roll script in FL.**
+      Copied to `Documents\Image-Line\FL Studio\Settings\Piano roll scripts\DarkProgression.pyscript`
+      (alongside RumbleBassline + BreakChop + ComposeWithLLM; byte-for-byte copy
+      verified). Offline gate passes 19/19 (44 asserts) via the shared mock
+      `flpianoroll`, but FL can't run piano-roll scripts headless — so verify live:
+      open the Piano roll on a **pad/keys channel**, **Tools → Scripting → Dark
+      Progression**, confirm the dialog shows all inputs (root/octave, scale
+      [natural minor / phrygian / harmonic minor], progression preset [Dark Pop /
+      Hypnotic / Tension / Wander / Random], bars-per-chord, total bars, voicing
+      [triad / 7th / add9], voice-leading toggle, arp [off/up/down/up-down/random],
+      arp rate / octave span / gate %, suspension %, velocity base + humanize,
+      timing humanize, seed), click OK. Check: chords are **in-key** and land on the
+      bars-per-chord grid; with **Voice leading ON** the chords move by small
+      inversions (hold hands) instead of jumping to root position; the **arp** (when
+      not Off) sits **above** the pad, follows the chord tones, and locks to the
+      8th/16th grid with the gate shortening each note. Notes **APPEND** at the
+      timeline selection start (or tick 0) — clear the roll (Ctrl+A, Delete) first
+      for a fresh progression. Same **Seed** → identical result; try the **Tension**
+      preset with the **Phrygian** scale for the bII colour. If the script isn't in
+      the menu, rescan/restart FL or check FL's *File settings → user data folder*
+      matches the OneDrive-redirected Documents path.
 
 ## Toolchain note (informational — the loop handles it, but a fresh clone won't)
 - `tools/bin/` is gitignored, including `tools/bin/mingw64` (portable MinGW-w64
