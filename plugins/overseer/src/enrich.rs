@@ -292,36 +292,56 @@ pub struct NodeSuggestion {
     pub b2_gain: f32,
 }
 
-/// Compute ghost suggestions from a captured feature summary.
-pub fn suggest_from_features(f: &FeatureSummary) -> NodeSuggestion {
-    // Low-band excess → low-shelf EQ suggestion; a starved sub gets a lift.
-    let low_gain = if f.low_ratio > 0.6 {
-        -3.0
-    } else if f.low_ratio > 0.45 {
-        -1.5
-    } else if f.low_ratio < 0.04 {
-        3.0
-    } else if f.low_ratio < 0.08 {
-        1.5
+/// Compute ghost suggestions from a captured feature summary and the committed instrument
+/// type. The type gates the low-end move: a bass-domain source (KICK/BASS/RUMBLE) is
+/// *supposed* to be low-heavy, so it is only ever LIFTED when its sub is starved and is never
+/// cut; a non-bass source instead gets its excess sub rumble cut.
+///
+/// Thresholds are calibrated on the deterministic testsig sources with planted defects
+/// (SOUND-PASS OVERSEER deep-dive — the earlier hand-guessed thresholds never triggered):
+///   * mud (150–500 Hz share): clean reese ≈ 0.25, +6 dB @ 300 Hz → 0.39; clean vocal ≈ 0.20.
+///   * harsh (2–5 kHz share): clean vocal ≈ 0.05, +6 dB @ 3.5 kHz → 0.08.
+///   * starved sub: a healthy kick reads low ≈ 0.87; high-passed at 100 Hz → 0.47.
+pub fn suggest_from_features(f: &FeatureSummary, ty: InstrumentType) -> NodeSuggestion {
+    let is_low_inst = matches!(
+        ty,
+        InstrumentType::Kick | InstrumentType::Bass | InstrumentType::Rumble
+    );
+    let low_gain = if is_low_inst {
+        // Bass-domain: only rescue a starved low end; never cut (that is their job).
+        if f.low_ratio < 0.55 {
+            4.0
+        } else if f.low_ratio < 0.68 {
+            2.0
+        } else {
+            0.0
+        }
     } else {
-        0.0
+        // Non-bass: tame excess sub rumble; nudge a very thin low end.
+        if f.low_ratio > 0.6 {
+            -3.0
+        } else if f.low_ratio > 0.45 {
+            -1.5
+        } else if f.low_ratio < 0.04 {
+            1.5
+        } else {
+            0.0
+        }
     };
 
-    // Mud excess (150-500 Hz share) → Bell 1 cut at 300 Hz. Thresholds calibrated on the
-    // testsig sources: a clean reese reads ~0.35, +6 dB @ 300 Hz pushes it past 0.5.
-    let b1_gain = if f.mud_ratio > 0.55 {
+    // Mud excess (150–500 Hz share) → Bell 1 cut at 300 Hz.
+    let b1_gain = if f.mud_ratio > 0.5 {
+        -6.0
+    } else if f.mud_ratio > 0.34 {
         -4.0
-    } else if f.mud_ratio > 0.42 {
-        -2.5
     } else {
         0.0
     };
-    // Harshness excess (2-5 kHz share) → Bell 2 cut at 3.5 kHz. A clean vocal reads
-    // ~0.1; +6 dB @ 3.5 kHz pushes it past 0.25.
-    let b2_gain = if f.harsh_ratio > 0.4 {
-        -4.0
-    } else if f.harsh_ratio > 0.22 {
-        -2.5
+    // Harshness excess (2–5 kHz share) → Bell 2 cut at 3.5 kHz.
+    let b2_gain = if f.harsh_ratio > 0.11 {
+        -6.0
+    } else if f.harsh_ratio > 0.065 {
+        -5.0
     } else {
         0.0
     };
@@ -531,11 +551,15 @@ mod tests {
         f.low_ratio = 0.8;
         f.crest = 6.0;
         f.level_db = -14.0;
-        let s = suggest_from_features(&f);
-        assert!(s.low_gain < 0.0, "excess low → cut");
+        // A non-bass source (Vocal) with excess sub → low-shelf cut.
+        let s = suggest_from_features(&f, InstrumentType::Vocal);
+        assert!(s.low_gain < 0.0, "excess low on a non-bass source → cut");
         assert!((-40.0..=-6.0).contains(&s.threshold));
         assert!((1.5..=8.0).contains(&s.ratio));
+        // A bass-domain source is never cut on the low end (that is its register).
+        let sb = suggest_from_features(&f, InstrumentType::Bass);
+        assert!(sb.low_gain >= 0.0, "bass low end must not be cut");
         // Deterministic.
-        assert_eq!(s, suggest_from_features(&f));
+        assert_eq!(s, suggest_from_features(&f, InstrumentType::Vocal));
     }
 }

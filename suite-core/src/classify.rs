@@ -778,14 +778,19 @@ pub fn scores(f: &FeatureSummary) -> [(InstrumentType, f32); 13] {
     let sib = f.sibilance_ratio;
     let pitch_hz = f.pitch_hz;
 
-    // KICK: low-band, low centroid, RHYTHMIC discrete hits (onsets present). The onset
-    // rate is the key separator from a sustained bass note in the same register.
-    let kick = ge(low, 0.4, 0.25) * le(cen, 350.0, 300.0) * ge(onset, 1.2, 1.5);
+    // KICK: low-band, low centroid, RHYTHMIC *discrete* hits. The onset rate is now a
+    // BAND (1.2–9 /s), not just a floor: a four-on-the-floor or even 16th-note kick sits in
+    // that range, but a continuously-moving pitched low source (e.g. a detuned-saw reese,
+    // whose beating trips ~20 onsets/s) is excluded so it is not mislabelled a kick
+    // (SOUND-PASS classifier FIX — measured reese onset ≈ 22/s vs kick ≈ 2/s).
+    let kick = ge(low, 0.4, 0.25) * le(cen, 350.0, 300.0) * band(onset, 1.2, 9.0, 1.5);
 
-    // BASS: low-band + strongly pitched + sustained + FEW onsets (one sustained note, not a
-    // rhythmic hit train).
+    // BASS: low-band + strongly pitched + sustained. The onset ceiling is wide (a sustained
+    // note reads few onsets, but a moving/beating reese trips many spurious ones from
+    // pitch-rate ripple); pitch+sustain+low are the real separators from a kick, and on a
+    // genuine kick the kick score ties and wins by evaluation order.
     let bass =
-        ge(low, 0.3, 0.25) * ge(pr, 0.45, 0.3) * ge(sus, 0.35, 0.25) * le(onset, 1.5, 1.5);
+        ge(low, 0.3, 0.25) * ge(pr, 0.45, 0.3) * ge(sus, 0.35, 0.25) * le(onset, 30.0, 20.0);
 
     // RUMBLE: very low-band + no onsets + not strongly pitched (a sub drone / bed).
     let rumble =

@@ -36,6 +36,9 @@ pub mod master;
 pub mod node;
 pub mod presets;
 
+#[cfg(test)]
+mod audit;
+
 use bus::{Slot, NUM_OVERRIDES, OVR_DRIVE, OVR_NAMES, OVR_RATIO, OVR_THRESHOLD, OVR_TRIM, OVR_WIDTH};
 use enrich::{
     apply_assist, context_defaults, suggest_from_features, theme_assist_targets, type_bank_category,
@@ -354,7 +357,7 @@ fn node_enrich_ui(
                 lty
             };
             slot.set_learn_lock(Some(commit_ty));
-            let sug = suggest_from_features(&cap);
+            let sug = suggest_from_features(&cap, commit_ty);
             if let Ok(mut lp) = params.learn.write() {
                 lp.locked = true;
                 lp.ty = commit_ty.index();

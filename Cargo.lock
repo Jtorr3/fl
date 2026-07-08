@@ -1644,6 +1644,7 @@ dependencies = [
 name = "overseer"
 version = "0.1.0"
 dependencies = [
+ "hound",
  "nih_plug",
  "nih_plug_egui",
  "serde",

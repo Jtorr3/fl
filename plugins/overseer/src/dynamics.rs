@@ -4,7 +4,7 @@
 //! All pure Rust, allocation-free after construction, shared between the plugin `process`
 //! path and the offline harness tests.
 
-use suite_core::dsp::Svf;
+use suite_core::dsp::{Oversampler4x, Svf};
 
 const EPS: f32 = 1.0e-9;
 
@@ -88,7 +88,13 @@ impl Compressor {
         self.makeup_db = makeup_db;
         self.atk = coef_ms(attack_ms, fs);
         self.rel = coef_ms(release_ms, fs);
-        self.det_coef = coef_ms(10.0, fs);
+        // Attack-honesty (SOUND-PASS FIX-3): the RMS detector window used to be a fixed 10 ms,
+        // which floored the realized attack near ~15 ms regardless of the displayed value — a
+        // fast-attack setting did essentially nothing. Tie the detector time to the attack so a
+        // fast attack is actually fast, while capping at 10 ms keeps slow settings free of
+        // low-frequency detector ripple. Floors at 0.5 ms.
+        let det_ms = attack_ms.clamp(0.5, 10.0);
+        self.det_coef = coef_ms(det_ms, fs);
     }
 
     pub fn reset(&mut self) {
@@ -314,6 +320,13 @@ pub struct Limiter {
     rel: f32,
     ceiling: f32,
     gr_db: f32,
+    // True-peak (inter-sample) detection: the peak that drives the gain is the 4x-oversampled
+    // peak of the incoming signal, not the raw sample peak, so inter-sample overs are caught.
+    // These live in the *sidechain only* — the audio path and its reported latency are
+    // unchanged (the oversampler's ~22-sample group delay stays inside the 96-sample lookahead
+    // window, so the anticipatory gain still lands before the peak reaches the output).
+    tp_l: Oversampler4x,
+    tp_r: Oversampler4x,
 }
 
 impl Limiter {
@@ -333,6 +346,8 @@ impl Limiter {
             rel,
             ceiling: db_to_lin(-1.0),
             gr_db: 0.0,
+            tp_l: Oversampler4x::new(),
+            tp_r: Oversampler4x::new(),
         }
     }
 
@@ -363,13 +378,27 @@ impl Limiter {
         self.smax.reset();
         self.gain = 1.0;
         self.gr_db = 0.0;
+        self.tp_l.reset();
+        self.tp_r.reset();
     }
 
     /// Process one stereo sample, returning the limited (delayed) pair.
     #[inline]
     pub fn process(&mut self, l: f32, r: f32) -> (f32, f32) {
-        // Peak of the *incoming* (undelayed) sample across channels.
-        let peak_in = l.abs().max(r.abs());
+        // True-peak of the *incoming* (undelayed) sample across channels: oversample each
+        // channel 4x and take the largest inter-sample magnitude. This makes the limiter
+        // catch inter-sample overs that a raw sample-peak detector would miss.
+        let mut tp_l = 0.0f32;
+        self.tp_l.process(l, |u| {
+            tp_l = tp_l.max(u.abs());
+            u
+        });
+        let mut tp_r = 0.0f32;
+        self.tp_r.process(r, |u| {
+            tp_r = tp_r.max(u.abs());
+            u
+        });
+        let peak_in = tp_l.max(tp_r);
         let win_peak = self.smax.push(peak_in);
 
         // Gain required so the loudest sample within the lookahead window hits the ceiling.
