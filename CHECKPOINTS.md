@@ -214,3 +214,20 @@
       reloading a project, re-pick the source in each MOD row (labels make this quick). This is
       deliberate (a persisted random id breaks CLAP state reproducibility); a stable-id scheme
       is a candidate follow-up.
+
+## X-RAY — shared cross-plugin analyzer (2026-07-08)
+- [ ] **Rescan FL** (Options → Manage plugins → Find more plugins) → verify **Qeynos X-RAY**
+      loads (CLAP + VST3 both installed; every other Qeynos plugin was rebuilt/reinstalled by
+      the publishing retrofit's rebuild-all).
+- [ ] **Overlay smoke test.** Put **X-RAY** on the master (or any bus) and 2–3 other Qeynos
+      plugins (e.g. GRIT on a bass, PATINA on drums, MURMUR on a send) on playing tracks. Open
+      X-RAY's window → one colored curve per live instance should appear on the log-freq grid,
+      with a legend row (name · bus id · peak/RMS) for each. **Hover** a legend row → the other
+      curves dim; **click** it → solo-dim persists; **Freeze** → the display holds.
+- [ ] **Publishers go stale correctly:** stop the transport (FL keeps processing, curves stay)
+      then delete/bypass a publishing plugin → its curve should drop off within ~3 s
+      (heartbeat GC), not linger.
+- [ ] **Bridging caveat (informational):** the spectrum bus is the same OS-wide shared file as
+      NERVE's (`%TEMP%\qeynos-bus`), so even bridged instances publish into it — but keep the
+      suite un-bridged (FL default) as the supported configuration. OVERSEER / NERVE / _template
+      do not publish spectra (DEFERRED.md).
