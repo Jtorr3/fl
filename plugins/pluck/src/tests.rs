@@ -16,6 +16,75 @@ use suite_core::testsig;
 
 const SR: f32 = 48_000.0;
 
+/// SOUND-PASS audition render (permanent infra, `#[ignore]`d in normal runs).
+/// Strums a chord via the REAL trigger path (a short percussive noise transient at t=0
+/// fires the onset detector → burst capture → `fire_strum`) and renders ~3 s of the
+/// resulting ring-out for every factory preset AND `Settings::default()`, into
+/// renders/_audition/PLUCK/<QVS_AUDITION_DIR or "before">/<preset>.wav. Also renders a
+/// single-note (E2) pitch probe so the fundamental can be checked in tune with
+/// `tools/audition.py analyze ... --sine-probe 82.41`. Analyzed offline by audition.py —
+/// watch the strum-onset CLICK and whether the fundamental lands on pitch.
+#[test]
+#[ignore]
+fn audition_render_musical_sources() {
+    let sr = SR;
+    let subdir = std::env::var("QVS_AUDITION_DIR").unwrap_or_else(|_| "before".into());
+
+    // One percussive pick transient at t=0 fires a single strum; the rest is silence so we
+    // hear the strings ring out. The strum onset (click?) and the tuning are what we judge.
+    let len = (3.0 * sr) as usize;
+    let input = {
+        let noise = testsig::white_noise(0.6, len, 0x51EED);
+        let mut x = vec![0.0f32; len];
+        let burst = (0.015 * sr) as usize; // 15 ms pick transient
+        for (n, v) in x.iter_mut().enumerate().take(burst) {
+            *v = noise[n];
+        }
+        x
+    };
+
+    let presets_all = load_all(presets::PRESET_JSON);
+    let mut jobs: Vec<(String, Settings)> = presets_all
+        .iter()
+        .map(|p| {
+            let fname = p.name.to_lowercase().replace([' ', '·', '-'], "_");
+            (fname, presets::settings_from_preset(p))
+        })
+        .collect();
+    jobs.push(("default".into(), Settings::default()));
+
+    for (fname, s) in &jobs {
+        let mut core = PluckCore::new(sr);
+        let (l, _r) = core.process_stereo(&input, s);
+        let path = render_path("_audition/PLUCK", &format!("{subdir}/{fname}"));
+        write_wav(&path, &l, sr as u32).expect("write audition render");
+    }
+
+    // Single-note pitch probe: hold E2 (one note; extra strings octave-stack it, all exact
+    // harmonics) so the fundamental at 82.41 Hz can be pitch-checked with --sine-probe 82.41.
+    let e2 = midi_to_freq(40.0);
+    let mut held = [f32::NAN; MAX_STRINGS];
+    held[0] = e2;
+    let sp = Settings {
+        source: TuningSource::Midi,
+        held,
+        held_count: 1,
+        decay: 0.9,
+        damp: 0.3,
+        strum_ms: 10.0,
+        exciter_gain: 1.4,
+        body: 0.0,
+        spread_cents: 0.0,
+        stereo_alt: 0.0,
+        mix: 1.0,
+        ..Settings::default()
+    };
+    let mut core = PluckCore::new(sr);
+    let (l, _r) = core.process_stereo(&input, &sp);
+    let path = render_path("_audition/PLUCK", &format!("{subdir}/_pitch_probe_e2"));
+    write_wav(&path, &l, sr as u32).expect("write pitch probe");
+}
+
 #[test]
 fn manual_covers_all_params_and_has_recipes() {
     suite_core::manual::assert_manual_covers_params(
