@@ -267,6 +267,254 @@ pub fn sliding_saw_f0(f_start: f32, f_end: f32, n: usize, len: usize) -> f32 {
 }
 
 // ---------------------------------------------------------------------------
+// Musical audition sources (SOUND-PASS infra). Deterministic, seeded, 48 kHz by
+// default. Alloc-into-Vec at test time is fine — these run offline only, never on
+// the audio thread. They exist so per-plugin sound-quality agents can render every
+// factory preset over genre-appropriate material (dark techno + atmospheric dnb)
+// and judge "would a producer keep this in a real song?" with tools/audition.py.
+// ---------------------------------------------------------------------------
+
+/// Naive (aliasing) sawtooth helper — one detuned voice. Phase in/out by reference so
+/// callers can run several partials in lockstep. Returns the sample at the current
+/// phase and advances it.
+#[inline]
+fn saw_tick(phase: &mut f32, freq: f32, sr: f32) -> f32 {
+    *phase += freq / sr;
+    if *phase >= 1.0 {
+        *phase -= phase.floor();
+    }
+    2.0 * *phase - 1.0
+}
+
+/// Peak-normalize a buffer in place to `target` linear (≤ 0 dBFS). No-op if silent.
+fn peak_normalize(buf: &mut [f32], target: f32) {
+    let peak = buf.iter().fold(1.0e-9f32, |a, &v| a.max(v.abs()));
+    let g = target / peak;
+    for v in buf.iter_mut() {
+        *v *= g;
+    }
+}
+
+/// Four-on-the-floor techno kick loop: the suite's default dark-techno driver.
+/// A kick on every quarter note, 55 Hz fundamental, with a slight deterministic
+/// per-hit level variation so it reads as a performance, not a copy-paste. Peak
+/// bounded below 0 dBFS. `bars` bars of 4/4 at `bpm`.
+pub fn synth_kick_loop(bpm: f32, bars: usize, sr: f32) -> Vec<f32> {
+    let sr = sr.max(1.0);
+    let bpm = bpm.clamp(40.0, 300.0);
+    let beat_samples = (60.0 / bpm * sr).round() as usize;
+    let beats = 4 * bars.max(1);
+    let len = beat_samples * beats;
+    let mut out = vec![0.0f32; len.max(1)];
+    // One kick one-shot, reused per hit. Tight body so hits stay separated.
+    let spec = KickSpec {
+        f_start: 140.0,
+        f_end: 55.0,
+        pitch_decay_s: 0.03,
+        amp_decay_s: 0.34,
+        click: 0.25,
+        sub_level: 0.3,
+        sub_ratio: 0.5,
+        drive: 0.1,
+    };
+    let kick_len = (0.45 * sr) as usize;
+    let kick = synth_kick(&spec, kick_len, sr);
+    let mut rng = Rng::new(0x4F00_2B17);
+    for b in 0..beats {
+        // slight level variation 0.82..1.0, accent the downbeat of each bar
+        let mut lvl = 0.82 + 0.18 * (rng.next_u32() as f32 / u32::MAX as f32);
+        if b % 4 == 0 {
+            lvl = 1.0;
+        }
+        let start = b * beat_samples;
+        for (i, &k) in kick.iter().enumerate() {
+            let idx = start + i;
+            if idx >= out.len() {
+                break;
+            }
+            out[idx] += k * lvl;
+        }
+    }
+    peak_normalize(&mut out, 0.9);
+    out
+}
+
+/// Detuned dual-saw "reese" bass bed (atmospheric dnb). Two saws a fixed beat apart
+/// (`±0.4 Hz`, ~0.8 Hz beating) summed and run through a gentle 2-pole low-pass at
+/// ~1.2 kHz so the energy sits low and thick. Deterministic; peak below 0 dBFS.
+pub fn synth_reese(f0: f32, seconds: f32, sr: f32) -> Vec<f32> {
+    let sr = sr.max(1.0);
+    let f0 = f0.clamp(20.0, sr * 0.2);
+    let len = (seconds.max(0.0) * sr) as usize;
+    let mut lp1 = crate::dsp::Svf::new();
+    let mut lp2 = crate::dsp::Svf::new();
+    lp1.set(1200.0, 0.707, sr);
+    lp2.set(1200.0, 0.707, sr);
+    let (mut p1, mut p2) = (0.0f32, 0.37f32);
+    let mut out: Vec<f32> = Vec::with_capacity(len.max(1));
+    for _ in 0..len {
+        let a = saw_tick(&mut p1, f0 - 0.4, sr);
+        let b = saw_tick(&mut p2, f0 + 0.4, sr);
+        // gentle low-pass (cascaded 2-pole -> ~ -24 dB/oct, still musical) keeps the
+        // reese energy concentrated well below 1.5 kHz.
+        let y = lp2.process(lp1.process(0.5 * (a + b)).lp).lp;
+        out.push(y);
+    }
+    peak_normalize(&mut out, 0.85);
+    out
+}
+
+/// Synthesized amen-ish breakbeat (atmospheric dnb / breakcore). A 16-step-per-bar
+/// pattern of the kick synth + a snare burst (200 Hz body + band-passed noise) +
+/// closed-hat ticks (short high-passed noise). Doesn't need to sound human — it needs
+/// transients and gaps for transient/gate/chop plugins. Deterministic; ≤ 0 dBFS.
+pub fn synth_break(bpm: f32, bars: usize, sr: f32) -> Vec<f32> {
+    let sr = sr.max(1.0);
+    let bpm = bpm.clamp(40.0, 300.0);
+    let beat_samples = (60.0 / bpm * sr).round() as usize;
+    let step = beat_samples / 4; // 16th note
+    let bars = bars.max(1);
+    let len = beat_samples * 4 * bars;
+    let mut out = vec![0.0f32; len.max(1)];
+
+    // --- one-shots ---
+    let kick = synth_kick(
+        &KickSpec { f_start: 150.0, f_end: 60.0, amp_decay_s: 0.18, click: 0.3, drive: 0.15, ..KickSpec::default() },
+        (0.25 * sr) as usize,
+        sr,
+    );
+    let snare = synth_snare(sr);
+    let hat = synth_hat(sr);
+
+    // --- 16-step pattern (per bar), amen-ish placement ---
+    let kick_steps = [0usize, 6, 10];
+    let snare_steps = [4usize, 12]; // backbeats
+    let ghost_steps = [7usize, 14]; // ghost snares
+    let hat_steps: [usize; 8] = [0, 2, 4, 6, 8, 10, 12, 14]; // 8th-note hats
+
+    let mut rng = Rng::new(0x00B7_EA71);
+    let place = |out: &mut Vec<f32>, oneshot: &[f32], step_idx: usize, lvl: f32| {
+        let start = step_idx * step;
+        for (i, &s) in oneshot.iter().enumerate() {
+            let idx = start + i;
+            if idx >= out.len() {
+                break;
+            }
+            out[idx] += s * lvl;
+        }
+    };
+    for bar in 0..bars {
+        let base = bar * 16;
+        for &s in &kick_steps {
+            place(&mut out, &kick, base + s, 1.0);
+        }
+        for &s in &snare_steps {
+            place(&mut out, &snare, base + s, 0.9);
+        }
+        for &s in &ghost_steps {
+            place(&mut out, &snare, base + s, 0.35);
+        }
+        for &s in &hat_steps {
+            let lvl = 0.4 + 0.25 * (rng.next_u32() as f32 / u32::MAX as f32);
+            place(&mut out, &hat, base + s, lvl);
+        }
+    }
+    peak_normalize(&mut out, 0.9);
+    out
+}
+
+/// Snare one-shot: 200 Hz decaying-sine body + a band-passed white-noise burst.
+fn synth_snare(sr: f32) -> Vec<f32> {
+    let len = (0.14 * sr) as usize;
+    let mut bp = crate::dsp::Svf::new();
+    bp.set(1800.0, 1.2, sr);
+    let mut rng = Rng::new(0x5A17_9E33);
+    let body_tau = 0.06 * sr;
+    let noise_tau = 0.09 * sr;
+    let mut phase = 0.0f32;
+    let mut out: Vec<f32> = Vec::with_capacity(len);
+    for n in 0..len {
+        phase += 200.0 / sr;
+        if phase >= 1.0 {
+            phase -= phase.floor();
+        }
+        let body = (2.0 * PI * phase).sin() * (-(n as f32) / body_tau).exp() * 0.6;
+        let noise = bp.process(rng.next_bipolar()).bp * (-(n as f32) / noise_tau).exp();
+        out.push(body + noise);
+    }
+    peak_normalize(&mut out, 0.9);
+    out
+}
+
+/// Closed-hat one-shot: short high-passed white noise, fast decay.
+fn synth_hat(sr: f32) -> Vec<f32> {
+    let len = (0.05 * sr) as usize;
+    let mut hp = crate::dsp::Svf::new();
+    hp.set(7000.0, 0.9, sr);
+    let mut rng = Rng::new(0x11CE_77A5);
+    let tau = 0.012 * sr;
+    let mut out: Vec<f32> = Vec::with_capacity(len);
+    for n in 0..len {
+        let h = hp.process(rng.next_bipolar()).hp * (-(n as f32) / tau).exp();
+        out.push(h);
+    }
+    peak_normalize(&mut out, 0.8);
+    out
+}
+
+/// Sustained detuned-saw minor-triad pad through a slow low-pass sweep (reverb /
+/// texture fodder). Root + minor third + fifth, each a detuned saw pair; the summed
+/// bank runs through one slow LP sweep (~300 Hz→~2.5 kHz and back over the buffer).
+/// Normalized to roughly -18 dBFS RMS with a low crest factor (dense, sustained).
+/// Deterministic; peak below 0 dBFS.
+pub fn synth_pad(root_hz: f32, seconds: f32, sr: f32) -> Vec<f32> {
+    let sr = sr.max(1.0);
+    let root = root_hz.clamp(30.0, sr * 0.1);
+    let len = (seconds.max(0.0) * sr) as usize;
+    // minor triad: root, +3 semitones, +7 semitones
+    let notes = [root, root * 2.0f32.powf(3.0 / 12.0), root * 2.0f32.powf(7.0 / 12.0)];
+    // detuned saw pair per note (±0.5 Hz), staggered start phases for density
+    let mut phases = [0.0f32, 0.11, 0.23, 0.41, 0.57, 0.79];
+    let freqs = [
+        notes[0] - 0.5, notes[0] + 0.5,
+        notes[1] - 0.5, notes[1] + 0.5,
+        notes[2] - 0.5, notes[2] + 0.5,
+    ];
+    let mut lp = crate::dsp::Svf::new();
+    let mut out: Vec<f32> = Vec::with_capacity(len.max(1));
+    let sweep_hz = if seconds > 0.0 { 0.5 / seconds.max(0.1) } else { 0.1 }; // ~half a cycle over the buffer
+    for n in 0..len {
+        let t = n as f32 / sr;
+        // slow LP sweep 300 Hz .. 2500 Hz
+        let lfo = 0.5 * (1.0 - (2.0 * PI * sweep_hz * t).cos());
+        let cutoff = 300.0 + 2200.0 * lfo;
+        lp.set(cutoff, 0.8, sr);
+        let mut s = 0.0f32;
+        for (i, &f) in freqs.iter().enumerate() {
+            s += saw_tick(&mut phases[i], f, sr);
+        }
+        s /= freqs.len() as f32;
+        out.push(lp.process(s).lp);
+    }
+    // normalize to ~ -18 dBFS RMS, then guard the peak below 0 dBFS.
+    let rms = (out.iter().map(|v| v * v).sum::<f32>() / out.len().max(1) as f32).sqrt();
+    if rms > 1.0e-9 {
+        let g = 0.1259 / rms; // -18 dBFS
+        for v in out.iter_mut() {
+            *v *= g;
+        }
+    }
+    let peak = out.iter().fold(0.0f32, |a, &v| a.max(v.abs()));
+    if peak > 0.9 {
+        let g = 0.9 / peak;
+        for v in out.iter_mut() {
+            *v *= g;
+        }
+    }
+    out
+}
+
+// ---------------------------------------------------------------------------
 // Fake transport (PRD §4: "fake-transport struct (tempo, playhead, bar pos) for
 // ASCEND/CLEAVE/HALT"). Promoted from ASCEND's crate-local pattern into the shared
 // harness so any transport-locked plugin (CLEAVE now, HALT later) can be driven
@@ -435,6 +683,124 @@ mod tests {
         assert!((t.frame().bar_pos - 1.0).abs() < 1e-9);
         // bars_per_sample × bar_samples == 1 bar.
         assert!((t.bars_per_sample() * bar_samples as f64 - 1.0).abs() < 1e-9);
+    }
+
+    // --- shared helpers for the musical-source tests -----------------------
+
+    fn peak(x: &[f32]) -> f32 {
+        x.iter().fold(0.0f32, |a, &v| a.max(v.abs()))
+    }
+    fn rms(x: &[f32]) -> f32 {
+        (x.iter().map(|v| v * v).sum::<f32>() / x.len().max(1) as f32).sqrt()
+    }
+
+    /// Count onsets via a simple spectral-flux-free energy-flux detector: per-frame
+    /// RMS, positive difference (flux), then peaks above a fraction of the max flux
+    /// separated by a refractory gap.
+    fn count_onsets(x: &[f32], sr: f32) -> usize {
+        let hop = (0.005 * sr) as usize; // 5 ms
+        let win = hop * 2;
+        if x.len() < win {
+            return 0;
+        }
+        let nframes = (x.len() - win) / hop + 1;
+        let mut env = Vec::with_capacity(nframes);
+        for i in 0..nframes {
+            let seg = &x[i * hop..i * hop + win];
+            env.push(rms(seg));
+        }
+        let mut flux: Vec<f32> = vec![0.0; nframes];
+        for i in 1..nframes {
+            flux[i] = (env[i] - env[i - 1]).max(0.0);
+        }
+        let maxf = flux.iter().cloned().fold(0.0f32, f32::max);
+        if maxf <= 1.0e-9 {
+            return 0;
+        }
+        let thresh = 0.18 * maxf;
+        let refractory = (0.10 * sr / hop as f32) as usize; // 100 ms in frames
+        let mut count = 0usize;
+        let mut last = 0usize;
+        let mut armed = true;
+        for i in 1..nframes - 1 {
+            let is_peak = flux[i] > thresh && flux[i] >= flux[i - 1] && flux[i] >= flux[i + 1];
+            if is_peak && armed && (count == 0 || i - last >= refractory) {
+                count += 1;
+                last = i;
+                armed = false;
+            }
+            if flux[i] < 0.5 * thresh {
+                armed = true;
+            }
+        }
+        count
+    }
+
+    /// Fraction of energy above `cut` Hz (via a 2-pole high-pass), for the reese test.
+    fn hf_energy_fraction(x: &[f32], cut: f32, sr: f32) -> f32 {
+        let mut hp = crate::dsp::Svf::new();
+        hp.set(cut, 0.707, sr);
+        let mut hi = 0.0f64;
+        let mut tot = 0.0f64;
+        for &s in x {
+            let h = hp.process(s).hp;
+            hi += (h * h) as f64;
+            tot += (s * s) as f64;
+        }
+        (hi / (tot + 1.0e-12)) as f32
+    }
+
+    #[test]
+    fn kick_loop_has_four_onsets_per_bar() {
+        let sr = 48_000.0;
+        let bars = 2;
+        let x = synth_kick_loop(130.0, bars, sr);
+        assert!(x.iter().all(|v| v.is_finite()));
+        assert!(peak(&x) <= 1.0, "peak {} over 0 dBFS", peak(&x));
+        assert!(rms(&x) > 1.0e-3, "silent");
+        // deterministic
+        let y = synth_kick_loop(130.0, bars, sr);
+        assert_eq!(x, y, "kick loop not deterministic");
+        let onsets = count_onsets(&x, sr);
+        assert_eq!(onsets, 4 * bars, "expected {} onsets, got {onsets}", 4 * bars);
+    }
+
+    #[test]
+    fn reese_energy_is_low_concentrated() {
+        let sr = 48_000.0;
+        let x = synth_reese(55.0, 1.0, sr);
+        assert!(x.iter().all(|v| v.is_finite()));
+        assert!(peak(&x) <= 1.0);
+        assert!(rms(&x) > 1.0e-3, "silent");
+        assert_eq!(x, synth_reese(55.0, 1.0, sr), "reese not deterministic");
+        let hf = hf_energy_fraction(&x, 1500.0, sr);
+        assert!(hf < 0.10, "too much energy above 1.5 kHz: {hf}");
+    }
+
+    #[test]
+    fn break_has_many_onsets() {
+        let sr = 48_000.0;
+        let bars = 2;
+        let x = synth_break(174.0, bars, sr);
+        assert!(x.iter().all(|v| v.is_finite()));
+        assert!(peak(&x) <= 1.0);
+        assert!(rms(&x) > 1.0e-3, "silent");
+        assert_eq!(x, synth_break(174.0, bars, sr), "break not deterministic");
+        let onsets = count_onsets(&x, sr);
+        assert!(onsets > 8, "break should have >8 onsets/2 bars, got {onsets}");
+    }
+
+    #[test]
+    fn pad_is_sustained_low_crest() {
+        let sr = 48_000.0;
+        let x = synth_pad(110.0, 2.0, sr);
+        assert!(x.iter().all(|v| v.is_finite()));
+        assert!(peak(&x) <= 1.0);
+        let r = rms(&x);
+        assert!(r > 1.0e-3, "silent");
+        assert_eq!(x, synth_pad(110.0, 2.0, sr), "pad not deterministic");
+        let crest_db = 20.0 * (peak(&x) / r).log10();
+        assert!(crest_db < 12.0, "pad crest too high (not sustained): {crest_db} dB");
     }
 
     #[test]
