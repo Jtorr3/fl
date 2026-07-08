@@ -26,6 +26,9 @@ use suite_core::bus::PluginKind;
 use suite_core::presets::{load_all, Preset};
 use suite_core::spectrum::SpectrumPublisher;
 
+/// Usage manual embedded from docs, rendered in-GUI by the '?' button (BUILT-IN-MANUALS).
+pub const MANUAL_DOC: &str = include_str!("../../../docs/EMBER.md");
+
 /// Log-frequency center of factor band `idx` (0..N_BANDS-1), for GUI labels.
 fn band_center_hz(idx: usize) -> f32 {
     let t = idx as f32 / (N_BANDS - 1) as f32;
@@ -297,6 +300,7 @@ impl Plugin for Ember {
                         ui.heading(
                             egui::RichText::new("QEYNOS · EMBER").color(suite_core::ui::ACCENT),
                         );
+                        suite_core::ui::manual_button(ui, "ember", "EMBER", MANUAL_DOC);
                         ui.label(
                             egui::RichText::new("spectral fader / temporal smoother")
                                 .color(suite_core::ui::TEXT_DIM)
@@ -453,6 +457,14 @@ mod render_tests {
     use crate::presets::{settings_from_preset, PRESET_JSON};
     use suite_core::harness::{assert_universal, render_path, write_wav};
     use suite_core::presets::load_all;
+
+    #[test]
+    fn manual_covers_all_params_and_has_recipes() {
+        suite_core::manual::assert_manual_covers_params(
+            crate::MANUAL_DOC,
+            &crate::EmberParams::default(),
+        );
+    }
 
     /// Render each factory preset with a 1 s pink-noise burst then 2 s of silence (so the
     /// spectral tail is audible in the WAV), write to renders/EMBER/, assert universal.

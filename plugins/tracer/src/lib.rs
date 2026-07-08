@@ -28,6 +28,9 @@ pub mod presets;
 use dsp::{PitchMode, Settings, ShapeKind, TracerCore, XoMode};
 use suite_core::presets::{load_all, Preset};
 
+/// Usage manual embedded from docs, rendered in-GUI by the '?' button (BUILT-IN-MANUALS).
+pub const MANUAL_DOC: &str = include_str!("../../../docs/TRACER.md");
+
 // ---------------------------------------------------------------------------
 // Param-facing enums (nih-plug `Enum`), mapped onto the pure-DSP enums.
 // ---------------------------------------------------------------------------
@@ -496,6 +499,7 @@ impl Plugin for Tracer {
                         ui.heading(
                             egui::RichText::new("QEYNOS · TRACER").color(suite_core::ui::ACCENT),
                         );
+                        suite_core::ui::manual_button(ui, "tracer", "TRACER", MANUAL_DOC);
                         ui.label(
                             egui::RichText::new("pitch-tracking multiband saturation")
                                 .color(suite_core::ui::TEXT_DIM)
@@ -762,6 +766,14 @@ mod render_tests {
     use suite_core::harness::{assert_universal, render_path, write_wav};
     use suite_core::presets::load_all;
     use suite_core::testsig;
+
+    #[test]
+    fn manual_covers_all_params_and_has_recipes() {
+        suite_core::manual::assert_manual_covers_params(
+            crate::MANUAL_DOC,
+            &crate::TracerParams::default(),
+        );
+    }
 
     /// Render each factory preset over a sliding-saw glide and a steady synthetic vocal,
     /// write the WAVs into renders/TRACER/, and assert the universal properties.

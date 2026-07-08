@@ -25,6 +25,9 @@ pub mod presets;
 use dsp::{GritCore, Mode, Settings, ShapeKind};
 use suite_core::presets::{load_all, Preset};
 
+/// Usage manual embedded from docs, rendered in-GUI by the '?' button (BUILT-IN-MANUALS).
+pub const MANUAL_DOC: &str = include_str!("../../../docs/GRIT.md");
+
 // ---------------------------------------------------------------------------
 // Param-facing enums (nih-plug `Enum`), mapped onto the pure-DSP enums.
 // ---------------------------------------------------------------------------
@@ -363,6 +366,7 @@ impl Plugin for Grit {
                         ui.heading(
                             egui::RichText::new("QEYNOS · GRIT").color(suite_core::ui::ACCENT),
                         );
+                        suite_core::ui::manual_button(ui, "grit", "GRIT", MANUAL_DOC);
                         ui.label(
                             egui::RichText::new("sidechained distortion")
                                 .color(suite_core::ui::TEXT_DIM)
@@ -583,6 +587,14 @@ mod render_tests {
     use crate::presets::{settings_from_preset, PRESET_JSON};
     use suite_core::harness::{assert_universal, render_path, write_wav};
     use suite_core::presets::load_all;
+
+    #[test]
+    fn manual_covers_all_params_and_has_recipes() {
+        suite_core::manual::assert_manual_covers_params(
+            crate::MANUAL_DOC,
+            &crate::GritParams::default(),
+        );
+    }
 
     /// Render each factory preset with a 1 kHz main sine and a pulsed sidechain,
     /// write the WAV into renders/GRIT/, and assert the universal properties.

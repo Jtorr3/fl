@@ -1,11 +1,15 @@
 # IMPACT — kick drum synth (MIDI instrument)
 
-A mono, last-note-priority kick synthesizer. A note-on drives an exponential **pitch
-envelope** into a phase-continuous sine/triangle body oscillator, layered with a
-band-passed noise **click**, one of three **embedded PCM transients**, and a **sub**
-oscillator. The mix is saturated through the suite waveshaper bank, shaped by an
-exponential **amp envelope**, and clipped. Retriggers are phase-continuous with a 1.5 ms
-declick ramp, so a kick can be re-fired mid-decay without a click.
+## What It Is
+
+IMPACT is a mono, last-note-priority kick-drum synthesizer. A note-on drives an exponential
+pitch envelope into a phase-continuous sine/triangle body oscillator, layered with a band-passed
+noise click, one of three embedded PCM transients, and a sub oscillator, then saturated,
+shaped by an amp envelope, and clipped. It covers the full range from deep 808 sub-kicks and
+atmospheric-dnb booms to punchy house kicks and distorted hardstyle/techno stompers, and
+retriggers are phase-continuous so a kick can be re-fired mid-decay without a click.
+
+## Signal Flow
 
 ```
 note-on ─ pitch env(f_start→f_end, curve) ─ sine/tri body osc ─┐
@@ -44,6 +48,41 @@ note input. It emits `ProcessStatus::KeepAlive` so its tail rings out after the 
 - **Output** — soft (`tanh`-style) or hard clip, then a trim, with a safety ceiling below
   0 dBFS.
 
+## Controls
+
+- **Pitch Start** — the frequency the pitch envelope starts at; higher gives a more pronounced
+  beater "click" at the top of the drop. 30…2000 Hz.
+- **Pitch End** — the settled body frequency the pitch drops to (the perceived kick note).
+  20…400 Hz.
+- **Pitch Decay** — how fast the pitch falls from start to end (τ_p, scaled by **Length**);
+  short = a snappy tick, long = a sliding 808 drop. 1…500 ms.
+- **Pitch Curve** — morphs the shape of the pitch drop, from a fast initial plunge to a hold-then-
+  drop. 0…1.
+- **Length** — master macro that scales the amp decay and pitch τ together for one "shorter /
+  longer" gesture. 0.1…4.0 ×.
+- **Amp Decay** — the amp envelope time constant, i.e. how long the kick sustains (also scaled by
+  **Length**). 20…3000 ms.
+- **Amp Curve** — morphs the amp decay shape from a fast initial drop to a longer hold. 0…1.
+- **Tone** — morphs the body oscillator from pure sine (0 %) toward triangle (100 %), adding
+  upper-harmonic edge. 0…100 %.
+- **Drive** — pre-envelope saturation drive through the waveshaper bank; the grit/weight control.
+  0…100 %.
+- **Drive Shape** — the waveshaper curve used by **Drive**: **Tube / Tape / Fold / Hard**.
+- **Soft Clip** — output clipping mode: soft (tanh) for rounded loudness or hard for aggressive
+  edge. on/off.
+- **Click Level** — amount of the band-passed noise click layer (beater attack). 0…100 %.
+- **Click Decay** — decay time of the noise click; longer smears the attack. 5…50 ms.
+- **Click Freq** — center frequency of the click band-pass; higher = a tickier, more forward top.
+  1000…8000 Hz.
+- **Transient** — which embedded PCM transient layers on top: **Off / Tick / Snap / Knock**.
+- **Transient Level** — amount of the selected PCM transient. 0…100 %.
+- **Sub Level** — amount of the sub oscillator for extra low-end weight. 0…100 %.
+- **Sub Ratio** — the sub oscillator frequency as a fraction of `f_end` (sub = f_end × ratio).
+  0.25…1.0.
+- **Key Track** — when on, the incoming MIDI note sets `f_end` (A1 = 55 Hz) so the kick is playable
+  as a tuned tom/bass; off, the note only triggers a fixed-pitch kick. on/off.
+- **Out** — output trim after the clip stage. −24…+6 dB.
+
 ## Parameters
 
 | Param | Range | Default | Notes |
@@ -69,9 +108,23 @@ note input. It emits `ProcessStatus::KeepAlive` so its tail rings out after the 
 | Key Track | on/off | off | MIDI note sets `f_end` (A1 = 55 Hz) |
 | Out | −24..+6 dB | 0 | Output trim |
 
-## Factory presets
+## Recipes
 
-808 Long · Techno Rumble Kick · Psy Snap · House Punch · Hardstyle Distorted.
+1. **Atmospheric-DnB 808 Sub** *(start: 808 Long)* — **Pitch Start** ≈ 160 Hz, **Pitch End** 45 Hz,
+   **Pitch Decay** ~60 ms, **Length** ~2.0 and **Amp Decay** long (~1500 ms) for a sliding sub that
+   sustains under a break. Add **Sub Level** ~40 % (**Sub Ratio** 0.5), keep **Drive** low, enable
+   **Key Track** so you can play the sub-bass melody from the keyboard.
+2. **Hard-Techno Rumble Kick** *(start: Techno Rumble Kick)* — **Pitch Start** ~300 Hz, **Pitch End**
+   ~50 Hz, **Pitch Decay** short, **Amp Decay** medium, then push **Drive** ~60 % with **Drive Shape**
+   = Hard and **Soft Clip** off for a saturated stomp. Pair with UNDERTOW on the same track for the
+   rumble tail.
+3. **Punchy House Kick** *(start: House Punch)* — **Pitch Start** ~240 Hz, **Pitch End** ~55 Hz,
+   **Pitch Decay** ~25 ms, **Click Level** ~40 % with **Click Freq** ~3.5 kHz and **Transient** = Tick
+   at **Transient Level** ~50 % for a forward beater attack. Short **Length** (~0.7) keeps it tight.
+4. **Distorted Hardstyle Stomp** *(start: Hardstyle Distorted)* — **Tone** ~40 % for triangle edge,
+   **Drive** ~80 % with **Drive Shape** = Fold, **Soft Clip** off, **Pitch End** ~70 Hz. Use
+   **Transient** = Knock at high **Transient Level** and pull **Out** back a couple dB to leave
+   headroom for the distortion.
 
 ## Verification (offline done-bar)
 
@@ -93,3 +146,7 @@ IMPACT's own kick math is also exposed suite-wide as `suite_core::testsig::synth
 3. Fire rapid repeated notes to hear the phase-continuous, declicked retrigger.
 
 Offline audition renders (one 1.5 s note per preset) are in `renders/IMPACT/`.
+
+## Factory presets
+
+808 Long · Techno Rumble Kick · Psy Snap · House Punch · Hardstyle Distorted.

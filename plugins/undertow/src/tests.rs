@@ -12,6 +12,14 @@ use suite_core::testsig::{synth_kick, white_noise, KickSpec};
 
 const SR: f32 = 48_000.0;
 
+#[test]
+fn manual_covers_all_params_and_has_recipes() {
+    suite_core::manual::assert_manual_covers_params(
+        crate::MANUAL_DOC,
+        &crate::UndertowParams::default(),
+    );
+}
+
 /// 4-on-the-floor synthetic-kick pattern: `beats` kicks at `bpm`, plus a tail. Returns the
 /// buffer and the onset sample indices.
 fn kick_pattern(bpm: f32, beats: usize, f_end: f32) -> (Vec<f32>, Vec<usize>, usize) {

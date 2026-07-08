@@ -31,6 +31,9 @@ mod tests;
 use dsp::{db_to_gain, Settings, UndertowCore};
 use suite_core::presets::{load_all, Preset};
 
+/// Usage manual embedded from docs, rendered in-GUI by the '?' button (BUILT-IN-MANUALS).
+pub const MANUAL_DOC: &str = include_str!("../../../docs/UNDERTOW.md");
+
 // ---------------------------------------------------------------------------
 // Plugin + params
 // ---------------------------------------------------------------------------
@@ -264,6 +267,7 @@ impl Plugin for Undertow {
                         use suite_core::ui::labeled_slider as row;
                         ui.add_space(4.0);
                         ui.heading(egui::RichText::new("QEYNOS · UNDERTOW").color(suite_core::ui::ACCENT));
+                        suite_core::ui::manual_button(ui, "undertow", "UNDERTOW", MANUAL_DOC);
                         ui.label(
                             egui::RichText::new("kick-to-rumble generator — sits on the kick track")
                                 .color(suite_core::ui::TEXT_DIM)

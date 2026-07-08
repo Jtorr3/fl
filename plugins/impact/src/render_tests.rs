@@ -12,6 +12,14 @@ use suite_core::stft::Stft;
 
 const SR: f32 = 48_000.0;
 
+#[test]
+fn manual_covers_all_params_and_has_recipes() {
+    suite_core::manual::assert_manual_covers_params(
+        crate::MANUAL_DOC,
+        &crate::ImpactParams::default(),
+    );
+}
+
 /// Render a single voice: note-on at sample 0, optional retrigger at `retrig_at`.
 fn render_note(s: &Settings, len: usize, retrig_at: Option<usize>) -> Vec<f32> {
     let mut v = KickVoice::new(SR);

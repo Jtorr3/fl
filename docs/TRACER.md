@@ -1,11 +1,15 @@
 # TRACER — pitch-tracking multiband saturation
 
-TRACER detects the fundamental (f0) of the incoming signal and locks a Linkwitz-Riley
-crossover tree to it: each crossover cutoff rides a harmonic multiple of f0, so as a note
-glides the bands follow, always saturating the same harmonic region (fundamental, body,
-presence…). Each band is driven through the suite waveshaper bank at 2x oversampling and
-summed. A MIDI note can replace the detector; when the detector loses confidence the
-crossovers freeze.
+## What It Is
+
+TRACER detects the fundamental (f0) of the incoming signal and locks a Linkwitz-Riley crossover
+tree to it: each crossover cutoff rides a harmonic multiple of f0, so as a note glides the bands
+follow, always saturating the same harmonic region (fundamental, body, presence…). Each band is
+driven through the suite waveshaper bank at 2x oversampling and summed, giving pitch-consistent
+harmonic color on basses, Reeses, vocals, and leads — or, with crossovers set Fixed, a classic
+static multiband saturator for buses.
+
+## Signal Flow
 
 ```
 in ─┬─ mono sum → MPM pitch detect (decimated ~12 kHz, window 1024)
@@ -50,6 +54,42 @@ center: bands where the ear is less sensitive get proportionally more drive so t
 harmonic color reads evenly across the spectrum. It is a color compensation, not a
 measurement; the multiplier is clamped to a sane range.
 
+## Controls
+
+- **Pitch Mode** — pitch source: **Detect** (MPM detector tracks the input f0) or **MIDI** (the
+  last note-on frequency drives the crossovers, detector bypassed).
+- **Bands** — number of active bands, **2 / 3 / 4** (band 0 = lowest); fewer for broad color,
+  more for surgical per-region drive.
+- **Smart Freq** — octave offset applied to every tracked crossover, sliding the whole band
+  layout up or down relative to f0. −2…+3 oct.
+- **Constant Color** — inverse equal-loudness drive weighting so harmonic color reads evenly
+  across the spectrum. on/off.
+- **Slew** — pitch slew limit; low values glide the crossovers smoothly through pitch changes,
+  high values snap. 5…2000 Hz/ms.
+- **Trim** — input trim into the wet path. −24…+24 dB.
+- **XO1 Mode** — crossover 1 source: **Track** (harmonic × f0) or **Fixed** (a set Hz).
+- **XO1 Fixed** — the fixed cutoff frequency for crossover 1 when **XO1 Mode** = Fixed.
+  20…20000 Hz.
+- **XO2 Mode** — crossover 2 source: **Track** or **Fixed**.
+- **XO2 Fixed** — the fixed cutoff for crossover 2 when **XO2 Mode** = Fixed. 20…20000 Hz.
+- **XO3 Mode** — crossover 3 source: **Track** or **Fixed**.
+- **XO3 Fixed** — the fixed cutoff for crossover 3 when **XO3 Mode** = Fixed. 20…20000 Hz.
+- **Band 1 Drive** — saturation drive into band 1's shaper (the lowest band). 0…48 dB.
+- **Band 1 Shape** — waveshaper for band 1: **Tube / Tape / Fold / Hard**.
+- **Band 1 Level** — output level of band 1 (−36 ≈ mute). −36…+12 dB.
+- **Band 2 Drive** — saturation drive into band 2's shaper. 0…48 dB.
+- **Band 2 Shape** — waveshaper for band 2: **Tube / Tape / Fold / Hard**.
+- **Band 2 Level** — output level of band 2 (−36 ≈ mute). −36…+12 dB.
+- **Band 3 Drive** — saturation drive into band 3's shaper. 0…48 dB.
+- **Band 3 Shape** — waveshaper for band 3: **Tube / Tape / Fold / Hard**.
+- **Band 3 Level** — output level of band 3 (−36 ≈ mute). −36…+12 dB.
+- **Band 4 Drive** — saturation drive into band 4's shaper (the highest band; active with
+  **Bands** = 4). 0…48 dB.
+- **Band 4 Shape** — waveshaper for band 4: **Tube / Tape / Fold / Hard**.
+- **Band 4 Level** — output level of band 4 (−36 ≈ mute). −36…+12 dB.
+- **Mix** — dry/wet blend; at 0 % the output nulls against dry. 0…100 %.
+- **Out** — output trim (hard-ceilinged at ±0.999). −24…+24 dB.
+
 ## Parameters
 
 | Param | Range | Default | Notes |
@@ -60,13 +100,34 @@ measurement; the multiplier is clamped to a sane range.
 | Constant Color | on/off | on | Inverse equal-loudness drive weighting |
 | Slew | 5..2000 Hz/ms | 200 | Pitch slew limit |
 | Trim | −24..+24 dB | 0 | Input trim (wet path) |
-| XO1/2/3 Mode | Track / Fixed | Track | Cutoff source per crossover |
-| XO1/2/3 Fixed | 20..20000 Hz | 200/1000/4000 | Fixed cutoff when Mode = Fixed |
+| XO1 Mode / XO2 Mode / XO3 Mode | Track / Fixed | Track | Cutoff source per crossover |
+| XO1 Fixed / XO2 Fixed / XO3 Fixed | 20..20000 Hz | 200/1000/4000 | Fixed cutoff when Mode = Fixed |
 | Band 1–4 Drive | 0..48 dB | 10/8/6/4 | Drive into the band's shaper |
 | Band 1–4 Shape | Tube / Tape / Fold / Hard | Tube/Tube/Tape/Tape | Waveshaper from the suite bank |
 | Band 1–4 Level | −36..+12 dB | 0 | Band output level (−36 ≈ mute) |
 | Mix | 0..100 % | 100 | Dry/wet. At 0 %, output nulls against dry. |
 | Out | −24..+24 dB | 0 | Output trim (hard-ceilinged at ±0.999) |
+
+## Recipes
+
+1. **Sliding 808 Grit** *(start: Sliding 808 Grit)* — **Pitch Mode** = Detect, **Bands** = 3,
+   **Smart Freq** 0, keep the crossovers on **Track** (**XO1 Mode** / **XO2 Mode** / **XO3 Mode** =
+   Track). Push **Band 1 Drive** ~14 dB with **Band 1 Shape** = Tube for fundamental weight and
+   **Band 2 Drive** ~10 dB / **Band 3 Shape** = Tape for harmonic bite; as the 808 glides the grit
+   stays locked to the note. **Constant Color** on, **Mix** 100 %.
+2. **Vocal-Rip Fundamental Warmth** *(start: Vocal Fundamental Warmth)* — **Bands** = 3, **Band 1
+   Drive** ~8 dB (**Band 1 Shape** = Tube) to thicken the vocal fundamental, keep **Band 3 Level**
+   low so sibilance isn't amplified. Lower **Slew** (~80 Hz/ms) so the tracking glides smoothly over
+   vibrato. Blend with **Mix** ~70 % for a warm, harmonically-fattened vocal.
+3. **Dark-Techno Reese Bite** *(start: Bass Harmonic Push)* — **Bands** = 4, drive the upper bands
+   hard (**Band 3 Drive** ~18 dB, **Band 4 Drive** ~16 dB with **Band 3 Shape** / **Band 4 Shape** =
+   Fold) while keeping **Band 1 Drive** modest so the sub stays clean. Nudge **Smart Freq** −0.5 to
+   pull the harmonic content down for a growling Reese.
+4. **Fixed-Band Bus Saturator** *(start: Fixed-Band Bus Saturator)* — set every crossover to Fixed
+   (**XO1 Mode** / **XO2 Mode** / **XO3 Mode** = Fixed) with **XO1 Fixed** ~200 Hz, **XO2 Fixed**
+   ~1 kHz, **XO3 Fixed** ~4 kHz, and moderate per-band drive (**Band 1–4 Drive** ~6 dB). TRACER now
+   runs as a classic static multiband saturator for drum buses and full mixes; **Out** −1 dB for
+   headroom.
 
 ## Factory presets
 

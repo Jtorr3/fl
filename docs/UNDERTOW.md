@@ -1,10 +1,14 @@
 # UNDERTOW — kick-to-rumble generator
 
-A rumble **generator** that sits **ON the kick track**. It passes the dry kick straight through
-and, underneath it, builds a kick-derived, **kick-ducked sub-bass rumble** — the long, breathing
-low-end tail that defines hard / melodic / hypnotic techno. Taste-tailored for that genre's
-low-end: the rumble is mono where it counts, tunable to the key, and it *breathes around* the
-kick instead of fighting it.
+## What It Is
+
+UNDERTOW is a rumble **generator** that sits **ON the kick track**. It passes the dry kick straight
+through and, underneath it, builds a kick-derived, **kick-ducked sub-bass rumble** — the long,
+breathing low-end tail that defines hard / melodic / hypnotic techno and atmospheric-dnb. The
+rumble is mono where it counts, tunable to the key, and it *breathes around* the kick instead of
+fighting it.
+
+## Signal Flow
 
 ```
 in(kick) ─┬────────────────────────────────────────────────────────────── dry ── + ── out
@@ -46,6 +50,32 @@ exact null), not a lag-0 coherent peak.
    between hits — it breathes *around* the kick.
 7. **Output.** `Rumble` level, `Width` (> 150 Hz only), summed with the dry kick, `Out Trim`.
 
+## Controls
+
+- **Strip** — how hard the kick's attack/click is stripped before rumble generation, so the rumble
+  is built from the body, not the transient. 0–100 %.
+- **Drive** — saturation drive into the 2× oversampled waveshaper that thickens the rumble source.
+  0–100 %.
+- **Size** — scales the FDN delay lengths: small = tight and immediate, large = cavernous and
+  diffuse. 0–100 %.
+- **Decay** — FDN reverb time (RT60), i.e. the rumble tail length. 0.2–3.0 s.
+- **LP Freq** — sub low-pass cutoff; the ceiling of the rumble's frequency range. 90–250 Hz.
+- **LP Res** — resonance (Q) of that low-pass; higher adds a bump at the cutoff. 0.5–8.
+- **Tune Note** — key-lock note (C0–B2, A1 = 55 Hz) for the resonant peak, so the rumble hums in
+  key.
+- **Tune Amount** — strength of the resonant bell at the tuned note; 0 % is flat, 100 % rings the
+  rumble hard at that pitch. 0–100 %.
+- **Duck Depth** — how much the rumble ducks at each kick onset, keyed by the dry kick envelope
+  (→ 0–24 dB). This is what makes the rumble breathe. 0–100 %.
+- **Duck Release** — how fast the rumble swells back after each kick. 80–300 ms.
+- **Rumble** — the rumble output level, summed with the dry kick; the bottom of the range mutes it
+  (and the output then nulls against dry). −60…+12 dB.
+- **Width** — stereo spread of the rumble content **above 150 Hz** only; the sub stays mono.
+  0–100 %.
+- **Dry** — the dry-kick level (default 0 dB unity, since the plugin sits on the kick track).
+  −60…+6 dB.
+- **Out Trim** — final output trim on the summed dry + rumble. −24…+24 dB.
+
 ## Parameters
 
 | Param | Range | Meaning |
@@ -64,6 +94,23 @@ exact null), not a lag-0 coherent peak.
 | Width | 0–100 % | Stereo spread of rumble **above 150 Hz** (low-end stays mono) |
 | Dry | −60…+6 dB | Dry-kick level (default 0 dB unity — the plugin sits on the kick) |
 | Out Trim | −24…+24 dB | Final output trim |
+
+## Recipes
+
+1. **Warehouse Rumble Bed** *(start: Warehouse Bed)* — **Strip** ~50 %, **Drive** ~30 %, **Size**
+   ~60 %, **Decay** ~1.2 s, **LP Freq** ~140 Hz. Set **Duck Depth** ~55 % with **Duck Release**
+   ~160 ms so the rumble ducks hard on each kick and swells back for a rolling hard-techno floor.
+   **Rumble** ~−3 dB, **Dry** 0 dB.
+2. **Rolling Melodic-Techno Hum** *(start: Hypnotic Wash Low)* — dial **Tune Note** to your track's
+   key and push **Tune Amount** ~60 % so the rumble hums the root. **Size** ~65 %, **Decay** ~1.9 s,
+   **LP Res** ~2.0 for a little bump. Keep **Duck Depth** ~50 % so it breathes; **Width** ~30 % adds
+   air above 150 Hz while the sub stays mono.
+3. **Atmospheric-DnB Sub Roller** *(start: Rolling Rumble)* — longer **Decay** (~2.0 s), **Size**
+   ~70 %, **Strip** ~55 % to keep only the body, **LP Freq** ~150 Hz. Lower **Duck Depth** (~35 %)
+   for a more continuous bed under a half-time break, **Rumble** ~−4 dB.
+4. **Distorted Drone Bed** *(start: Distorted Drone Bed)* — crank **Drive** ~85 % for a saturated,
+   harmonically-rich rumble, **Decay** ~2.1 s, **Duck Depth** ~40 %. Watch **Out Trim** (pull back
+   ~2 dB) so the driven rumble plus dry kick stays under the ceiling.
 
 ## Presets
 
