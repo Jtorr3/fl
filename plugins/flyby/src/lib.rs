@@ -441,8 +441,13 @@ impl Plugin for Flyby {
                         ui.add_space(4.0);
 
                         // The XY pad: draw + edit the path, show the moving source dot.
+                        // It is FLYBY's primary interactive display surface, so it lives in
+                        // the CONSOLE v2 CRT telemetry bay (drag/edit still work identically;
+                        // THEME-OFF degrades the bay to a plain panel with the original colors).
                         let phase = phase_meter.load(Ordering::Relaxed);
-                        xy_pad(ui, &params, setter, phase);
+                        suite_core::ui::crt_frame(ui, "flyby-crt", 316.0, |ui| {
+                            xy_pad(ui, &params, setter, phase);
+                        });
 
                         ui.add_space(6.0);
                         egui::Grid::new("flyby-controls")
@@ -630,27 +635,49 @@ fn xy_pad(ui: &mut egui::Ui, params: &FlybyParams, setter: &ParamSetter, phase: 
 
     // --- Paint ---
     if ui.is_rect_visible(rect) {
+        // CONSOLE re-skins the decorative pad (glass background, phosphor path/handles);
+        // THEME-OFF keeps the original panel + amber. The moving SOURCE dot stays bright
+        // white in both themes so the live position reads clearly against the trace.
+        let console = suite_core::ui::console_on(ui.ctx());
+        let trace = if console { suite_core::ui::PHOSPHOR } else { suite_core::ui::ACCENT };
+        let mark = if console { suite_core::ui::PHOSPHOR_DIM } else { suite_core::ui::TEXT_DIM };
+        let grid = if console {
+            suite_core::ui::PHOSPHOR_DIM.linear_multiply(0.35)
+        } else {
+            egui::Color32::from_rgb(34, 37, 42)
+        };
+        let handle_edge = if console { suite_core::ui::GLASS_BG } else { suite_core::ui::BG };
         let painter = ui.painter_at(rect);
-        painter.rect_filled(rect, 4.0, suite_core::ui::PANEL);
-        painter.rect_stroke(
-            rect,
-            4.0,
-            egui::Stroke::new(1.0, egui::Color32::from_rgb(40, 43, 48)),
-            egui::StrokeKind::Middle,
-        );
+        if console {
+            // Let the CRT glass + scanlines from `crt_frame` show through.
+            painter.rect_stroke(
+                rect,
+                4.0,
+                egui::Stroke::new(1.0, suite_core::ui::PHOSPHOR_DIM.linear_multiply(0.5)),
+                egui::StrokeKind::Middle,
+            );
+        } else {
+            painter.rect_filled(rect, 4.0, suite_core::ui::PANEL);
+            painter.rect_stroke(
+                rect,
+                4.0,
+                egui::Stroke::new(1.0, egui::Color32::from_rgb(40, 43, 48)),
+                egui::StrokeKind::Middle,
+            );
+        }
         // Center cross-hairs (listener).
         let center = node_to_screen(rect, 0.0, 0.0);
         painter.line_segment(
             [egui::pos2(rect.left(), center.y), egui::pos2(rect.right(), center.y)],
-            egui::Stroke::new(1.0, egui::Color32::from_rgb(34, 37, 42)),
+            egui::Stroke::new(1.0, grid),
         );
         painter.line_segment(
             [egui::pos2(center.x, rect.top()), egui::pos2(center.x, rect.bottom())],
-            egui::Stroke::new(1.0, egui::Color32::from_rgb(34, 37, 42)),
+            egui::Stroke::new(1.0, grid),
         );
         // Listener marker.
-        painter.circle_stroke(center, 5.0, egui::Stroke::new(1.5, suite_core::ui::TEXT_DIM));
-        painter.circle_filled(center, 1.5, suite_core::ui::TEXT_DIM);
+        painter.circle_stroke(center, 5.0, egui::Stroke::new(1.5, mark));
+        painter.circle_filled(center, 1.5, mark);
 
         // Path curve (sampled Catmull-Rom).
         let steps = 240;
@@ -663,25 +690,25 @@ fn xy_pad(ui: &mut egui::Ui, params: &FlybyParams, setter: &ParamSetter, phase: 
             .collect();
         painter.add(egui::Shape::line(
             pts,
-            egui::Stroke::new(1.5, suite_core::ui::ACCENT.linear_multiply(0.7)),
+            egui::Stroke::new(1.5, trace.linear_multiply(0.7)),
         ));
 
         // Node handles.
         for i in 0..count {
             let sp = node_to_screen(rect, nodes[i].0, nodes[i].1);
-            painter.circle_filled(sp, 5.0, suite_core::ui::ACCENT);
-            painter.circle_stroke(sp, 5.0, egui::Stroke::new(1.0, suite_core::ui::BG));
+            painter.circle_filled(sp, 5.0, trace);
+            painter.circle_stroke(sp, 5.0, egui::Stroke::new(1.0, handle_edge));
         }
 
         // Moving source dot at the current traversal phase.
         let (sx, sy) = dsp::path_position(&nodes, count, phase);
         let dot = node_to_screen(rect, sx, sy);
         painter.circle_filled(dot, 6.0, egui::Color32::from_rgb(240, 240, 245));
-        painter.circle_stroke(dot, 8.0, egui::Stroke::new(1.5, suite_core::ui::ACCENT));
+        painter.circle_stroke(dot, 8.0, egui::Stroke::new(1.5, trace));
         // A faint line from the listener to the source (the current distance/azimuth).
         painter.line_segment(
             [center, dot],
-            egui::Stroke::new(1.0, suite_core::ui::ACCENT.linear_multiply(0.35)),
+            egui::Stroke::new(1.0, trace.linear_multiply(0.35)),
         );
     }
     // Keep the dot animating while the editor is open.

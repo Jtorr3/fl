@@ -444,8 +444,13 @@ impl Plugin for Chamber {
                         );
                         ui.separator();
 
-                        // Floor-plan XY pad.
-                        floor_plan(ui, &params, setter);
+                        // Floor-plan XY pad — CHAMBER's primary interactive display surface,
+                        // hosted in the CONSOLE v2 CRT telemetry bay (drag source/listener
+                        // still work identically; THEME-OFF degrades the bay to a plain panel
+                        // with the original colors).
+                        suite_core::ui::crt_frame(ui, "chamber-crt", 316.0, |ui| {
+                            floor_plan(ui, &params, setter);
+                        });
 
                         // Live geometry readout (RT60 + direct arrival).
                         let s = params.snapshot();
@@ -653,14 +658,41 @@ fn floor_plan(ui: &mut egui::Ui, params: &ChamberParams, setter: &ParamSetter) {
     }
 
     if ui.is_rect_visible(rect) {
+        // CONSOLE re-skins the decorative plan (glass background, phosphor grid/markers);
+        // THEME-OFF keeps the original panel + amber. SRC stays amber/phosphor and LISTEN
+        // stays dim so the two draggable handles remain distinguishable in both themes.
+        let console = suite_core::ui::console_on(ui.ctx());
+        let src_col = if console { suite_core::ui::PHOSPHOR } else { suite_core::ui::ACCENT };
+        let lis_col = if console { suite_core::ui::PHOSPHOR_DIM } else { suite_core::ui::TEXT_DIM };
+        let grid = if console {
+            suite_core::ui::PHOSPHOR_DIM.linear_multiply(0.35)
+        } else {
+            egui::Color32::from_rgb(34, 37, 42)
+        };
+        let axis = if console {
+            suite_core::ui::PHOSPHOR_DIM.linear_multiply(0.6)
+        } else {
+            egui::Color32::from_rgb(70, 74, 82)
+        };
+        let src_edge = if console { suite_core::ui::GLASS_BG } else { suite_core::ui::BG };
         let painter = ui.painter_at(rect);
-        painter.rect_filled(rect, 4.0, suite_core::ui::PANEL);
-        painter.rect_stroke(
-            rect,
-            4.0,
-            egui::Stroke::new(1.5, egui::Color32::from_rgb(60, 64, 72)),
-            egui::StrokeKind::Middle,
-        );
+        if console {
+            // Let the CRT glass + scanlines from `crt_frame` show through.
+            painter.rect_stroke(
+                rect,
+                4.0,
+                egui::Stroke::new(1.5, suite_core::ui::PHOSPHOR_DIM.linear_multiply(0.5)),
+                egui::StrokeKind::Middle,
+            );
+        } else {
+            painter.rect_filled(rect, 4.0, suite_core::ui::PANEL);
+            painter.rect_stroke(
+                rect,
+                4.0,
+                egui::Stroke::new(1.5, egui::Color32::from_rgb(60, 64, 72)),
+                egui::StrokeKind::Middle,
+            );
+        }
         // Faint grid.
         for k in 1..4 {
             let fx = k as f32 / 4.0;
@@ -669,14 +701,14 @@ fn floor_plan(ui: &mut egui::Ui, params: &ChamberParams, setter: &ParamSetter) {
                     egui::pos2(rect.left() + fx * rect.width(), rect.top()),
                     egui::pos2(rect.left() + fx * rect.width(), rect.bottom()),
                 ],
-                egui::Stroke::new(1.0, egui::Color32::from_rgb(34, 37, 42)),
+                egui::Stroke::new(1.0, grid),
             );
             painter.line_segment(
                 [
                     egui::pos2(rect.left(), rect.top() + fx * rect.height()),
                     egui::pos2(rect.right(), rect.top() + fx * rect.height()),
                 ],
-                egui::Stroke::new(1.0, egui::Color32::from_rgb(34, 37, 42)),
+                egui::Stroke::new(1.0, grid),
             );
         }
         // Line between source and listener (direct path).
@@ -684,36 +716,36 @@ fn floor_plan(ui: &mut egui::Ui, params: &ChamberParams, setter: &ParamSetter) {
         let lp = frac_to_screen(rect, lis.0, lis.1);
         painter.line_segment(
             [sp, lp],
-            egui::Stroke::new(1.0, suite_core::ui::ACCENT.linear_multiply(0.4)),
+            egui::Stroke::new(1.0, src_col.linear_multiply(0.4)),
         );
 
         // Listener (dim ring + cross).
-        painter.circle_stroke(lp, 8.0, egui::Stroke::new(2.0, suite_core::ui::TEXT_DIM));
+        painter.circle_stroke(lp, 8.0, egui::Stroke::new(2.0, lis_col));
         painter.line_segment(
             [egui::pos2(lp.x - 5.0, lp.y), egui::pos2(lp.x + 5.0, lp.y)],
-            egui::Stroke::new(1.5, suite_core::ui::TEXT_DIM),
+            egui::Stroke::new(1.5, lis_col),
         );
         painter.line_segment(
             [egui::pos2(lp.x, lp.y - 5.0), egui::pos2(lp.x, lp.y + 5.0)],
-            egui::Stroke::new(1.5, suite_core::ui::TEXT_DIM),
+            egui::Stroke::new(1.5, lis_col),
         );
         painter.text(
             egui::pos2(lp.x + 10.0, lp.y - 10.0),
             egui::Align2::LEFT_CENTER,
             "LISTEN",
             egui::FontId::proportional(10.0),
-            suite_core::ui::TEXT_DIM,
+            lis_col,
         );
 
         // Source (amber dot).
-        painter.circle_filled(sp, 7.0, suite_core::ui::ACCENT);
-        painter.circle_stroke(sp, 7.0, egui::Stroke::new(1.0, suite_core::ui::BG));
+        painter.circle_filled(sp, 7.0, src_col);
+        painter.circle_stroke(sp, 7.0, egui::Stroke::new(1.0, src_edge));
         painter.text(
             egui::pos2(sp.x + 10.0, sp.y - 10.0),
             egui::Align2::LEFT_CENTER,
             "SRC",
             egui::FontId::proportional(10.0),
-            suite_core::ui::ACCENT,
+            src_col,
         );
 
         // Axis labels.
@@ -722,7 +754,7 @@ fn floor_plan(ui: &mut egui::Ui, params: &ChamberParams, setter: &ParamSetter) {
             egui::Align2::CENTER_BOTTOM,
             "◄ WIDTH ►",
             egui::FontId::proportional(9.0),
-            egui::Color32::from_rgb(70, 74, 82),
+            axis,
         );
     }
 }

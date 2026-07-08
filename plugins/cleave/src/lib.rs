@@ -328,6 +328,26 @@ impl Plugin for Cleave {
                         );
                         ui.separator();
 
+                        // CONSOLE v2 CRT telemetry readout. CLEAVE's step grid below is an
+                        // OPERABLE control, so it stays where and as it is; the bay instead
+                        // shows a compact honest live readout (the same values as the knobs +
+                        // the live playhead). GUI-thread reads only; process() untouched.
+                        let crt_steps = (params.steps.value() as usize).clamp(MIN_STEPS, MAX_STEPS);
+                        let crt_head = cur_step.load(Ordering::Relaxed) as usize;
+                        suite_core::ui::crt_lines(
+                            ui,
+                            "cleave-crt",
+                            "CLEAVE · SLICER",
+                            &[
+                                ("STEP", format!("{}/{}", (crt_head % crt_steps.max(1)) + 1, crt_steps)),
+                                ("MODE", format!("{} · grid {}", params.slice_mode, params.grid_div)),
+                                ("SWING", format!("{} · dens {}", params.swing, params.density)),
+                                ("SENS", format!("{}", params.sensitivity)),
+                                ("OUT", format!("mix {} · {}", params.mix, params.out)),
+                            ],
+                        );
+                        ui.add_space(4.0);
+
                         // Pattern actions: Randomize (density) + Clear.
                         ui.horizontal(|ui| {
                             ui.label(

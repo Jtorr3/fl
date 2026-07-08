@@ -323,9 +323,13 @@ impl Plugin for Carve {
                         );
                         ui.separator();
 
-                        // Live per-band reduction meter.
+                        // Live per-band reduction meter, hosted in the CONSOLE v2 CRT
+                        // telemetry bay (display-only meter; in THEME-OFF it degrades to a
+                        // plain panel with the original colors).
                         section(ui, "REDUCTION");
-                        reduction_meter(ui, &meter);
+                        suite_core::ui::crt_frame(ui, "carve-crt", 62.0, |ui| {
+                            reduction_meter(ui, &meter);
+                        });
                         ui.add_space(6.0);
 
                         egui::ScrollArea::vertical().show(ui, |ui| {
@@ -488,8 +492,18 @@ fn reduction_meter(ui: &mut egui::Ui, meter: &[AtomicF32]) {
     let avail = ui.available_width().min(560.0);
     let size = Vec2::new(avail, 46.0);
     let (rect, _resp) = ui.allocate_exact_size(size, egui::Sense::hover());
+    // CONSOLE re-skins the meter toward the amber phosphor palette; THEME-OFF keeps the
+    // original panel + amber bars. The bar HEIGHTS carry the meaning (per-band cut depth).
+    let console = suite_core::ui::console_on(ui.ctx());
     let painter = ui.painter_at(rect);
-    painter.rect_filled(rect, 3.0, suite_core::ui::PANEL);
+    if !console {
+        painter.rect_filled(rect, 3.0, suite_core::ui::PANEL);
+    }
+    let bar_col = if console {
+        suite_core::ui::PHOSPHOR
+    } else {
+        suite_core::ui::ACCENT
+    };
     let gap = 3.0;
     let bw = (rect.width() - gap * (n as f32 + 1.0)) / n as f32;
     for i in 0..n {
@@ -500,7 +514,7 @@ fn reduction_meter(ui: &mut egui::Ui, meter: &[AtomicF32]) {
             egui::pos2(x0, rect.bottom() - 3.0 - h),
             egui::pos2(x0 + bw, rect.bottom() - 3.0),
         );
-        painter.rect_filled(bar, 2.0, suite_core::ui::ACCENT);
+        painter.rect_filled(bar, 2.0, bar_col);
     }
 }
 
