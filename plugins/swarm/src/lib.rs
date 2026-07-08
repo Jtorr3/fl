@@ -16,7 +16,6 @@ use nih_plug::prelude::*;
 use nih_plug_egui::{
     create_egui_editor,
     egui::{self, Vec2},
-    resizable_window::ResizableWindow,
     EguiState,
 };
 use std::sync::Arc;
@@ -319,7 +318,7 @@ impl Plugin for Swarm {
             |ctx, _| suite_core::ui::apply_theme(ctx),
             move |egui_ctx, setter, _state| {
                 suite_core::ui::apply_theme(egui_ctx);
-                ResizableWindow::new("qeynos-swarm-window")
+                suite_core::ui::ScaledWindow::new("qeynos-swarm-window", Vec2::new(600.0, 660.0))
                     .min_size(Vec2::new(520.0, 540.0))
                     .show(egui_ctx, egui_state.as_ref(), |ui| {
                         use suite_core::ui::labeled_slider as row;
