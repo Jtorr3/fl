@@ -348,6 +348,33 @@ impl Plugin for Wire {
                         );
                         ui.separator();
 
+                        // CONSOLE v2 CRT telemetry bay — honest live state (same values shown
+                        // on the knobs below; GUI-thread param reads only, process() untouched).
+                        // THEME-OFF degrades to a plain readout panel.
+                        suite_core::ui::crt_lines(
+                            ui,
+                            "wire-crt",
+                            "WIRE · CODEC DEGRADE",
+                            &[
+                                ("CODEC", format!("{} · {}", params.bitrate, params.mode)),
+                                (
+                                    "LINK",
+                                    format!(
+                                        "bw {} · fec {}",
+                                        params.bandwidth,
+                                        if params.fec.value() { "on" } else { "off" },
+                                    ),
+                                ),
+                                ("DEGRADE", format!("loss {} · crunch {}", params.loss, params.crunch)),
+                                ("REGEN", format!("delay {} · amt {}", params.regen_delay, params.regen_amount)),
+                                (
+                                    "OUT",
+                                    format!("width {} · mix {} · {}", params.width, params.mix, params.out),
+                                ),
+                            ],
+                        );
+                        ui.add_space(4.0);
+
                         egui::ScrollArea::vertical().show(ui, |ui| {
                             ui.label(
                                 egui::RichText::new("CODEC")

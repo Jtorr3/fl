@@ -293,6 +293,32 @@ impl Plugin for Smudge {
                         );
                         ui.separator();
 
+                        // CONSOLE v2 CRT telemetry bay — honest live state (same values shown
+                        // on the knobs below; GUI-thread param reads only, process() untouched).
+                        // THEME-OFF degrades to a plain readout panel.
+                        suite_core::ui::crt_lines(
+                            ui,
+                            "smudge-crt",
+                            "SMUDGE · SPECTRAL CHAOS",
+                            &[
+                                (
+                                    "SCRAMBLE",
+                                    format!("amt {} · range {} · rate {}", params.scramble, params.srange, params.srate),
+                                ),
+                                (
+                                    "SP.DELAY",
+                                    format!("amt {} · tilt {} · fb {}", params.delay, params.dtilt, params.dfb),
+                                ),
+                                ("BLUR", format!("amt {} · time {} · tilt {}", params.blur, params.btau, params.btilt)),
+                                ("STRETCH", format!("amt {} · factor {}", params.stretch, params.sfactor)),
+                                (
+                                    "CHAOS",
+                                    format!("rate {} · depth {} · mix {}", params.crate_, params.cdepth, params.mix),
+                                ),
+                            ],
+                        );
+                        ui.add_space(4.0);
+
                         egui::ScrollArea::vertical().show(ui, |ui| {
                             use suite_core::ui::labeled_slider as row;
 

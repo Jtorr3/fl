@@ -359,6 +359,48 @@ impl Plugin for Swarm {
                         );
                         ui.separator();
 
+                        // CONSOLE v2 CRT telemetry bay — honest live state (same values shown
+                        // on the knobs below; GUI-thread param reads only, process() untouched).
+                        // THEME-OFF degrades to a plain readout panel.
+                        suite_core::ui::crt_lines(
+                            ui,
+                            "swarm-crt",
+                            "SWARM · MASS GRANULATOR",
+                            &[
+                                ("CLOUD", format!("dens {} · size {}", params.density, params.size)),
+                                (
+                                    "MOTION",
+                                    format!(
+                                        "spray {} · scatter {} · rev {}",
+                                        params.spray, params.scatter, params.reverse,
+                                    ),
+                                ),
+                                (
+                                    "TEX",
+                                    format!(
+                                        "shimmer {} · {} mix {}",
+                                        params.shimmer,
+                                        if params.freeze.value() { "FROZEN" } else { "live" },
+                                        params.freeze_mix,
+                                    ),
+                                ),
+                                (
+                                    "SCHED",
+                                    format!(
+                                        "sync {} · div {} · quant {}",
+                                        if params.sync.value() { "on" } else { "off" },
+                                        params.division,
+                                        if params.quantize.value() { "on" } else { "off" },
+                                    ),
+                                ),
+                                (
+                                    "OUT",
+                                    format!("width {} · mix {} · {}", params.width, params.mix, params.out),
+                                ),
+                            ],
+                        );
+                        ui.add_space(4.0);
+
                         egui::ScrollArea::vertical().show(ui, |ui| {
                             ui.label(egui::RichText::new("CLOUD").color(suite_core::ui::TEXT_DIM).small());
                             egui::Grid::new("swarm-cloud")

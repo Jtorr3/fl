@@ -494,6 +494,47 @@ impl Plugin for Ouroboros {
                         );
                         ui.separator();
 
+                        // CONSOLE v2 CRT telemetry bay — honest live state (same values shown
+                        // on the knobs below; GUI-thread param reads only, process() untouched).
+                        // THEME-OFF degrades to a plain readout panel.
+                        suite_core::ui::crt_lines(
+                            ui,
+                            "ouroboros-crt",
+                            "OUROBOROS · FEEDBACK LOOP",
+                            &[
+                                (
+                                    "LOOP",
+                                    format!(
+                                        "{} · div {} · sync {}",
+                                        params.delay,
+                                        params.division,
+                                        if params.sync.value() { "on" } else { "off" },
+                                    ),
+                                ),
+                                ("FDBK", format!("{} · decay {}", params.feedback, params.decay)),
+                                (
+                                    "FREEZE",
+                                    format!(
+                                        "{} · mix {}",
+                                        if params.freeze.value() { "HELD" } else { "thru" },
+                                        params.freeze_mix,
+                                    ),
+                                ),
+                                (
+                                    "CHAIN",
+                                    format!(
+                                        "{} · {}/{}/{}",
+                                        params.order,
+                                        params.slot_a.kind,
+                                        params.slot_b.kind,
+                                        params.slot_c.kind,
+                                    ),
+                                ),
+                                ("OUT", format!("mix {} · {}", params.mix, params.out)),
+                            ],
+                        );
+                        ui.add_space(4.0);
+
                         egui::ScrollArea::vertical().show(ui, |ui| {
                             ui.label(
                                 egui::RichText::new("LOOP")

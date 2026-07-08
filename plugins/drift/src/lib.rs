@@ -376,6 +376,33 @@ impl Plugin for Drift {
                         );
                         ui.separator();
 
+                        // CONSOLE v2 CRT telemetry bay — honest live state (same values shown
+                        // on the knobs below; GUI-thread param reads only, process() untouched).
+                        // THEME-OFF degrades to a plain readout panel.
+                        suite_core::ui::crt_lines(
+                            ui,
+                            "drift-crt",
+                            "DRIFT · INFINITY FILTER",
+                            &[
+                                ("SWEEP", format!("{} · {}", params.rate, params.direction)),
+                                (
+                                    "SYNC",
+                                    format!(
+                                        "{} · div {}",
+                                        if params.sync.value() { "on" } else { "free" },
+                                        params.division,
+                                    ),
+                                ),
+                                ("BANK", format!("{} peaks · res {}", params.peaks, params.resonance)),
+                                ("RANGE", format!("{} .. {}", params.range_lo, params.range_hi)),
+                                (
+                                    "OUT",
+                                    format!("depth {} · mix {} · {}", params.depth, params.mix, params.out),
+                                ),
+                            ],
+                        );
+                        ui.add_space(4.0);
+
                         egui::ScrollArea::vertical().show(ui, |ui| {
                             ui.label(
                                 egui::RichText::new("GLIDE")
