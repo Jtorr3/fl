@@ -322,7 +322,11 @@ is the shared core, built immediately before)
 - [x] W9-VOXRIP - [x] VOXKEY - [x] VOXFIT
 - [x] UI-CORE-FIX (knobs not sliders, uniform window scaling, working click-to-type — suite-wide retrofit; user-reported defects 2026-07-07)
 - [x] W1-RUMBLE-BASSLINE - [x] W2-BREAK-CHOP - [x] W3-DARK-PROGRESSION
-**HARD CHECKPOINT**
+- [x] **HARD CHECKPOINT 2** (2026-07-07): full re-validation sweep — all gates GREEN (18 crates +
+  6 Python gates); 2 confirmed minors fixed (SNAP: rattle layer now faded through the 1.5 ms trig
+  ramp on retrigger to match the module-doc intent, plus a strengthened noise-cancelled retrigger
+  done-bar that provably catches the step; voxrip: "separation is out-of-process" docstring
+  rewritten to describe the real voxrip_separate.py + PEP 723 CPU-pin mechanism), 2 findings refuted.
 
 Pulled forward from POLISH (user priority 2026-07-07):
 - [ ] PRESET-SYSTEM (suite-wide user preset save/load + retrofit all plugins)

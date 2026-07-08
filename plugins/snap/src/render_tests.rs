@@ -241,13 +241,35 @@ fn tone_moves_spectral_centroid_monotonically() {
     );
 }
 
-/// Done-bar #3: a mid-decay retrigger must not step more than the declick bound (IMPACT's
-/// exact recipe): compare the worst sample-to-sample delta of a retriggered render against a
-/// no-retrigger baseline. A snare-mode config (body + rattle + click) so the master declick
-/// ramp and the noise trigger-fade are what's under test.
+fn rms(x: &[f32]) -> f32 {
+    if x.is_empty() {
+        return 0.0;
+    }
+    (x.iter().map(|&v| (v * v) as f64).sum::<f64>() / x.len() as f64).sqrt() as f32
+}
+
+/// Done-bar #3: a mid-decay retrigger must not step (IMPACT's recipe). Two patches are exercised:
+///
+/// * a **Hybrid** patch (body + rattle + clap + click) checked with the coarse global-baseline
+///   `max_step` bound — the shipped done-bar;
+/// * a pure **Snare** patch (blend = 0, balance = 1 → all-rattle, fast rattle) checked with a
+///   sharper, noise-carrier-cancelling method, because a `max_step`-vs-global-baseline bound is
+///   *blind* to a noise-layer regression: the rattle at full amplitude is a normal part of the
+///   sound at note onset, so a retrigger that snaps the rattle to full never exceeds the global
+///   noise slew — the only artefact is a one-sample envelope discontinuity buried in the noise.
+///
+/// The sharper method exploits an invariant of `note_on`: it does **not** touch the noise RNGs or
+/// the SVF states, so a no-retrigger baseline and a retriggered render share a *bit-identical*
+/// noise carrier and are equal sample-for-sample before the retrigger. Their difference `d`
+/// therefore cancels the carrier and isolates the envelope changes. In `d`, a properly declicked
+/// rattle re-onsets through the 1.5 ms `trig` ramp, so the RMS of `d` in the first fraction of a
+/// millisecond after the retrigger is a small fraction of its settled level; a rattle that steps
+/// to full instantly makes the onset RMS a much larger fraction. (Measured onset/settled RMS
+/// ratio: ≈ 0.285 without the `rattle * trig` fix, ≈ 0.015 with it; the bound is 0.1.)
 #[test]
 fn retrigger_is_declicked() {
-    let s = Settings {
+    // --- Hybrid patch: coarse global-baseline max_step done-bar (body + rattle + clap + click). ---
+    let hybrid = Settings {
         mode: 0.2,
         tune: 200.0,
         balance: 0.55,
@@ -263,27 +285,69 @@ fn retrigger_is_declicked() {
     };
     let len = (SR * 0.5) as usize;
     let retrig_at = len / 2;
+    let (base_l, _) = render(&hybrid, len, None);
+    let (retrig_l, _) = render(&hybrid, len, Some(retrig_at));
+    assert_universal(&base_l);
+    assert_universal(&retrig_l);
+    let base_step = max_step(&base_l);
+    let bound = base_step * 1.6 + 0.03;
+    assert!(
+        max_step(&retrig_l) <= bound,
+        "hybrid retrigger step {:.4} exceeds declick bound {bound:.4} (baseline {base_step:.4})",
+        max_step(&retrig_l)
+    );
+    let a = retrig_at.saturating_sub(64);
+    let b = (retrig_at + 256).min(len);
+    assert!(
+        max_step(&retrig_l[a..b]) <= bound,
+        "hybrid retrigger onset step {:.4} exceeds declick bound {bound:.4}",
+        max_step(&retrig_l[a..b])
+    );
 
-    let (base_l, _) = render(&s, len, None);
-    let (retrig_l, _) = render(&s, len, Some(retrig_at));
+    // --- Snare patch (blend = 0, all-rattle, fast rattle): noise-cancelled onset-RMS ratio. ---
+    // snap = 1 gives the shortest rattle tau, so by the mid-decay retrigger the baseline rattle
+    // has all but died — maximising the step the un-ramped rattle would take back to full.
+    let snare = Settings {
+        mode: 0.0,
+        tune: 190.0,
+        balance: 1.0, // no body: the difference `d` isolates the rattle (+ the declicked click)
+        snap: 1.0,
+        decay_ms: 300.0,
+        taps: 4,
+        spread_ms: 18.0,
+        humanize: 0.3,
+        tone: 0.5,
+        drive: 0.2,
+        width: 0.0,
+        ..Settings::default()
+    };
+    let (base_l, _) = render(&snare, len, None);
+    let (retrig_l, _) = render(&snare, len, Some(retrig_at));
     assert_universal(&base_l);
     assert_universal(&retrig_l);
 
-    let base_step = max_step(&base_l);
-    let retrig_step = max_step(&retrig_l);
-    let bound = base_step * 1.6 + 0.03;
+    // Invariant the cancellation relies on: identical, bit-for-bit, before the retrigger.
     assert!(
-        retrig_step <= bound,
-        "retrigger step {retrig_step:.4} exceeds declick bound {bound:.4} (baseline {base_step:.4})"
+        base_l[..retrig_at]
+            .iter()
+            .zip(&retrig_l[..retrig_at])
+            .all(|(a, b)| a == b),
+        "pre-retrigger renders diverged — noise carrier is not shared, method invalid"
     );
 
-    // Localize: the worst step in the retrigger onset window is no worse than the bound.
-    let a = retrig_at.saturating_sub(64);
-    let b = (retrig_at + 256).min(len);
-    let local = max_step(&retrig_l[a..b]);
+    let d: Vec<f32> = retrig_l.iter().zip(&base_l).map(|(a, b)| a - b).collect();
+    // Onset window: the first ~0.33 ms (16 samples @48k), well inside the 1.5 ms trig ramp so a
+    // declicked rattle is still heavily attenuated here. Settled window: fully past the ramp,
+    // where the rattle divergence is at full level and independent of the fix.
+    let ramp = ((crate::dsp::DECLICK_MS * 0.001) * SR) as usize; // 72 samples
+    let onset = &d[retrig_at..retrig_at + ramp / 4];
+    let settled = &d[retrig_at + 2 * ramp..(retrig_at + 8 * ramp).min(len)];
+    let ratio = rms(onset) / (rms(settled) + 1e-12);
     assert!(
-        local <= bound,
-        "retrigger onset step {local:.4} exceeds declick bound {bound:.4} (baseline {base_step:.4})"
+        ratio <= 0.1,
+        "snare-mode rattle onset RMS is {ratio:.3}× its settled level — rattle re-onsets \
+         without the 1.5 ms trig fade (steps to full). Expected ≤ 0.1 (measured ≈ 0.015 declicked, \
+         ≈ 0.285 stepping)."
     );
 }
 

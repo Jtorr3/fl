@@ -465,8 +465,12 @@ impl SnapVoice {
             // CLICK transient layer: noise → high BP, fast env, snap-scaled.
             let click = ch.click_bp.process(noise).bp * click_env * self.click_level;
 
-            // Snare engine (body + rattle) vs clap engine, blended by mode.
-            let snare_engine = body + rattle;
+            // Snare engine (body + rattle) vs clap engine, blended by mode. The rattle is a fast
+            // noise layer: note_on resets its env to 1.0, so it too must fade in through the
+            // trigger ramp (else a mid-decay retrigger steps it to full within one sample). The
+            // body is deliberately left un-ramped — it is phase-continuous and its level is
+            // governed by the master amp declick envelope.
+            let snare_engine = body + rattle * trig;
             let voice_pre =
                 snare_engine * self.snare_w + (clap * self.clap_w + click) * trig;
 

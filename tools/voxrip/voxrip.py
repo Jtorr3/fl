@@ -34,10 +34,16 @@ Design note -- separation is out-of-process
 --------------------------------------------
 demucs pulls torch (~200 MB CPU wheel). Putting it in THIS script's PEP 723 deps
 would make every analysis run -- and the offline test gate -- download torch.
-Instead separation shells out to `uv run --torch-backend cpu --with demucs
-python -m demucs ...`, an isolated env uv builds on first use. The analysis and
-conform math (this file) depend only on numpy/librosa/soundfile/scipy and are
-fully unit-tested without any model weights or network.
+Instead separation shells out to a sibling PEP 723 script,
+`voxrip_separate.py`, via `uv run --python 3.12 voxrip_separate.py <input>
+<out_root>` (built by demucs_command()). That helper carries the demucs + torch
+deps in its OWN PEP 723 header, plus a `[tool.uv.sources]` / `[[tool.uv.index]]`
+block pinning torch/torchaudio to PyTorch's CPU wheel index -- so uv builds an
+isolated CPU-only env for it on first use and no CUDA wheel is ever downloaded.
+It runs demucs with `--two-stems vocals`, yielding vocals.wav + no_vocals.wav.
+The analysis and conform math (this file) depend only on
+numpy/librosa/soundfile/scipy and are fully unit-tested without any model
+weights or network.
 
 Run it
 ------
