@@ -244,7 +244,8 @@ pub struct CleaveCore {
     bars_per_sample: f64,
     pattern_pos: f64, // bars within [0, PATTERN_BARS)
     synced: bool,
-    next_step: usize, // next step index to trigger this cycle
+    host_bar_pos: f64, // previous frame's raw (unwrapped) host bar position — direction of a seek/loop
+    next_step: usize,  // next step index to trigger this cycle
     prev_step_idx: i64,
 
     // --- voices ---
@@ -252,6 +253,7 @@ pub struct CleaveCore {
     voice_rr: usize,
     roll: RollSched,
     now: u64,
+    trig_count: u64, // total step triggers that actually spawned a grain (test observability)
 
     // --- per-step grid snapshot (copied from the persisted grid each block) ---
     grid_snapshot: [StepData; MAX_STEPS],
@@ -300,12 +302,14 @@ impl CleaveCore {
             bars_per_sample: 0.0,
             pattern_pos: 0.0,
             synced: false,
+            host_bar_pos: 0.0,
             next_step: 0,
             prev_step_idx: -1,
             voices: [Grain::default(); MAX_VOICES],
             voice_rr: 0,
             roll: RollSched::default(),
             now: 0,
+            trig_count: 0,
             grid_snapshot: [StepData::default(); MAX_STEPS],
             rng: Rng::new(0xC1EA_5EED),
             mix_sm,
@@ -333,11 +337,13 @@ impl CleaveCore {
         self.slice_count = 0;
         self.pattern_pos = 0.0;
         self.synced = false;
+        self.host_bar_pos = 0.0;
         self.next_step = 0;
         self.prev_step_idx = -1;
         self.voices = [Grain::default(); MAX_VOICES];
         self.roll = RollSched::default();
         self.now = 0;
+        self.trig_count = 0;
         self.rng = Rng::new(0xC1EA_5EED);
         self.stft.reset();
         for m in self.prev_mag.iter_mut() {
@@ -362,24 +368,58 @@ impl CleaveCore {
 
     /// Hand the core the per-block transport snapshot (from the host or a `FakeTransport`).
     pub fn set_transport(&mut self, t: &TransportFrame) {
+        let was_playing = self.playing;
         self.playing = t.playing;
         self.bars_per_sample = t.bars_per_sample.max(0.0);
         let expected = t.bar_pos.rem_euclid(PATTERN_BARS);
+        // Direction of any host discontinuity: negative == the host jumped BACKWARD (a loop wrap
+        // or a seek-back). Tracked on the raw (unwrapped) host bar so a 1-bar loop wrap — which
+        // is antipodal on the 2-bar pattern circle and so ambiguous in `expected` alone — reads
+        // unambiguously as backward motion.
+        let raw_delta = t.bar_pos - self.host_bar_pos;
+        self.host_bar_pos = t.bar_pos;
+
         if !self.synced {
             self.pattern_pos = expected;
             self.synced = true;
             self.prime_next_step();
-        } else {
-            // Re-sync only on a real discontinuity (a seek), so per-sample advance drives
-            // steady playback without block-boundary jitter.
-            let mut d = (expected - self.pattern_pos).abs();
-            if d > PATTERN_BARS * 0.5 {
-                d = PATTERN_BARS - d; // wrap-around distance
+            return;
+        }
+
+        // FIX 2 — stopped free-run: while the host is stopped, freeze transport tracking and let
+        // the internal clock free-run in `process_sample`. Re-syncing to the host's frozen
+        // `bar_pos` here would snap `pattern_pos` back every block (drift > 0.05 bars) and
+        // machine-gun the sequencer instead of free-running (module docs, done-bar free-run).
+        if !self.playing {
+            return;
+        }
+
+        // Resuming from a stop: honor any genuine reposition made while stopped, no latch.
+        if !was_playing {
+            self.pattern_pos = expected;
+            self.prime_next_step();
+            return;
+        }
+
+        // Re-sync only on a real discontinuity (a seek/loop), so per-sample advance drives
+        // steady playback without block-boundary jitter.
+        let mut d = (expected - self.pattern_pos).abs();
+        if d > PATTERN_BARS * 0.5 {
+            d = PATTERN_BARS - d; // wrap-around distance
+        }
+        if d > 0.05 {
+            // FIX 1 — a BACKWARD host jump is a latch point. A host loop shorter than the 2-bar
+            // internal boundary (the standard 1-bar FL pattern loop) wraps the host position every
+            // bar, hitting this seek branch but never the internal `on_wrap`, so the snapshot would
+            // never latch and the wet stays silent at mix=1 forever. Latch the freshly-captured
+            // audio on the wrap so the slicer has something to play. A 2-bar (or longer even-bar)
+            // host loop wraps `pattern_pos` internally first, so `d` stays ~0 here and this branch
+            // never double-latches on the same wrap; forward seeks re-sync without latching.
+            if raw_delta < -1.0e-9 {
+                self.latch_snapshot();
             }
-            if d > 0.05 {
-                self.pattern_pos = expected;
-                self.prime_next_step();
-            }
+            self.pattern_pos = expected;
+            self.prime_next_step();
         }
     }
 
@@ -502,15 +542,24 @@ impl CleaveCore {
         (ol.clamp(-1.0, 1.0), or.clamp(-1.0, 1.0))
     }
 
-    /// At a pattern boundary: latch the last 2 bars into the playback buffer and (re)slice it.
+    /// At an internal 2-bar pattern boundary: latch the snapshot and restart the step cursor.
     fn on_wrap(&mut self) {
+        self.latch_snapshot();
+        self.next_step = 0;
+        self.roll.remaining = 0;
+    }
+
+    /// Latch the last 2 bars of the capture ring into the playback buffer and (re)slice it.
+    /// Called from the internal 2-bar wrap ([`on_wrap`]) and from a host loop-wrap / seek-back
+    /// detected in [`set_transport`] (FIX 1). Does not touch the step cursor — callers reprime.
+    fn latch_snapshot(&mut self) {
         // Snapshot length = 2 bars in samples (clamped to the ring).
         let pb_len = if self.bars_per_sample > 1.0e-12 {
             (PATTERN_BARS / self.bars_per_sample).round() as usize
         } else {
             0
         };
-        self.pb_len = pb_len.min(self.ring_cap).max(0);
+        self.pb_len = pb_len.min(self.ring_cap);
         // Copy the most recent pb_len samples ending at the write head into play_*.
         let n = self.pb_len;
         for i in 0..n {
@@ -520,8 +569,6 @@ impl CleaveCore {
             self.play_r[i] = self.ring_r[idx];
         }
         self.slice_buffer();
-        self.next_step = 0;
-        self.roll.remaining = 0;
     }
 
     /// (Re)compute slice boundaries over the current playback snapshot.
@@ -721,6 +768,7 @@ impl CleaveCore {
         let level = sd.level.clamp(0.0, 1.0);
 
         // First sub-onset now.
+        self.trig_count = self.trig_count.wrapping_add(1);
         self.spawn_grain(lo, hi, step_inc, sd.reverse, dur, fade, level);
 
         // Schedule the remaining roll sub-onsets.
@@ -815,6 +863,12 @@ impl CleaveCore {
     /// The playback-snapshot length the slicer operated on (== clamped `mono.len()`).
     pub fn test_pb_len(&self) -> usize {
         self.pb_len
+    }
+
+    /// Total step triggers that actually spawned a grain since construction/reset — used by the
+    /// stopped free-run regression to count onsets at the free-run rate (vs the machine-gun bug).
+    pub fn test_trig_count(&self) -> u64 {
+        self.trig_count
     }
 }
 

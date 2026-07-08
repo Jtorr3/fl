@@ -483,6 +483,132 @@ fn stopped_transport_still_nulls_at_mix_zero() {
     assert!(null_residual_db(&out, &input) < -120.0);
 }
 
+// ---------------------------------------------------------------------------
+// P0 regression 1: a 1-bar host loop (bar_pos wraps every bar — the standard FL pattern-loop
+// workflow) must latch the capture and make sound at mix = 1. Before the fix the internal 2-bar
+// `on_wrap` never fired, `pb_len` stayed 0, and the wet output was permanently silent. Also
+// asserts the latch is *rolling*: it re-latches every wrap, so new (silent) input eventually
+// replaces the old (loud) snapshot.
+// ---------------------------------------------------------------------------
+#[test]
+fn one_bar_host_loop_latches_and_refreshes() {
+    let bpm = 120.0;
+    let steps = 16usize;
+    let bar = bars_to_samples(1.0, bpm); // 1-bar host loop length, in samples
+    let passes = 6usize;
+    let total = passes * bar;
+
+    // Loud noise for passes 0..3, silence for passes 3..6. A rolling latch must pick up the new
+    // silence within a couple of passes; a one-shot latch would hold the loud snapshot forever.
+    let noise = testsig::white_noise(0.5, total, 4242);
+    let mut input = vec![0.0f32; total];
+    for p in 0..3 {
+        input[p * bar..(p + 1) * bar].copy_from_slice(&noise[p * bar..(p + 1) * bar]);
+    }
+
+    let s = Settings {
+        slice_mode: SliceMode::Grid,
+        grid_div: GridDiv::Eighth,
+        steps,
+        swing: 0.0,
+        mix: 1.0, // fully wet — exposes the "silent forever" bug directly
+        out_db: 0.0,
+        ..Settings::default()
+    };
+    let mut core = CleaveCore::new(SR);
+    core.configure(&s);
+    let grid = straight_grid(steps);
+    core.set_grid(&grid);
+
+    let mut t = FakeTransport::new(SR as f64, bpm);
+    let mut out = vec![0.0f32; total];
+    for p in 0..passes {
+        let pass_start = p * bar;
+        let mut k = 0usize; // samples into this pass
+        while k < bar {
+            // Host position within the 1-bar loop; at k == 0 it jumps back from ~1 bar (the loop
+            // wrap the host reports) — the backward jump the fix latches on.
+            t.seek_samples(k as f64);
+            core.configure(&s);
+            core.set_grid(&grid);
+            core.set_transport(&t.frame());
+            let blk = BLOCK.min(bar - k);
+            for j in 0..blk {
+                let idx = pass_start + k + j;
+                let (a, _b) = core.process_sample(input[idx], input[idx]);
+                out[idx] = a;
+            }
+            k += blk;
+        }
+    }
+
+    let pass_rms = |p: usize| rms(&out[p * bar..(p + 1) * bar]);
+    let r2 = pass_rms(2);
+    let r5 = pass_rms(5);
+    assert!(
+        r2 > 1e-3,
+        "1-bar host loop is silent after the 2nd pass (RMS {r2:.2e}) — the capture never latched"
+    );
+    assert!(
+        r5 < 0.1 * r2,
+        "rolling latch did not refresh: pass-5 RMS {r5:.2e} is not << pass-2 RMS {r2:.2e} \
+         (silent input never replaced the old loud snapshot)"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// P0 regression 2: a stopped transport (playing = false, bar_pos frozen) must free-run the
+// internal clock at the host tempo. Before the fix the seek detector re-snapped `pattern_pos` to
+// the frozen host bar every ~0.05 bars and re-primed, stalling/machine-gunning the sequencer. We
+// count actual step triggers over several cycles and require the free-run rate (`steps`/cycle).
+// ---------------------------------------------------------------------------
+#[test]
+fn stopped_transport_free_runs_at_tempo() {
+    let bpm = 120.0;
+    let steps = 16usize;
+    let cycle = bars_to_samples(2.0, bpm); // internal 2-bar pattern length, in samples
+    let cycles = 4usize;
+    let total = cycles * cycle;
+    let input = testsig::white_noise(0.5, total, 909);
+
+    let s = Settings {
+        slice_mode: SliceMode::Grid,
+        grid_div: GridDiv::Eighth,
+        steps,
+        swing: 0.0,
+        mix: 1.0,
+        out_db: 0.0,
+        ..Settings::default()
+    };
+    let mut core = CleaveCore::new(SR);
+    core.configure(&s);
+    core.set_grid(&straight_grid(steps));
+
+    // Stopped, position frozen at bar 0 the whole render (never advanced). The internal clock
+    // must free-run at the tempo regardless.
+    let t = FakeTransport::new(SR as f64, bpm).playing(false);
+    let mut i = 0usize;
+    while i < total {
+        core.set_transport(&t.frame());
+        let end = (i + BLOCK).min(total);
+        for j in i..end {
+            let _ = core.process_sample(input[j], input[j]);
+        }
+        i = end;
+    }
+
+    // Free-run count: `steps` triggers per 2-bar cycle. The first cycle captures nothing (pb_len
+    // is 0 until the first internal wrap) so it fires no grains; cycles 2..=cycles each fire all
+    // `steps`. A stalled sequencer fires ~0; a machine-gunning one fires far more than this.
+    let expected = steps * (cycles - 1); // 16 * 3 = 48
+    let got = core.test_trig_count() as usize;
+    assert!(
+        got >= expected - steps && got <= expected + 2,
+        "stopped free-run fired {got} step triggers; expected ~{expected} at the free-run rate \
+         (a stalled or machine-gunning sequencer fails this band)"
+    );
+}
+
 // --------------------------------------------------------------------------
 // Regression (HARD CHECKPOINT 3, BLOCKER): the Transient slicer must never index past its
 // slice_starts array on a busy snapshot. A dense onset train (≥128 onsets at the 30 ms
