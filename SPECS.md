@@ -464,3 +464,40 @@ Master grid badges/colors, thematic preset banks filtered by (now auto-known) ty
   params still reachable; knob drag/reset/fine-drag work (manual FL check ->
   CHECKPOINTS). No aesthetic iteration loops beyond the defined language — the
   spec above IS the design decision.
+
+
+---
+
+### UI-CORE-FIX — functional GUI defects (user-reported 2026-07-07; NOT the theme pass)
+User's exact complaints on the shipped GUIs: (1) "rescaling is clunky", (2) "lack of
+knobs instead of sliders is wack", (3) "you can't type to set values - despite them
+allowing the user to click into it and presenting a type indicator".
+
+Fix in suite-core::ui (widgets are shared -> one fix, suite-wide retrofit):
+1. **Rotary knob widget** replaces the labeled slider as the standard param control:
+   vertical-drag (drag up = increase), Ctrl/fine-drag at ~10x resolution,
+   double-click = reset to default, scroll wheel steps, arc + needle drawn with the
+   suite theme, label above, live value below. Modulation-safe (reads through
+   nih-plug param setter, begin/end_set_parameter correctly on drag start/end).
+2. **Click-to-type that actually works**: clicking the value text opens a real
+   egui TextEdit with requested keyboard focus; Enter commits via
+   string_to_value (all params already have parsers - clap-validator enforced),
+   Esc cancels, clicking away commits. Kill the phantom caret: value text is not
+   an editable-looking widget unless editing is truly active.
+   HOST CAVEAT to verify + document: FL's wrapper can swallow keystrokes
+   (typing-keyboard-to-piano). Test in pluginval editor harness for correctness;
+   add a manual line + CHECKPOINTS entry telling the user which FL wrapper toggle
+   to flip if keys still don't arrive in FL itself.
+3. **Uniform window scaling**: content scales as one unit instead of reflowing.
+   Implement a UI scale factor: base layout at fixed logical size; window resize
+   maps to zoom (pixels-per-point multiplier), aspect-locked, with snap points
+   (75/100/125/150%) surfaced in a corner size menu; persist chosen scale in
+   plugin state. No mid-drag layout jumps.
+Rollout: build widgets in suite-core::ui, port _template as reference, then
+mechanical retrofit of every shipped plugin's editor (grouped commits ok),
+build.ps1 -All to revalidate (suite-core API rule). Done bar: every plugin opens
+under validator editor test with knobs + working text entry (simulate where the
+harness allows; at minimum unit-test the parse/commit path and the scale mapping);
+no param lost in the retrofit (param-count cross-check test per plugin).
+PEDAL-UI (endgame theme) then re-skins THESE widgets - layout/interaction decided
+here stays.
