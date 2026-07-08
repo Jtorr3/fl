@@ -25,6 +25,9 @@ pub mod presets;
 use dsp::{PatinaCore, Settings};
 use suite_core::presets::{load_all, Preset};
 
+/// Usage manual embedded from docs, rendered in-GUI by the '?' button (BUILT-IN-MANUALS).
+pub const MANUAL_DOC: &str = include_str!("../../../docs/PATINA.md");
+
 /// Plain-number string→value parser (strips a trailing unit like " dB" / " Hz").
 fn num_s2v() -> Arc<dyn Fn(&str) -> Option<f32> + Send + Sync> {
     Arc::new(|s: &str| {
@@ -282,6 +285,7 @@ impl Plugin for Patina {
                         ui.heading(
                             egui::RichText::new("QEYNOS · PATINA").color(suite_core::ui::ACCENT),
                         );
+                        suite_core::ui::manual_button(ui, "patina", "PATINA", MANUAL_DOC);
                         ui.label(
                             egui::RichText::new(
                                 "analog lo-fi character — wow/flutter · tape sat · dropouts · keyed noise",

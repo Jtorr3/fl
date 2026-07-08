@@ -8,6 +8,15 @@ key-detect** over the input. Each resonator's input drive is optionally weighted
 input's **band energy at its pitch**, so the bank "sings" the notes present in the source.
 Zero reported latency; `mix = 0` nulls against the dry input.
 
+## What It Is
+
+CHORALE is a bank of tuned string-like resonators that the incoming audio plays. Feed it drums,
+a pad, or a vocal and 12–24 waveguides ring sympathetically in a chord, scale, or the detected
+key — turning any source into a shimmering, singing wash. It is zero-latency and nulls at
+**Mix = 0**, so it sits harmlessly inline until you blend the resonance in.
+
+## Signal Flow
+
 ```
  in(audio) ─┬─────────────────────────────────────────────────────────► dry ─┐
             ├─ SpectrumTap (input band energies) ─► per-resonator weights     │
@@ -96,6 +105,35 @@ times a second (block-size-independent), cheaply.
 | Wet Solo | off / on | output pure resonance (ignores Mix) |
 | Mix | 0–100 % | dry/wet (0 = exact passthrough) |
 | Out | ±24 dB | output trim |
+
+## Controls
+
+- **Source** — tuning source for the bank: **Scale/Chord**, **MIDI Held**, or **Key Detect**.
+- **Root** — root pitch class (C…B) for the Scale voicing and the Key-Detect fallback.
+- **Scale/Chord** — the chord/scale type spread across the bank (Minor Triad … Octaves), 12 types.
+- **Resonators** — number of active resonators (density of the bank), 12–24.
+- **Decay** — ring / sustain time of each resonator (≈0.3–18 s target), 0–100 %.
+- **Damp** — in-loop low-pass: brightness and how fast the highs die, 0–100 %.
+- **Spread** — alternating ± detune per resonator for chorus thickness, 0–50 cents.
+- **Sympathetic** — weights each resonator's drive by the input's band energy at its pitch, so the
+  bank only sings where the source has energy, 0–100 %.
+- **Excite** — continuous input drive level into the bank, 0–2×.
+- **Stereo** — pans resonators alternately L/R as a width control, 0–100 %.
+- **Wet Solo** — outputs the pure resonance, ignoring Mix (audition the bank alone).
+- **Mix** — dry/wet blend; 0 % is an exact zero-latency passthrough, 0–100 %.
+- **Out** — output trim, ±24 dB.
+
+## Recipes
+
+1. **Iron Drone Bed (dark techno)** — **Phrygian Drone Bed**, **Source = Scale/Chord**, **Root** E,
+   **Decay** ~96 %, **Damp** high, **Mix** ~65 %. Feed it a rumble or noisy pad and it becomes a
+   slow, dark harmonic bed under the kick. Raise **Spread** for a wider, more unstable drone.
+2. **Ghost In The Break (atmospheric dnb)** — **Ghost In The Signal**, **Source = Key Detect**,
+   **Sympathetic** 100 %, **Mix** ~50 % on a break bus. The bank tracks the tune's key and only
+   rings where the drums leave space — a haunted wash that follows the music.
+3. **Choir From A Vocal (vocal-rip)** — **Glass Choir** on a chopped vocal, **Source = Scale/Chord**
+   (or **MIDI Held** to play chords in over it), low **Damp**, **Stereo** ~85 %, **Wet Solo** on to
+   audition. The vocal excites a wide glassy choir you can print and resample.
 
 ## Presets
 

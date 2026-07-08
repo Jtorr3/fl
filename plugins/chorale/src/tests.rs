@@ -18,6 +18,11 @@ use suite_core::testsig;
 
 const SR: f32 = 48_000.0;
 
+#[test]
+fn manual_covers_all_params_and_has_recipes() {
+    suite_core::manual::assert_manual_covers_params(crate::MANUAL_DOC, &crate::ChoraleParams::default());
+}
+
 /// Windowed single-frequency DFT magnitude (Hann) over `sig` at `freq`.
 fn mag_at(sig: &[f32], freq: f32, sr: f32) -> f64 {
     let n = sig.len();

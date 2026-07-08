@@ -16,6 +16,11 @@ fn temp_bus_path(tag: &str) -> PathBuf {
     ))
 }
 
+#[test]
+fn manual_covers_all_params_and_has_recipes() {
+    suite_core::manual::assert_manual_covers_params(crate::MANUAL_DOC, &crate::XrayParams::default());
+}
+
 /// Deterministic xorshift noise (no `rand` dep).
 struct Rng(u32);
 impl Rng {

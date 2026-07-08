@@ -47,6 +47,10 @@ use node::{load_f32, NodeCore, NodeMeters, NodeSettings};
 use suite_core::classify::{classify, infer_theme, InstrumentType, MixAnalysis, NodeReport, SessionTheme};
 use suite_core::presets::{load_all, Preset};
 
+/// Usage manual embedded from docs, rendered in-GUI by the '?' button (BUILT-IN-MANUALS).
+/// One doc covers both editors (Node + Master); each editor's '?' opens it with its own slug.
+pub const MANUAL_DOC: &str = include_str!("../../../docs/OVERSEER.md");
+
 // ---------------------------------------------------------------------------
 // Shared param constructors
 // ---------------------------------------------------------------------------
@@ -529,6 +533,7 @@ impl Plugin for OverseerNode {
                                 egui::RichText::new("QEYNOS · OVERSEER NODE")
                                     .color(suite_core::ui::ACCENT),
                             );
+                            suite_core::ui::manual_button(ui, "overseer-node", "OVERSEER NODE", MANUAL_DOC);
                             if slot.override_held() {
                                 ui.label(
                                     egui::RichText::new(" MASTER OVERRIDE ")
@@ -1231,6 +1236,7 @@ impl Plugin for OverseerMaster {
                             egui::RichText::new("QEYNOS · OVERSEER MASTER")
                                 .color(suite_core::ui::ACCENT),
                         );
+                        suite_core::ui::manual_button(ui, "overseer-master", "OVERSEER MASTER", MANUAL_DOC);
                         ui.label(
                             egui::RichText::new(
                                 "mastering bus — EQ · 3-band comp · lookahead limiter · LUFS",
@@ -1568,6 +1574,12 @@ mod tests {
     use suite_core::testsig;
 
     const SR: f32 = 48_000.0;
+
+    #[test]
+    fn manual_covers_all_params_and_has_recipes() {
+        suite_core::manual::assert_manual_covers_params(crate::MANUAL_DOC, &crate::NodeParams::default());
+        suite_core::manual::assert_manual_covers_params(crate::MANUAL_DOC, &crate::MasterParams::default());
+    }
 
     fn new_master() -> MasterCore {
         MasterCore::new(

@@ -20,6 +20,11 @@ use std::f32::consts::{PI, TAU};
 
 const SR: f32 = 48_000.0;
 
+#[test]
+fn manual_covers_all_params_and_has_recipes() {
+    suite_core::manual::assert_manual_covers_params(crate::MANUAL_DOC, &crate::PatinaParams::default());
+}
+
 /// A fully-neutral base setting (every section identity).
 fn base() -> Settings {
     Settings {

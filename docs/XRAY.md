@@ -4,6 +4,26 @@
 spectrum to the shared bus, and X-RAY overlays **all of them at once** as colored curves in a
 single window — the whole session's spectral balance without a meter on every track.*
 
+## What It Is
+
+X-RAY is the suite's shared spectrum analyzer. Every other Qeynos plugin quietly publishes its
+own 32-band output spectrum to a shared bus, and X-RAY overlays all of them as colored curves in
+one window — so you can see how kick, bass, pads and master stack up in the frequency domain at a
+glance. Audio passes through bit-exact; it is a pure meter, not a processor.
+
+## Signal Flow
+
+```
+ every Qeynos plugin ─ taps its output ─ 32-band spectrum ─┐
+                                                            ├─► shared bus (%TEMP%\qeynos-bus)
+ X-RAY (this instance) ─ input ─┬─ Publish? ─ own spectrum ─┘        │
+                                │                                    ▼
+                                └─ × Out trim (bit-exact @0 dB) ─ out │  snapshot_live()
+                                                                      ▼
+                                              overlay: one curve per live source + legend
+                                                       (hover-highlight · click-solo · Freeze)
+```
+
 X-RAY is two halves:
 
 1. **A publisher baked into the suite.** Each audio plugin now taps its output through a
@@ -102,3 +122,23 @@ bit-exactness is `xray::tests::passthrough_is_bit_exact_at_unity`.
 | Publish | on/off | on | Publish X-RAY's own input spectrum to the bus |
 | Freeze | on/off | off | Hold the current display |
 | Out | −24…+24 dB | 0 dB | Output trim; **bit-exact passthrough at 0 dB** |
+
+## Controls
+
+- **Publish** — when on, X-RAY publishes its *own* input spectrum to the bus so it appears as a
+  source alongside the other plugins; turn it off to keep X-RAY a silent reader only.
+- **Freeze** — holds the current display, snapshotting every live curve so you can inspect one
+  moment without the overlay updating.
+- **Out** — output trim, −24…+24 dB. Bit-exact passthrough at 0 dB (X-RAY is a transparent probe).
+
+## Recipes
+
+1. **Master-bus overview (dark techno)** — drop X-RAY on the master with every track running Qeynos
+   plugins. Each source draws its own curve; watch the low-end pile-up between kick and bass and
+   carve one with an OVERSEER Node until their curves interleave instead of stacking.
+2. **Find the mud (atmospheric dnb)** — with a busy break playing, **hover** the pad's legend row
+   to highlight its curve while the others dim, then **click** to solo-dim it. See exactly where
+   the pad fights the reese in the low-mids before you EQ.
+3. **Compare a vocal rip (vocal-rip)** — put X-RAY after your vocal chain, A/B a processed vs raw
+   pass, and hit **Freeze** on the fuller take to hold its curve as a reference target while you
+   match the other. **Publish** on lets the vocal itself show up in a full-session overview.

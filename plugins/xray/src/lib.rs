@@ -26,6 +26,9 @@ use std::sync::{Arc, Mutex};
 use suite_core::bus::{PluginKind, SlotSnapshot};
 use suite_core::spectrum::{band_center_hz, SpectrumPublisher, F_HIGH, F_LOW, NUM_BANDS};
 
+/// Usage manual embedded from docs, rendered in-GUI by the '?' button (BUILT-IN-MANUALS).
+pub const MANUAL_DOC: &str = include_str!("../../../docs/XRAY.md");
+
 /// Linear-gain out trim from a dB value. `out_gain(0.0) == 1.0` exactly, so an untrimmed
 /// passthrough is bit-exact.
 #[inline]
@@ -264,6 +267,7 @@ fn editor_ui(
     ui.add_space(4.0);
     ui.horizontal(|ui| {
         ui.heading(egui::RichText::new("QEYNOS · X-RAY").color(ACCENT));
+        suite_core::ui::manual_button(ui, "xray", "X-RAY", MANUAL_DOC);
         ui.add_space(8.0);
         ui.label(
             egui::RichText::new("suite spectrum overlay")

@@ -12,6 +12,14 @@ crackle** sits underneath — optionally *keyed* to the input so the noise only 
 signal. The **AGE** knob scales every one of these together on a curated curve, from a barely-
 there patina to a fully destroyed tape.
 
+## What It Is
+
+PATINA is an analog degradation chain — the sound of tired tape and dusty vinyl in one box.
+It wobbles the pitch (wow & flutter), saturates and lifts the low end like a record head, drops
+out at random, and lays a bed of hiss / hum / crackle underneath, with a single **Age** macro
+aging the whole thing on one curve. Neutral it is a bit-exact passthrough, so you can push it
+from a barely-there glue to a fully rotted transmission and always dial back to clean.
+
 ## Signal flow
 
 ```
@@ -72,6 +80,42 @@ crackle are decorrelated per channel; hum is correlated (shared phase).
 | Out | ±24 dB | output trim |
 
 **MOD (NERVE):** the **WOW**, **AGE**, and **MIX** targets can listen to a NERVE bus stream.
+
+## Controls
+
+- **Wow** — depth of the slow ~0.4 Hz pitch wobble (also scales the slow random walk), 0–100 %.
+- **Wow Rate** — trims the wow frequency around 0.4 Hz, 0.25–4.0×.
+- **Flutter** — depth of the fast (~8 Hz) wobble, the jittery cousin of wow, 0–100 %.
+- **Saturation** — tape soft-clip drive (2× oversampled); 0 % is clean, higher rounds transients
+  and thickens, 0–100 %.
+- **Head Bump** — low-shelf lift emulating the record-head resonance (up to ~+9 dB), 0–100 %.
+- **Bump Freq** — corner frequency of the head-bump shelf, 60–120 Hz.
+- **Azimuth** — right-channel HF phase skew (misaligned tape head); mono-sums to a gentle HF loss,
+  0–100 %.
+- **Dropout Rate** — how often the medium randomly drops out, 0–100 %.
+- **Dropout Depth** — how deep each dropout dip cuts (edges are 8 ms-smoothed, click-free), 0–100 %.
+- **Hiss** — level of the filtered white-noise tape hiss, 0–100 %.
+- **Hum** — mains hum level (fundamental + 3 harmonics), 0–100 %.
+- **Crackle** — level of sparse band-passed vinyl pops, 0–100 %.
+- **Hum 60 Hz** — toggles the hum fundamental between 60 Hz (on) and 50 Hz (off) mains.
+- **Noise Key** — 0 % holds a constant noise floor; 100 % gates the whole noise bed by the input
+  envelope so the tape only hisses when the music plays, 0–100 %.
+- **Age** — the master macro: scales wow/flutter, saturation, dropouts and noise together on a
+  curated curve, from subtle patina to total decay, 0–100 %.
+- **Mix** — dry↔wet blend; 0 % is the latency-matched dry passthrough, 0–100 %.
+- **Out** — output trim, ±24 dB.
+
+## Recipes
+
+1. **Warehouse Dust (dark techno)** — load **Bedroom Dub Deck**, push **Age** to ~35 % and drop
+   **Mix** to ~70 % across the drum bus. The head bump and wow thicken the low end while the keyed
+   **Hiss** breathes with the kick — grime without mud.
+2. **Sewer Break (atmospheric dnb)** — start from **Sewer Transmission**, keep **Dropout Rate**
+   and **Depth** high and **Flutter** near 0.8 so the break lurches; set **Noise Key** low so the
+   crackle bed hangs under the whole thing. A ruined-transmission drum loop.
+3. **Ripped Vocal (vocal-rip)** — put PATINA on a bounced vocal with **Warped 78**: **Wow** ~0.5,
+   **Wow Rate** slow, **Crackle** up, **Mix** ~80 %. The pitch drift and pops turn a clean take
+   into a haunted, half-remembered sample. Back **Age** off toward 0 to recover the dry instantly.
 
 ## Presets
 
