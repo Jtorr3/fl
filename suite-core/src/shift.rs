@@ -16,11 +16,16 @@
 //!    against the expected advance `2π·hop·k/N`, scale by `osamp = N/hop`, add the bin
 //!    mid-frequency → `ana_freq[k]` in Hz.
 //! 2. **Spectral envelope** — estimated by **cepstral liftering** (documented choice):
-//!    real cepstrum of `log|X|`, keep the low-quefrency coefficients (lifter length
-//!    `fft_size/16`), transform back, `exp` → smooth envelope `env[k]`. The lifter cutoff
-//!    sits below the pitch-period quefrency `sr/f0` for f0 up to ~`sr/(2·L)` (≈187 Hz at
-//!    48 k / 2048), so harmonics are removed while the ~3 lowest formants are retained;
-//!    higher voices still get a usable, slightly smoother envelope.
+//!    real cepstrum of `log|X|`, keep the low-quefrency coefficients, transform back, `exp` →
+//!    smooth envelope `env[k]`. The lifter cutoff is **pitch-adaptive**: the default is
+//!    `fft_size/16` (128 at 2048), but that fixed cutoff sits *above* the pitch-period quefrency
+//!    `sr/f0` for f0 ≳ `sr/(2·L)` ≈ 187 Hz, so on high (female-range) voices the "envelope" would
+//!    track the harmonic comb and the reapplied envelope would comb the output (a gurgle/metallic
+//!    smear — measured inharmonic residual −4 dB at f0 = 400–500 Hz). So each frame finds the
+//!    pitch-period rahmonic in the cepstrum and, when a clear voiced peak is present, pulls the
+//!    cutoff to `0.75·period` (clamped to `[32, fft_size/16]`) — always below the pitch peak, so
+//!    the ~3 lowest formants are kept while harmonics are removed at any f0. Low voices keep the
+//!    `fft_size/16` default unchanged (no regression); unvoiced/textural frames keep it too.
 //! 3. **Flatten** — `exc[k] = mag[k] / env[k]` (only when envelope preservation is on).
 //! 4. **Pitch shift the excitation** — bin remap `index = round(k · pitch_ratio)`,
 //!    accumulating `exc` into `syn_mag[index]` and setting `syn_freq[index] =
@@ -66,7 +71,11 @@ struct FrameState {
     expct: f32,       // expected per-bin phase advance per hop = TAU·hop/N
     freq_per_bin: f32, // sr/N
     osamp: f32,       // N/hop
-    lifter: usize,    // cepstral lifter cutoff (quefrency), samples
+    lifter: usize,    // cepstral lifter cutoff (quefrency), samples — the MAX / low-voice default
+    lifter_f: f32,    // frame-smoothed adaptive cutoff (avoids per-frame steps → envelope clicks)
+    min_lifter: usize, // floor on the adaptive cutoff (keeps ≥3 formants of envelope resolution)
+    qmin: usize,      // pitch-period search range (samples): sr/f_max
+    qmax: usize,      // sr/f_min
 
     pitch_ratio: f32,
     formant_ratio: f32,
@@ -113,6 +122,10 @@ impl FrameState {
             freq_per_bin: sr / n as f32,
             osamp: n as f32 / hop as f32,
             lifter: (n / 16).max(4),
+            lifter_f: (n / 16).max(4) as f32,
+            min_lifter: 32.min((n / 16).max(4)),
+            qmin: ((sr / 1000.0).round() as usize).max(2),
+            qmax: (((sr / 70.0).round() as usize).min(nbins.saturating_sub(2))).max(3),
             pitch_ratio: 1.0,
             formant_ratio: 1.0,
             preserve: true,
@@ -142,7 +155,42 @@ impl FrameState {
         for v in self.sum_phase.iter_mut() {
             *v = 0.0;
         }
+        self.lifter_f = self.lifter as f32;
         self.primed = false;
+    }
+
+    /// Pitch-adaptive cepstral lifter cutoff (quefrency, samples). Scans `self.cepstrum` (the
+    /// full real cepstrum, before liftering) for the strongest rahmonic in the plausible
+    /// pitch-period band `[qmin, qmax]`; when a clear periodic peak is present (peak ≫ the band's
+    /// mean magnitude) the cutoff is set to `0.75·period`, clamped to `[min_lifter, lifter]`, so
+    /// the pitch peak is excluded even on high voices. No clear peak (unvoiced / textural) → the
+    /// default `lifter`. Alloc-free.
+    #[inline]
+    fn adaptive_lifter(&self) -> usize {
+        let (qmin, qmax) = (self.qmin, self.qmax.min(self.n / 2));
+        if qmax <= qmin + 1 {
+            return self.lifter;
+        }
+        let mut peak_q = 0usize;
+        let mut peak_v = f32::NEG_INFINITY;
+        let mut sum_abs = 0.0f32;
+        for q in qmin..=qmax {
+            let c = self.cepstrum[q];
+            if c > peak_v {
+                peak_v = c;
+                peak_q = q;
+            }
+            sum_abs += c.abs();
+        }
+        let mean_abs = sum_abs / (qmax - qmin + 1) as f32;
+        // Require a genuine periodic peak (a voiced pitch rahmonic) before shrinking the cutoff,
+        // so unvoiced/noisy frames keep the smooth default envelope (no over-smoothing).
+        if peak_q >= qmin && peak_v > 2.0 * mean_abs.max(1.0e-9) {
+            let adapted = (peak_q * 3) / 4; // 0.75·period — safely below the pitch rahmonic
+            adapted.clamp(self.min_lifter, self.lifter)
+        } else {
+            self.lifter
+        }
     }
 
     /// Cepstral-liftering spectral envelope of the current magnitude spectrum → `self.env`.
@@ -162,7 +210,20 @@ impl FrameState {
             .expect("cepstrum inverse");
         // Lifter: keep low quefrency at both ends (the cepstrum is real & symmetric), zero
         // the rest — this discards the pitch-period peak and keeps the formant envelope.
-        let l = self.lifter;
+        // PITCH-ADAPTIVE cutoff: the fixed `n/16` (128 at 2048) cutoff sits ABOVE the pitch
+        // period for f0 ≳ sr/(2·L) ≈ 187 Hz, so on high (female-range) voices the "envelope"
+        // starts tracking the harmonic comb → the reapplied envelope combs the output (a
+        // gurgle/metallic on high vocals; measured out-inharmonic −4 dB at f0 = 400–500 Hz vs
+        // −34 dB clean). Find the pitch-period rahmonic in the cepstrum and pull the cutoff
+        // safely below it (0.75·period), so the pitch peak is always excluded while ≥3 formants
+        // are kept. At low f0 the period is large ⇒ cutoff stays at the `n/16` default (no
+        // change, no regression for SEANCE's low/textural material).
+        // Smooth the cutoff across frames — a per-frame step in the lifter length steps the
+        // envelope and clicks in the WOLA overlap-add (SEANCE's shimmer caught this). ~6-frame
+        // one-pole: fast enough to settle in ~35 ms, slow enough that peak-pick flicker can't step.
+        let target = self.adaptive_lifter() as f32;
+        self.lifter_f += 0.15 * (target - self.lifter_f);
+        let l = (self.lifter_f.round() as usize).clamp(self.min_lifter, self.lifter);
         for q in (l + 1)..(self.n - l) {
             self.cepstrum[q] = 0.0;
         }
@@ -383,6 +444,84 @@ mod tests {
     /// Run a whole buffer through a fresh engine.
     fn run(eng: &mut ShiftEngine, input: &[f32]) -> Vec<f32> {
         input.iter().map(|&x| eng.process(x)).collect()
+    }
+
+    /// Inharmonic residual (dB) of a tonal signal relative to a known fundamental: FFT the
+    /// steady middle, sum energy within ±30% of each harmonic k·f0, and return
+    /// 10·log10((total − harmonic)/total). A clean harmonic tone sits on its harmonics
+    /// (low residual); phase-vocoder combing / envelope-tracking-harmonics adds inharmonic
+    /// sidebands (higher residual). Robust to the harmonic comb (unlike a cepstral envelope).
+    fn inharmonic_residual_db(sig: &[f32], f0: f32) -> f32 {
+        use realfft::RealFftPlanner;
+        let n = 16384usize.min(sig.len() & !1);
+        if n < 4096 {
+            return f32::NAN;
+        }
+        let start = (sig.len().saturating_sub(n)) / 2;
+        let mut planner = RealFftPlanner::<f32>::new();
+        let fwd = planner.plan_fft_forward(n);
+        let window: Vec<f32> = (0..n)
+            .map(|i| 0.5 - 0.5 * (std::f32::consts::TAU * i as f32 / n as f32).cos())
+            .collect();
+        let mut buf: Vec<f32> = (0..n).map(|i| sig[start + i] * window[i]).collect();
+        let mut spec = fwd.make_output_vec();
+        fwd.process(&mut buf, &mut spec).unwrap();
+        let nbins = spec.len();
+        let bin_hz = SR / n as f32;
+        let mag2: Vec<f64> = spec.iter().map(|c| (c.norm() as f64).powi(2)).collect();
+        // Only consider up to 8 kHz (where vocal energy + the audible comb live).
+        let kmax = ((8000.0 / bin_hz) as usize).min(nbins - 1);
+        let total: f64 = mag2[1..=kmax].iter().sum();
+        if total <= 0.0 {
+            return f32::NAN;
+        }
+        let mut harmonic = 0.0f64;
+        let half = (0.30 * f0 / bin_hz).ceil() as isize;
+        let nharm = (8000.0 / f0) as usize;
+        for h in 1..=nharm {
+            let center = (h as f32 * f0 / bin_hz).round() as isize;
+            for b in (center - half)..=(center + half) {
+                if b >= 1 && (b as usize) <= kmax {
+                    harmonic += mag2[b as usize];
+                }
+            }
+        }
+        let residual = (total - harmonic).max(0.0) / total;
+        10.0 * (residual.max(1e-12)).log10() as f32
+    }
+
+    /// Regression: on a HIGH-f0 (female-range) voice a formant shift must not comb. Before the
+    /// pitch-adaptive lifter, the fixed `n/16` (128) cutoff sat above the pitch period for
+    /// f0 ≳ 262 Hz, so the "envelope" tracked the harmonic comb and the reapplied envelope
+    /// smeared inharmonic energy across the output (measured out-inharmonic −4.6 dB at f0 = 400,
+    /// −6.4 dB at 500 — ~35–45 % of the energy inharmonic). The adaptive lifter pulls the cutoff
+    /// below the pitch rahmonic, restoring a smooth envelope (−25 / −16 dB after). Assert the
+    /// formant-shifted output stays well below the pre-fix combing level at these f0.
+    #[test]
+    fn high_f0_formant_shift_does_not_comb() {
+        for &f0 in &[400.0f32, 500.0] {
+            let dry = synth_vocal(f0, (SR * 1.2) as usize, SR);
+            let mut eng = ShiftEngine::default_geometry(SR);
+            eng.set_pitch_ratio(1.0);
+            eng.set_formant_ratio(1.4);
+            eng.set_envelope_preserve(true);
+            let wet = run(&mut eng, &dry);
+            let res = inharmonic_residual_db(&wet, f0);
+            assert!(
+                res < -12.0,
+                "high-f0 ({f0} Hz) formant shift combs: inharmonic residual {res:.1} dB \
+                 (pre-fix ≈ −5 dB; want < −12 dB — the adaptive lifter should keep the envelope smooth)"
+            );
+        }
+        // And the low-f0 case must be unchanged (adaptive cutoff clamps to the n/16 default there).
+        let dry = synth_vocal(220.0, (SR * 1.2) as usize, SR);
+        let mut eng = ShiftEngine::default_geometry(SR);
+        eng.set_pitch_ratio(1.0);
+        eng.set_formant_ratio(1.4);
+        eng.set_envelope_preserve(true);
+        let wet = run(&mut eng, &dry);
+        let res = inharmonic_residual_db(&wet, 220.0);
+        assert!(res < -20.0, "low-f0 formant shift regressed: residual {res:.1} dB (want < −20)");
     }
 
     /// Measure f0 (Hz) of the steady middle of a signal via the suite MPM detector.
