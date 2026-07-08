@@ -198,7 +198,7 @@ impl Default for ChoraleParams {
         let (st_v2s, st_s2v) = pct();
         let (m_v2s, m_s2v) = pct();
         Self {
-            editor_state: EguiState::from_size(560, 580),
+            editor_state: EguiState::from_size(560, 600),
             source: EnumParam::new("Source", SourceParam::Scale),
             root: IntParam::new("Root", 9, IntRange::Linear { min: 0, max: 11 })
                 .with_value_to_string(Arc::new(|v| {
@@ -415,7 +415,7 @@ impl Plugin for Chorale {
             |ctx, _| suite_core::ui::apply_theme(ctx),
             move |egui_ctx, setter, _state| {
                 suite_core::ui::apply_theme(egui_ctx);
-                suite_core::ui::ScaledWindow::new("qeynos-chorale-window", Vec2::new(560.0, 580.0))
+                suite_core::ui::ScaledWindow::new("qeynos-chorale-window", Vec2::new(560.0, 600.0))
                     .min_size(Vec2::new(460.0, 480.0))
                     .show(egui_ctx, egui_state.as_ref(), |ui| {
                         use suite_core::ui::labeled_slider as row;
@@ -456,7 +456,7 @@ impl Plugin for Chorale {
                         // the published activity envelope; process() untouched). CONSOLE re-skins
                         // the bars to phosphor amber over glass; THEME-OFF keeps the original
                         // panel look (the same bars still render — guardrail #3).
-                        suite_core::ui::crt_frame(ui, "chorale-crt", 76.0, |ui| {
+                        suite_core::ui::crt_frame(ui, "chorale-crt", 86.0, |ui| {
                             let console = suite_core::ui::console_on(ui.ctx());
                             ui.label(
                                 egui::RichText::new("CHORALE · RESONATOR BANK")
@@ -599,7 +599,9 @@ impl Drop for Chorale {
 /// (CONSOLE v2 active) drives the re-skin: phosphor bars over the CRT glass vs. the original
 /// amber-on-panel look. Behavior/values are identical in both.
 fn res_activity(ui: &mut egui::Ui, activity: &[AtomicF32], console: bool) {
-    ui.ctx().request_repaint();
+    // Energy bars animate live; honor the CRT-motion pref + ~8 fps idle guarantee (guardrails
+    // #2/#6) instead of free-running every frame.
+    suite_core::ui::scope_repaint(ui.ctx());
     let n = activity.len();
     let avail = ui.available_width().min(420.0);
     let size = Vec2::new(avail, 42.0);

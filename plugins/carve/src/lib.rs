@@ -487,7 +487,8 @@ fn section(ui: &mut egui::Ui, title: &str) {
 
 /// Horizontal per-band reduction meter: taller bar = deeper cut in that frequency band.
 fn reduction_meter(ui: &mut egui::Ui, meter: &[AtomicF32]) {
-    ui.ctx().request_repaint();
+    // Honor the CRT-motion pref + ~8 fps idle guarantee (guardrails #2/#6).
+    suite_core::ui::scope_repaint(ui.ctx());
     let n = meter.len().max(1);
     let avail = ui.available_width().min(560.0);
     let size = Vec2::new(avail, 46.0);

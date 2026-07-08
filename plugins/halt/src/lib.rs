@@ -241,7 +241,7 @@ impl Default for HaltParams {
     fn default() -> Self {
         let d = Settings::default();
         Self {
-            editor_state: EguiState::from_size(560, 520),
+            editor_state: EguiState::from_size(560, 536),
 
             tape_stop: BoolParam::new("Tape Stop", false),
             stutter: BoolParam::new("Stutter", false),
@@ -445,7 +445,7 @@ impl Plugin for Halt {
             |ctx, _| suite_core::ui::apply_theme(ctx),
             move |egui_ctx, setter, _state| {
                 suite_core::ui::apply_theme(egui_ctx);
-                suite_core::ui::ScaledWindow::new("qeynos-halt-window", Vec2::new(560.0, 520.0))
+                suite_core::ui::ScaledWindow::new("qeynos-halt-window", Vec2::new(560.0, 536.0))
                     .min_size(Vec2::new(460.0, 420.0))
                     .show(egui_ctx, egui_state.as_ref(), |ui| {
                         use suite_core::ui::labeled_slider as row;

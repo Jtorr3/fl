@@ -642,7 +642,8 @@ impl Drop for Pluck {
 
 /// Six vertical activity bars showing per-string energy (cheap; optional GUI extra).
 fn string_activity(ui: &mut egui::Ui, activity: &[AtomicF32]) {
-    ui.ctx().request_repaint();
+    // Honor the CRT-motion pref + ~8 fps idle guarantee (guardrails #2/#6).
+    suite_core::ui::scope_repaint(ui.ctx());
     // CONSOLE re-skin: on the CRT glass the opaque panel backing is dropped (glass shows
     // through) and the energy bars glow phosphor amber; THEME-OFF keeps the panel + accent.
     let console = suite_core::ui::console_on(ui.ctx());

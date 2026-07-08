@@ -399,6 +399,9 @@ impl Plugin for Flyby {
                     .min_size(Vec2::new(460.0, 520.0))
                     .show(egui_ctx, egui_state.as_ref(), |ui| {
                         use suite_core::ui::labeled_slider as row;
+                        // The optional node-coordinate type-in section (below) can grow the content
+                        // past the base height, so scroll rather than clip.
+                        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                         ui.add_space(4.0);
                         ui.heading(
                             egui::RichText::new("QEYNOS · FLYBY").color(suite_core::ui::ACCENT),
@@ -469,6 +472,34 @@ impl Plugin for Flyby {
                                 row(ui, "OUT", &params.out, setter);
                                 ui.end_row();
                             });
+
+                        // Guardrail #3: the path node X/Y are automatable params settable by
+                        // dragging in the pad, so they must ALSO be readable + type-in-able outside
+                        // the glass. Collapsed by default (the pad is the primary editor); the
+                        // enclosing ScrollArea keeps it from clipping when expanded.
+                        ui.add_space(6.0);
+                        let count = (params.node_count.value() as usize).clamp(MIN_NODES, MAX_NODES);
+                        egui::CollapsingHeader::new("NODE X/Y (type-in)")
+                            .id_salt("flyby-node-coords")
+                            .show(ui, |ui| {
+                                let refs = params.node_refs();
+                                egui::Grid::new("flyby-node-grid")
+                                    .num_columns(4)
+                                    .spacing([10.0, 6.0])
+                                    .show(ui, |ui| {
+                                        for i in 0..count {
+                                            row(ui, &format!("N{} X", i + 1), &refs[i].x, setter);
+                                            row(ui, &format!("N{} Y", i + 1), &refs[i].y, setter);
+                                            if i % 2 == 1 {
+                                                ui.end_row();
+                                            }
+                                        }
+                                        if count % 2 == 1 {
+                                            ui.end_row();
+                                        }
+                                    });
+                            });
+                        }); // ScrollArea
                     });
             },
         )
@@ -711,8 +742,20 @@ fn xy_pad(ui: &mut egui::Ui, params: &FlybyParams, setter: &ParamSetter, phase: 
             egui::Stroke::new(1.0, trace.linear_multiply(0.35)),
         );
     }
-    // Keep the dot animating while the editor is open.
-    ui.ctx().request_repaint();
+    // Guardrail #6: only free-run repaint while CRT motion is on AND the source dot is actually
+    // moving (transport running → phase advancing). When idle (paused, or motion off) drop to the
+    // ~8 fps idle cadence so the editor stops spinning the CPU. The cursor blink in `crt_frame`
+    // keeps its own slow repaint alive independently.
+    let last_id = response.id.with("flyby-last-phase");
+    let last: f32 = ui.memory(|m| m.data.get_temp(last_id).unwrap_or(f32::NAN));
+    ui.memory_mut(|m| m.data.insert_temp(last_id, phase));
+    let animating = last.is_finite() && (phase - last).abs() > 1e-4;
+    if suite_core::ui::crt_motion_on(ui.ctx()) && animating {
+        ui.ctx().request_repaint();
+    } else {
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_millis(125));
+    }
 }
 
 impl ClapPlugin for Flyby {

@@ -1057,11 +1057,12 @@ fn master_enrich_ui(
     params: &MasterParams,
     setter: &ParamSetter,
     shared: &Arc<master::MasterShared>,
+    slots: &[Arc<bus::Slot>],
 ) -> SessionTheme {
     use suite_core::ui::{labeled_slider, ACCENT, TEXT_DIM};
 
-    // Gather the live Node reports (GUI thread → locking + allocation are fine here).
-    let slots = bus::bus().live_slots();
+    // Live Node reports built from the once-per-frame snapshot the caller passed in (avoids
+    // re-locking + re-allocating `live_slots()` three times per frame).
     let mut reports: Vec<NodeReport> = Vec::with_capacity(slots.len());
     for s in slots.iter() {
         let (ty, _c) = s.resolved_type();
@@ -1294,8 +1295,13 @@ impl Plugin for OverseerMaster {
                         );
                         ui.add_space(6.0);
 
+                        // Snapshot the live Node census ONCE per frame and share it across the
+                        // three consumers below (enrich card, CRT census line, Node grid) — each
+                        // used to call bus().live_slots() independently (lock + Vec alloc x3).
+                        let live_slots = bus::bus().live_slots();
+
                         // OVERSEER-ENRICH: theme inference, assist, LEARN, summary card.
-                        let theme = master_enrich_ui(ui, &params, setter, &shared);
+                        let theme = master_enrich_ui(ui, &params, setter, &shared, &live_slots);
 
                         // Preset bar: factory + user presets, filtered by the session theme;
                         // save/save-as/delete, dirty dot.
@@ -1345,7 +1351,7 @@ impl Plugin for OverseerMaster {
                                     format!(
                                         "{} · {} node(s) live",
                                         theme.label(),
-                                        bus::bus().live_slots().len(),
+                                        live_slots.len(),
                                     ),
                                 ),
                                 (
@@ -1490,7 +1496,7 @@ impl Plugin for OverseerMaster {
                                 .color(suite_core::ui::TEXT_DIM)
                                 .small(),
                             );
-                            let slots = bus::bus().live_slots();
+                            let slots = &live_slots;
                             if slots.is_empty() {
                                 ui.label(
                                     egui::RichText::new(

@@ -423,7 +423,9 @@ impl Plugin for Nerve {
                     .show(egui_ctx, egui_state.as_ref(), |ui| {
                         editor_ui(ui, &params, setter, &scopes, &presets, &inst_id);
                     });
-                egui_ctx.request_repaint();
+                // Live stream scopes animate — but honor the CRT-motion pref + ~8 fps idle
+                // guarantee (guardrails #2/#6) rather than free-running unconditionally.
+                suite_core::ui::scope_repaint(egui_ctx);
             },
         )
     }
@@ -590,8 +592,15 @@ fn editor_ui(
                     let v = scopes[i].load(std::sync::atomic::Ordering::Relaxed);
                     ui.vertical(|ui| {
                         ui.label(egui::RichText::new(*name).color(lbl_col).small());
-                        // Bipolar streams map -1..1 -> 0..1; env streams already 0..1.
-                        let norm = ((v + 1.0) * 0.5).clamp(0.0, 1.0);
+                        // S5/S6 (Env A/B) are unipolar 0..1 (dsp.rs) — map them directly. The
+                        // other six streams are bipolar -1..1, mapped to 0..1 for the bar. The old
+                        // code applied the bipolar mapping to all eight, so the env bars never
+                        // dropped below 50 %.
+                        let norm = if i == 4 || i == 5 {
+                            v.clamp(0.0, 1.0)
+                        } else {
+                            ((v + 1.0) * 0.5).clamp(0.0, 1.0)
+                        };
                         ui.add(
                             egui::widgets::ProgressBar::new(norm)
                                 .desired_width(70.0)

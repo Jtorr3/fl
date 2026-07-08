@@ -109,7 +109,7 @@ impl Default for BandaidParams {
     fn default() -> Self {
         let d = Settings::default();
         Self {
-            editor_state: EguiState::from_size(600, 500),
+            editor_state: EguiState::from_size(600, 516),
 
             xover_low: FloatParam::new(
                 "Xover Low",
@@ -277,7 +277,7 @@ impl Plugin for Bandaid {
             |ctx, _| suite_core::ui::apply_theme(ctx),
             move |egui_ctx, setter, _state| {
                 suite_core::ui::apply_theme(egui_ctx);
-                suite_core::ui::ScaledWindow::new("qeynos-bandaid-window", Vec2::new(600.0, 500.0))
+                suite_core::ui::ScaledWindow::new("qeynos-bandaid-window", Vec2::new(600.0, 516.0))
                     .min_size(Vec2::new(500.0, 420.0))
                     .show(egui_ctx, egui_state.as_ref(), |ui| {
                         use suite_core::ui::labeled_slider as row;

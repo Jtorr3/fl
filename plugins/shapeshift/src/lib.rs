@@ -758,8 +758,9 @@ fn xy_pad(ui: &mut egui::Ui, params: &ShapeshiftParams, setter: &ParamSetter, ph
         painter.circle_filled(up, 6.0, accent);
         painter.circle_stroke(up, 6.0, egui::Stroke::new(1.0, suite_core::ui::BG));
     }
-    // Keep the orbit dot animating while the editor is open.
-    ui.ctx().request_repaint();
+    // Keep the orbit dot animating — but honor the CRT-motion pref + ~8 fps idle guarantee
+    // (guardrails #2/#6) rather than free-running unconditionally.
+    suite_core::ui::scope_repaint(ui.ctx());
 }
 
 fn corner_name(c: CornerParam) -> &'static str {

@@ -17,6 +17,7 @@ use nih_plug_egui::{
     egui::{self, Vec2},
     EguiState,
 };
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, RwLock};
 use suite_core::bus::PluginKind;
 use suite_core::modlisten::ModRoutes;
@@ -157,6 +158,9 @@ pub struct Tracer {
     /// Last MIDI note frequency (Hz) for MIDI pitch mode.
     last_note_hz: Option<f32>,
     spectrum: SpectrumPublisher,
+    /// Live detected/MIDI fundamental (Hz) published for the editor's CRT telemetry — the
+    /// process thread writes it (wait-free), the GUI reads it for an honest PITCH readout.
+    pitch_hz: Arc<AtomicF32>,
 }
 
 #[derive(Params)]
@@ -251,6 +255,20 @@ fn level_param(name: &str) -> FloatParam {
         .with_unit(" dB")
         .with_smoother(SmoothingStyle::Linear(20.0))
         .with_value_to_string(formatters::v2s_f32_rounded(2))
+}
+
+/// Nearest equal-tempered note name for a frequency (A4 = 440 Hz), for the live PITCH readout.
+fn hz_to_note(hz: f32) -> String {
+    if !(hz > 0.0) || hz < 20.0 {
+        return "—".to_string();
+    }
+    const NAMES: [&str; 12] = [
+        "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
+    ];
+    let midi = (69.0 + 12.0 * (hz / 440.0).log2()).round() as i32;
+    let idx = ((midi % 12) + 12) % 12;
+    let octave = midi / 12 - 1;
+    format!("{}{}", NAMES[idx as usize], octave)
 }
 
 impl Default for TracerParams {
@@ -372,6 +390,7 @@ impl Default for Tracer {
             factory_presets: Arc::new(load_all(presets::PRESET_JSON)),
             last_note_hz: None,
             spectrum: SpectrumPublisher::new(),
+            pitch_hz: Arc::new(AtomicF32::new(0.0)),
         }
     }
 }
@@ -485,6 +504,7 @@ impl Plugin for Tracer {
         let params = self.params.clone();
         let egui_state = self.params.editor_state.clone();
         let presets = self.factory_presets.clone();
+        let pitch_hz = self.pitch_hz.clone();
         create_egui_editor(
             self.params.editor_state.clone(),
             (),
@@ -524,11 +544,20 @@ impl Plugin for Tracer {
                         // CONSOLE v2 CRT telemetry bay — honest live state (the same values
                         // shown on the knobs below; GUI-thread reads only, process() untouched).
                         // In THEME-OFF this degrades to a plain readout panel.
+                        let f0 = pitch_hz.load(Ordering::Relaxed);
                         suite_core::ui::crt_lines(
                             ui,
                             "tracer-crt",
                             "TRACER · PITCH-TRACKED SAT",
                             &[
+                                (
+                                    "DETECTED",
+                                    if f0 >= 20.0 {
+                                        format!("{:.1} Hz · {}", f0, hz_to_note(f0))
+                                    } else {
+                                        "— (no pitch)".to_string()
+                                    },
+                                ),
                                 (
                                     "PITCH",
                                     format!(
@@ -780,6 +809,12 @@ impl Plugin for Tracer {
             self.spectrum.feed(xr_m / xr_n);
         }
         self.spectrum.publish();
+
+        // Publish the live detected/MIDI fundamental for the editor's CRT PITCH readout (only
+        // while the editor is open — a single wait-free relaxed store, no allocation).
+        if self.params.editor_state.is_open() {
+            self.pitch_hz.store(self.core.f0(), Ordering::Relaxed);
+        }
         ProcessStatus::Normal
     }
 }

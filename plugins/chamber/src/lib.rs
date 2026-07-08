@@ -172,7 +172,7 @@ impl Default for ChamberParams {
         let d = Settings::default();
         let m = |v: MaterialParam| v; // clarity
         Self {
-            editor_state: EguiState::from_size(600, 720),
+            editor_state: EguiState::from_size(600, 800),
             w: FloatParam::new(
                 "Width",
                 d.w,
@@ -413,8 +413,8 @@ impl Plugin for Chamber {
             |ctx, _| suite_core::ui::apply_theme(ctx),
             move |egui_ctx, setter, _state| {
                 suite_core::ui::apply_theme(egui_ctx);
-                suite_core::ui::ScaledWindow::new("qeynos-chamber-window", Vec2::new(600.0, 720.0))
-                    .min_size(Vec2::new(500.0, 600.0))
+                suite_core::ui::ScaledWindow::new("qeynos-chamber-window", Vec2::new(600.0, 800.0))
+                    .min_size(Vec2::new(500.0, 640.0))
                     .show(egui_ctx, egui_state.as_ref(), |ui| {
                         use suite_core::ui::labeled_slider as row;
                         ui.add_space(4.0);
@@ -451,6 +451,22 @@ impl Plugin for Chamber {
                         suite_core::ui::crt_frame(ui, "chamber-crt", 316.0, |ui| {
                             floor_plan(ui, &params, setter);
                         });
+
+                        // Guardrail #3: the four floor-plan coordinates are automatable params, so
+                        // they must ALSO be readable + settable OUTSIDE the glass — plain-text value
+                        // + click-to-type via the suite's standard knob/value-entry widget. Nothing
+                        // is operable only inside the CRT.
+                        egui::Grid::new("chamber-coords")
+                            .num_columns(4)
+                            .spacing([10.0, 6.0])
+                            .show(ui, |ui| {
+                                row(ui, "SRC X", &params.src_x, setter);
+                                row(ui, "SRC Y", &params.src_y, setter);
+                                row(ui, "LIS X", &params.lis_x, setter);
+                                row(ui, "LIS Y", &params.lis_y, setter);
+                                ui.end_row();
+                            });
+                        ui.add_space(4.0);
 
                         // Live geometry readout (RT60 + direct arrival).
                         let s = params.snapshot();

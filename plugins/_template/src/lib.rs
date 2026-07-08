@@ -95,7 +95,7 @@ impl Default for Template {
 impl Default for TemplateParams {
     fn default() -> Self {
         Self {
-            editor_state: EguiState::from_size(320, 220),
+            editor_state: EguiState::from_size(320, 236),
             // Smoothed gain, -60 .. +24 dB, default unity.
             gain: FloatParam::new(
                 "Gain",
@@ -156,7 +156,7 @@ impl Plugin for Template {
             },
             move |egui_ctx, setter, _state| {
                 suite_core::ui::apply_theme(egui_ctx);
-                suite_core::ui::ScaledWindow::new("qeynos-template-window", Vec2::new(320.0, 220.0))
+                suite_core::ui::ScaledWindow::new("qeynos-template-window", Vec2::new(320.0, 236.0))
                     .min_size(Vec2::new(240.0, 160.0))
                     .show(egui_ctx, egui_state.as_ref(), |ui| {
                         ui.add_space(6.0);

@@ -150,7 +150,9 @@ impl Plugin for Xray {
                     .show(egui_ctx, egui_state.as_ref(), |ui| {
                         editor_ui(ui, &params, setter, &view);
                     });
-                egui_ctx.request_repaint();
+                // Live analyzer animates — honor the CRT-motion pref + ~8 fps idle guarantee
+                // (guardrails #2/#6) rather than free-running unconditionally.
+                suite_core::ui::scope_repaint(egui_ctx);
             },
         )
     }

@@ -133,7 +133,7 @@ impl Default for CleaveParams {
         let pat = build_pattern(0, d.steps, 1);
         grid.steps[..MAX_STEPS].copy_from_slice(&pat);
         Self {
-            editor_state: EguiState::from_size(680, 560),
+            editor_state: EguiState::from_size(680, 620),
             grid: RwLock::new(grid),
             slice_mode: EnumParam::new("Slice Mode", SliceModeParam::Grid),
             sensitivity: FloatParam::new(
@@ -297,7 +297,7 @@ impl Plugin for Cleave {
             |ctx, _| suite_core::ui::apply_theme(ctx),
             move |egui_ctx, setter, _state| {
                 suite_core::ui::apply_theme(egui_ctx);
-                suite_core::ui::ScaledWindow::new("qeynos-cleave-window", Vec2::new(680.0, 560.0))
+                suite_core::ui::ScaledWindow::new("qeynos-cleave-window", Vec2::new(680.0, 620.0))
                     .min_size(Vec2::new(560.0, 440.0))
                     .show(egui_ctx, egui_state.as_ref(), |ui| {
                         use suite_core::ui::labeled_slider as row;
@@ -709,7 +709,9 @@ fn step_grid_widget(ui: &mut egui::Ui, params: &CleaveParams, playhead: usize) {
             egui::StrokeKind::Middle,
         );
     }
-    ui.ctx().request_repaint();
+    // Live playhead animates — honor the CRT-motion pref + ~8 fps idle guarantee (guardrails
+    // #2/#6) rather than free-running unconditionally.
+    suite_core::ui::scope_repaint(ui.ctx());
 }
 
 impl ClapPlugin for Cleave {

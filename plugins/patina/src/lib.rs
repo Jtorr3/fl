@@ -117,7 +117,7 @@ impl Default for PatinaParams {
     fn default() -> Self {
         let d = Settings::default();
         Self {
-            editor_state: EguiState::from_size(620, 560),
+            editor_state: EguiState::from_size(620, 576),
 
             wow: pct_param("Wow", d.wow_depth),
             wow_rate: FloatParam::new(
@@ -277,7 +277,7 @@ impl Plugin for Patina {
             |ctx, _| suite_core::ui::apply_theme(ctx),
             move |egui_ctx, setter, _state| {
                 suite_core::ui::apply_theme(egui_ctx);
-                suite_core::ui::ScaledWindow::new("qeynos-patina-window", Vec2::new(620.0, 560.0))
+                suite_core::ui::ScaledWindow::new("qeynos-patina-window", Vec2::new(620.0, 576.0))
                     .min_size(Vec2::new(520.0, 460.0))
                     .show(egui_ctx, egui_state.as_ref(), |ui| {
                         use suite_core::ui::labeled_slider as row;
