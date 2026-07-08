@@ -93,6 +93,23 @@ impl VarDelay {
         self.buf[r]
     }
 
+    /// Read at a **fractional** delay `d` (samples ago), linearly interpolated. Used by the
+    /// optional delay-modulation path so the FDN's comb nulls sweep and its discrete modes
+    /// smear into a dense band (anti-metallic). Clamped to `[1, cap-2]`. At an integer `d`
+    /// (fraction 0) this returns **exactly** [`read`](Self::read) with `len == d`, so the
+    /// zero-depth modulation path is bit-identical to the unmodulated core.
+    #[inline]
+    fn read_frac(&self, d: f32) -> f32 {
+        let cap = self.buf.len();
+        let d = d.clamp(1.0, (cap.saturating_sub(2)).max(1) as f32);
+        let d0 = d.floor();
+        let frac = d - d0;
+        let d0 = d0 as usize;
+        let a = self.buf[(self.pos + cap - d0) % cap]; // d0 samples ago
+        let b = self.buf[(self.pos + cap - d0 - 1) % cap]; // d0+1 samples ago (older)
+        a + frac * (b - a)
+    }
+
     /// Write `x` at the head and advance.
     #[inline]
     fn write(&mut self, x: f32) {
@@ -192,6 +209,13 @@ pub struct Fdn8 {
     diff_r: Vec<Allpass>,
     /// Final output scaling so a dense late field stays well below 0 dBFS.
     out_gain: f32,
+    /// Optional per-line delay modulation (anti-metallic). `mod_depth` samples of slow
+    /// sinusoidal delay-length wobble, decorrelated per line, sweeps the comb nulls so the
+    /// tail's discrete modes smear into a dense band. `0` (default) = classic static FDN,
+    /// bit-identical to the pre-modulation core (see [`read_frac`](VarDelay::read_frac)).
+    mod_depth: f32,
+    mod_phase: [f32; N],
+    mod_inc: [f32; N],
 }
 
 impl Fdn8 {
@@ -214,6 +238,16 @@ impl Fdn8 {
             diff_l,
             diff_r,
             out_gain: 0.4,
+            mod_depth: 0.0,
+            // Staggered start phases so the eight lines never move in lockstep.
+            mod_phase: {
+                let mut p = [0.0f32; N];
+                for (i, ph) in p.iter_mut().enumerate() {
+                    *ph = core::f32::consts::TAU * (i as f32) / (N as f32);
+                }
+                p
+            },
+            mod_inc: [0.0; N],
         };
         me.set_damping(0.2);
         me.set_diffusion(0.5);
@@ -235,6 +269,12 @@ impl Fdn8 {
             self.delay_len[i] = d;
             self.lines[i].set_len(d);
         }
+        // Re-zero the modulation LFOs so the first sample read at the new lengths carries no
+        // modulation offset (eff == delay_len). A delay-length change is already a
+        // discontinuity the call site masks (crossfade / silence); this keeps the modulation
+        // from *adding* to that step. The LFOs re-diverge over the following cycle to resume
+        // smearing during the static hold. No-op when modulation is disabled.
+        self.mod_phase = [0.0; N];
         self.recompute_gains();
     }
 
@@ -272,6 +312,23 @@ impl Fdn8 {
         self.out_gain = g;
     }
 
+    /// Enable **delay-length modulation** to break up the metallic ringing of a static FDN.
+    /// `depth_samples` of slow sinusoidal wobble is applied to each line's read pointer with
+    /// a per-line rate spread around `rate_hz`, so the comb-null frequencies sweep and the
+    /// tail's discrete modes smear into a dense, diffuse band (the SOUND-PASS anti-metallic
+    /// fix for MURMUR / CHAMBER / SEANCE). `depth_samples == 0` (the default) restores the
+    /// exact static core — consumers that never call this (e.g. UNDERTOW) are unchanged.
+    /// Small depths (~0.1–0.3 ms) are inaudible as vibrato yet enough to diffuse the modes.
+    pub fn set_modulation(&mut self, depth_samples: f32, rate_hz: f32) {
+        self.mod_depth = depth_samples.max(0.0);
+        let base = (rate_hz.max(0.0) * core::f32::consts::TAU) / self.sr;
+        for i in 0..N {
+            // Per-line rate spread of ±~30 % so lines decorrelate rather than detune as one.
+            let mult = 1.0 + 0.3 * ((i as f32 / (N as f32 - 1.0)) - 0.5);
+            self.mod_inc[i] = base * mult;
+        }
+    }
+
     fn recompute_gains(&mut self) {
         for i in 0..N {
             let len = self.delay_len[i] as f32;
@@ -306,10 +363,24 @@ impl Fdn8 {
             dr = ap.process(dr);
         }
 
-        // Read current line outputs (the output taps).
+        // Read current line outputs (the output taps). With modulation enabled each line is
+        // read at a slowly-swept fractional delay so the comb nulls move and the modes smear;
+        // at `mod_depth == 0` this is bit-identical to the plain integer `read()`.
         let mut s = [0.0f32; N];
-        for i in 0..N {
-            s[i] = self.lines[i].read();
+        if self.mod_depth > 0.0 {
+            for i in 0..N {
+                let lfo = self.mod_phase[i].sin();
+                let eff = self.delay_len[i] as f32 + self.mod_depth * lfo;
+                s[i] = self.lines[i].read_frac(eff);
+                self.mod_phase[i] += self.mod_inc[i];
+                if self.mod_phase[i] >= core::f32::consts::TAU {
+                    self.mod_phase[i] -= core::f32::consts::TAU;
+                }
+            }
+        } else {
+            for i in 0..N {
+                s[i] = self.lines[i].read();
+            }
         }
 
         // Damping + decay → feedback pre-vector v.

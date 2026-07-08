@@ -330,8 +330,13 @@ impl MurmurCore {
         self.onset.set_sensitivity(s.sensitivity);
 
         let rt60 = if s.freeze { FREEZE_RT60 } else { s.decay };
+        // Anti-metallic delay modulation (SOUND-PASS): ~0.2 ms of slow per-line wobble
+        // smears the FDN's discrete tail modes into a dense diffuse band. Inaudible as
+        // vibrato; turns the ringing "tin-can" tail into a smooth cathedral wash.
+        let mod_depth = 0.0002 * self.sr;
         for f in self.fdn.iter_mut() {
             f.set_rt60(rt60);
+            f.set_modulation(mod_depth, 0.8);
         }
         // Color: apply live to both only when the knob actually moves.
         if (s.color - self.prev_color).abs() > 1.0e-4 {

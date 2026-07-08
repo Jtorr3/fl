@@ -71,6 +71,41 @@ pub fn write_wav(path: &Path, samples: &[f32], sample_rate: u32) -> std::io::Res
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
 }
 
+/// Write interleaved L/R f32 buffers to a 2-channel 32-bit float WAV, creating parent
+/// dirs. Used by the SOUND-PASS audition renders so `tools/audition.py` can measure the
+/// stereo correlation / width of reverb tails (a mono-collapsed tail is a defect for the
+/// reverb/texture family). Length is the min of the two channels.
+pub fn write_wav_stereo(
+    path: &Path,
+    left: &[f32],
+    right: &[f32],
+    sample_rate: u32,
+) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let spec = hound::WavSpec {
+        channels: 2,
+        sample_rate,
+        bits_per_sample: 32,
+        sample_format: hound::SampleFormat::Float,
+    };
+    let mut writer = hound::WavWriter::create(path, spec)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+    let n = left.len().min(right.len());
+    for i in 0..n {
+        writer
+            .write_sample(left[i])
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+        writer
+            .write_sample(right[i])
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+    }
+    writer
+        .finalize()
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+}
+
 /// Convenience: render, write to `renders/<plugin>/<name>.wav`, return the output.
 pub fn render_and_write<P: Processor>(
     plugin: &str,
