@@ -47,7 +47,10 @@ use enrich::{
 use eq::EqSettings;
 use master::{BandComp, MasterCore, MasterMeters, MasterSettings};
 use node::{load_f32, NodeCore, NodeMeters, NodeSettings};
-use suite_core::classify::{classify, infer_theme, InstrumentType, MixAnalysis, NodeReport, SessionTheme};
+use suite_core::classify::{
+    classify, infer_theme, infer_theme_from_mix, InstrumentType, MixAnalysis, NodeReport,
+    SessionTheme,
+};
 use suite_core::presets::{load_all, Preset};
 
 /// Usage manual embedded from docs, rendered in-GUI by the '?' button (BUILT-IN-MANUALS).
@@ -1106,6 +1109,10 @@ fn master_enrich_ui(
         .map(|t| SessionTheme::from_index(t.theme));
     let (theme, conf) = match locked {
         Some(t) => (t, 1.0),
+        // No lock: with live Nodes use their per-instrument reports; with NONE (Master alone
+        // on the mix bus) fall back to the Master's own mix-bus analysis so the theme readout,
+        // ASSIST knob and SUGGEST moves come alive instead of sitting inert on Generic.
+        None if reports.is_empty() => infer_theme_from_mix(&mfeat, &mix),
         None => infer_theme(&reports, &mix),
     };
     // Publish theme + assist targets for the audio thread.

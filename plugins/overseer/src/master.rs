@@ -9,7 +9,8 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 
 use suite_core::classify::{
-    infer_theme, FeatureExtractor, FeatureSummary, InstrumentType, MixAnalysis, NodeReport,
+    infer_theme, infer_theme_from_mix, FeatureExtractor, FeatureSummary, InstrumentType,
+    MixAnalysis, NodeReport,
     SessionTheme,
 };
 use suite_core::dsp::{OnePole, Oversampler4x};
@@ -385,7 +386,15 @@ impl MasterCore {
                     onset_density: onset,
                     dynamic_range_db: 20.0 * mfeat.crest.max(1.0).log10(),
                 };
-                let (theme, conf) = infer_theme(&reports[..n], &mix);
+                // With Nodes reporting, use their per-instrument context; with NO Nodes on
+                // the bus (Master-alone setup), fall back to inferring the theme from the
+                // Master's own mix-bus analysis so ASSIST/SUGGEST come alive instead of
+                // sitting inert on Generic.
+                let (theme, conf) = if n == 0 {
+                    infer_theme_from_mix(&mfeat, &mix)
+                } else {
+                    infer_theme(&reports[..n], &mix)
+                };
                 self.shared.set_theme(theme, conf);
                 theme
             }

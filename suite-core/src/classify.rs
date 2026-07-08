@@ -916,6 +916,15 @@ impl Default for MixAnalysis {
     }
 }
 
+/// Confidence floor for the mix-only theme fallback ([`infer_theme_from_mix`]).
+///
+/// Classifying the theme from the Master's OWN summed mix bus is inherently coarser than
+/// reading per-instrument [`NodeReport`]s (a kick+bass+pad all fold into one spectrum), so we
+/// hold the fallback to a *higher* bar than [`CONF_MARGIN`]: a clearly-characterised mix
+/// (strong sub + dark tilt at a techno tempo, or a dense break at a dnb tempo) clears it, but
+/// a murky/ambiguous mix stays [`SessionTheme::Generic`] rather than guess wrong.
+pub const MIX_FALLBACK_CONF_FLOOR: f32 = 0.5;
+
 /// Infer the session theme from the live Node reports + master mix analysis. Returns
 /// `(theme, confidence)`. Below [`CONF_MARGIN`] the theme is [`SessionTheme::Generic`].
 pub fn infer_theme(nodes: &[NodeReport], mix: &MixAnalysis) -> (SessionTheme, f32) {
@@ -973,6 +982,85 @@ pub fn infer_theme(nodes: &[NodeReport], mix: &MixAnalysis) -> (SessionTheme, f3
         }
     }
     if best_v < CONF_MARGIN {
+        (SessionTheme::Generic, best_v)
+    } else {
+        (best, best_v)
+    }
+}
+
+/// Fallback theme inference for a Master running **alone** on the mix bus with **no** OVERSEER
+/// Node instances reporting (the common, discoverable setup: just the Master on the master
+/// track). Instead of sitting on [`SessionTheme::Generic`] — which yields all-zero
+/// `theme_assist_targets`, an inert ASSIST knob and no SUGGEST moves — the Master classifies
+/// the theme from its OWN summed mix-bus [`FeatureSummary`] (the same spectral-tilt /
+/// centroid / sub-weight / onset features the Node classifier uses) plus the transport
+/// `mix` context (tempo/onset). This realises the original OVERSEER-ENRICH intent that the
+/// Master "knows what it's managing innately".
+///
+/// Returns `(theme, confidence)`. Because mix-only analysis is coarser than per-Node reports
+/// the result is gated on [`MIX_FALLBACK_CONF_FLOOR`] (higher than [`CONF_MARGIN`]): a murky
+/// mix stays [`SessionTheme::Generic`] rather than guess wrong, but a clearly dark-techno /
+/// dnb-breaks / ambient / house mix classifies. Cheap + allocation-free; runs on the GUI/bus
+/// or block tick, never per-sample in `process()`.
+///
+/// When Node reports *are* available the caller uses [`infer_theme`] instead (Nodes give
+/// better per-instrument context); this path is only for the no-Node case.
+pub fn infer_theme_from_mix(mix_feat: &FeatureSummary, mix: &MixAnalysis) -> (SessionTheme, f32) {
+    // Silence gate — no confident theme on a dead bus.
+    if !mix_feat.level_db.is_finite() || mix_feat.level_db < SILENCE_DB {
+        return (SessionTheme::Generic, 0.0);
+    }
+
+    let low = mix_feat.low_ratio;
+    let tilt = mix_feat.tilt;
+    let sus = mix_feat.sustain;
+    let wid = mix_feat.width;
+    // Prefer the mix's own measured onset rate; fall back to the transport-side density.
+    let onset = mix_feat.onset_rate.max(mix.onset_density);
+    let tempo = mix.tempo_bpm;
+
+    let dark = le(tilt, -0.1, 0.6); // dark spectral tilt
+    let bright = ge(tilt, -0.1, 0.6); // brighter / airier
+    let subby = ge(low, 0.30, 0.25); // strong sub / low-mid weight
+
+    // DARK-TECHNO: strong low end + dark tilt + kick-driven onset, slowish (or unknown)
+    // tempo. The onset term is a *soft ceiling* (not a tight band) so a beating reese's
+    // spurious onsets don't disqualify it — the real separator from a dense break is tempo.
+    let techno = subby
+        * (0.5 + 0.5 * dark)
+        * le(onset, 12.0, 10.0)
+        * band(tempo, 118.0, 140.0, 16.0).max(if tempo <= 0.0 { 0.7 } else { 0.0 });
+
+    // DNB-BREAKS: dense onsets (a break) + present sub + brighter/airier top; fast tempo when
+    // known.
+    let dnb = ge(onset, 6.0, 5.0)
+        * ge(low, 0.20, 0.25)
+        * (0.6 + 0.4 * bright)
+        * band(tempo, 160.0, 180.0, 20.0).max(if tempo <= 0.0 { 0.5 } else { 0.0 });
+
+    // AMBIENT/ATMOS: sparse onsets + sustained + wide, no driving low-end transients.
+    let ambient = le(onset, 2.0, 2.0) * ge(sus, 0.5, 0.3) * ge(wid, 0.15, 0.2);
+
+    // HOUSE/GROOVE: four-on-the-floor-ish onset + brighter than techno + ~120–128 BPM.
+    let house = band(onset, 2.0, 8.0, 4.0)
+        * bright
+        * band(tempo, 118.0, 128.0, 10.0).max(if tempo <= 0.0 { 0.45 } else { 0.0 });
+
+    let cands = [
+        (SessionTheme::DarkTechno, techno),
+        (SessionTheme::DnbBreaks, dnb),
+        (SessionTheme::Ambient, ambient),
+        (SessionTheme::HouseGroove, house),
+    ];
+    let mut best = SessionTheme::Generic;
+    let mut best_v = 0.0f32;
+    for (t, v) in cands.iter() {
+        if *v > best_v {
+            best_v = *v;
+            best = *t;
+        }
+    }
+    if best_v < MIX_FALLBACK_CONF_FLOOR {
         (SessionTheme::Generic, best_v)
     } else {
         (best, best_v)
@@ -1274,8 +1362,65 @@ mod tests {
 
     #[test]
     fn empty_session_theme_is_generic() {
+        // The Node-report entry point is unchanged: with no Nodes it still declines to
+        // Generic. The mix fallback lives in `infer_theme_from_mix` (Master call site).
         let (t, c) = infer_theme(&[], &MixAnalysis::default());
         assert_eq!(t, SessionTheme::Generic);
         assert!(c < CONF_MARGIN);
+    }
+
+    // ---- Done-bar: mix-only theme fallback (Master alone, no Nodes) --------
+
+    #[test]
+    fn mix_fallback_infers_dark_techno_without_nodes() {
+        // A dark-techno-ish MIX (four-on-the-floor kick + a sub drone) summed to one bus,
+        // with NO Node reports — the Master-alone setup. The fallback must classify it.
+        let mut mix_sig = kick_train(6.0);
+        let sub = testsig::sine(50.0, 0.6, mix_sig.len(), SR);
+        for (m, s) in mix_sig.iter_mut().zip(sub.iter()) {
+            *m += *s;
+        }
+        let mf = summarize_signal(&mix_sig);
+        let mix = MixAnalysis {
+            tempo_bpm: 132.0,
+            tilt: mf.tilt,
+            onset_density: mf.onset_rate,
+            dynamic_range_db: 20.0 * mf.crest.max(1.0).log10(),
+        };
+        let (theme, conf) = infer_theme_from_mix(&mf, &mix);
+        assert_eq!(theme, SessionTheme::DarkTechno, "mix feats {mf:?}");
+        assert!(
+            conf >= MIX_FALLBACK_CONF_FLOOR,
+            "fallback confidence {conf} below floor (feats {mf:?})"
+        );
+    }
+
+    #[test]
+    fn mix_fallback_stays_generic_on_murky_mix() {
+        // Steady broadband noise: no sub weight, no tempo, no dark tilt, no sustain — the
+        // fallback must DECLINE (stay Generic) rather than guess wrong. Honest gating.
+        let noise = testsig::white_noise(0.4, (SR * 4.0) as usize, 1234);
+        let mf = summarize_signal(&noise);
+        let mix = MixAnalysis {
+            tempo_bpm: 0.0,
+            tilt: mf.tilt,
+            onset_density: mf.onset_rate,
+            dynamic_range_db: 12.0,
+        };
+        let (theme, conf) = infer_theme_from_mix(&mf, &mix);
+        assert_eq!(
+            theme,
+            SessionTheme::Generic,
+            "murky mix should stay Generic, got {theme:?} @ {conf}"
+        );
+    }
+
+    #[test]
+    fn mix_fallback_silence_is_generic() {
+        let silence = vec![0.0f32; (SR * 1.0) as usize];
+        let mf = summarize_signal(&silence);
+        let (theme, conf) = infer_theme_from_mix(&mf, &MixAnalysis::default());
+        assert_eq!(theme, SessionTheme::Generic);
+        assert_eq!(conf, 0.0);
     }
 }

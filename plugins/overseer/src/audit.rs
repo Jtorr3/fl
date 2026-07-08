@@ -9,7 +9,10 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use suite_core::classify::{classify, FeatureExtractor, InstrumentType};
+use suite_core::classify::{
+    classify, infer_theme, infer_theme_from_mix, FeatureExtractor, FeatureSummary, InstrumentType,
+    MixAnalysis, NodeReport, MIX_FALLBACK_CONF_FLOOR,
+};
 use suite_core::dsp::Oversampler4x;
 use suite_core::harness::write_wav;
 use suite_core::testsig;
@@ -911,4 +914,157 @@ fn audit_pdc_reported_latency_matches_impulse() {
     println!("PDC master: reported {m_lat}, impulse peak at {m_peak}");
     assert_eq!(m_peak, m_lat, "Master latency report is dishonest");
     println!("PDC full chain (Node + Master): {} samples @ 48k", node_lat + m_lat);
+}
+
+// ===========================================================================
+// 10. THEME FALLBACK — Master ALONE infers the theme from its OWN mix (no Nodes)
+// ===========================================================================
+
+/// Rolling [`FeatureSummary`] of a mono mix through the shared feature extractor — the same
+/// self-analysis the Master runs on its input each block.
+fn mix_features(x: &[f32]) -> FeatureSummary {
+    let mut fx = FeatureExtractor::new(SR);
+    for c in x.chunks(512) {
+        fx.process_block(c, c);
+    }
+    fx.summary()
+}
+
+/// The CHECKPOINTS.md "OVERSEER Master theme stuck on Generic when no Node instances are
+/// placed" defect. With the Master alone on the mix bus (no OVERSEER Nodes on tracks) the
+/// theme must now fall back to the Master's own mix-bus analysis, so ASSIST/SUGGEST-ONLY come
+/// alive. Asserts: (a) a clearly-characterised mix infers a NON-Generic theme that matches
+/// its character, (b) that theme's `theme_assist_targets` are non-zero, (c) applying ASSIST
+/// measurably moves the master output toward the theme reference, and (d) the Node-present
+/// path is unchanged.
+#[test]
+fn audit_master_theme_fallback_from_mix() {
+    // --- (a) a clearly DARK-TECHNO mix, NO node reports on the bus ---
+    let kick = testsig::synth_kick_loop(132.0, 8, SR);
+    let secs = kick.len() as f32 / SR;
+    let reese = testsig::synth_reese(55.0, secs, SR);
+    let techno_mix = mix_sum(&[&kick, &scale(&reese, 0.6)]);
+    let tf = mix_features(&techno_mix);
+    let tmix = MixAnalysis {
+        tempo_bpm: 132.0,
+        tilt: tf.tilt,
+        onset_density: tf.onset_rate,
+        dynamic_range_db: 20.0 * tf.crest.max(1.0).log10(),
+    };
+    let (t_theme, t_conf) = infer_theme_from_mix(&tf, &tmix);
+    println!(
+        "FALLBACK techno mix -> {:?} @ {:.2} (low={:.2} tilt={:+.2} onset={:.1}/s)",
+        t_theme, t_conf, tf.low_ratio, tf.tilt, tf.onset_rate
+    );
+    assert_eq!(
+        t_theme,
+        SessionTheme::DarkTechno,
+        "Master-alone mix fallback must infer DARK-TECHNO from a kick+reese mix"
+    );
+    assert!(t_conf >= MIX_FALLBACK_CONF_FLOOR, "techno fallback conf {t_conf} below floor");
+
+    // --- (b) the theme's assist targets are non-zero (SUGGEST moves come alive) ---
+    let targets = theme_assist_targets(t_theme);
+    assert!(
+        targets != crate::enrich::AssistTargets::default(),
+        "DARK-TECHNO assist targets must be non-zero, got {targets:?}"
+    );
+
+    // --- (c) applying ASSIST measurably moves the master output toward the DARK-TECHNO
+    //     reference: darker spectral tilt (tops rolled off) + firmer low end. A neutral
+    //     master (ratio-1 comp, limiter parked) isolates the EQ move; the source is kept
+    //     ~-12 dB so the limiter stays idle. ---
+    let base = neutral_master(0.0);
+    let assisted = apply_assist(&base, &targets, 0.3);
+    let g = 10f32.powf(-12.0 / 20.0) / peak(&techno_mix);
+    let src = scale(&techno_mix, g);
+    let render = |s: &MasterSettings| -> Vec<f32> {
+        let mut core = new_master();
+        let mut l = src.clone();
+        let mut r = src.clone();
+        master_render(&mut core, s, &mut l, &mut r);
+        l
+    };
+    let out_base = render(&base);
+    let out_assist = render(&assisted);
+    write_stereo("theme_fallback_base", &out_base, &out_base);
+    write_stereo("theme_fallback_assisted", &out_assist, &out_assist);
+    // Rendered-OUTPUT evidence: the low band of the actual master output firms up (the mix
+    // is kick+reese, already floor-dark with ~no >9 kHz energy, so the low shelf is the
+    // audible move on this material — audition.py-style band-deviation check).
+    let tilt_base = mix_features(&out_base).tilt;
+    let tilt_assist = mix_features(&out_assist).tilt;
+    let lo_base = band_db(&out_base, &[45.0, 60.0, 90.0]);
+    let lo_assist = band_db(&out_assist, &[45.0, 60.0, 90.0]);
+    println!(
+        "FALLBACK assist-move (output): tilt {tilt_base:+.3} -> {tilt_assist:+.3}; low {lo_base:+.2} -> {lo_assist:+.2} dB"
+    );
+    assert!(
+        lo_assist > lo_base + 0.05,
+        "ASSIST did not firm the low end of the master output: {lo_base:+.2} -> {lo_assist:+.2} dB"
+    );
+    assert!(
+        tilt_assist <= tilt_base + 1.0e-4,
+        "ASSIST brightened an output it should darken: tilt {tilt_base:+.3} -> {tilt_assist:+.3}"
+    );
+
+    // EQ transfer-function evidence: the DARK-TECHNO high-shelf roll-off (+9 kHz) IS applied
+    // — measured directly on the assisted master EQ vs the base, robust to the source having
+    // no HF energy. Tops down ~0.45 dB (−1.5 dB × 0.3 assist), low up ~0.3 dB (+1.0 × 0.3).
+    let mut eq_b = FourBandEq::new();
+    eq_b.configure(&base.eq, SR);
+    let mut eq_a = FourBandEq::new();
+    eq_a.configure(&assisted.eq, SR);
+    let hi_b = steady_sine_gain_db(&mut eq_b, 12_000.0);
+    let hi_a = steady_sine_gain_db(&mut eq_a, 12_000.0);
+    let lo_b = steady_sine_gain_db(&mut eq_b, 45.0);
+    let lo_a = steady_sine_gain_db(&mut eq_a, 45.0);
+    println!(
+        "FALLBACK assist-move (EQ xfer): 12k {hi_b:+.2} -> {hi_a:+.2} dB; 45Hz {lo_b:+.2} -> {lo_a:+.2} dB"
+    );
+    assert!(hi_a < hi_b - 0.2, "DARK-TECHNO high-shelf roll-off not applied: 12k {hi_b:+.2} -> {hi_a:+.2}");
+    assert!(lo_a > lo_b + 0.1, "DARK-TECHNO low-shelf firm not applied: 45Hz {lo_b:+.2} -> {lo_a:+.2}");
+
+    // --- (a2) a clearly DNB-BREAKS mix, NO node reports ---
+    let brk = testsig::synth_break(174.0, 8, SR);
+    let bsecs = brk.len() as f32 / SR;
+    let pad = testsig::synth_pad(220.0, bsecs, SR);
+    let dnb_mix = mix_sum(&[&brk, &scale(&pad, 0.5)]);
+    let df = mix_features(&dnb_mix);
+    let dmix = MixAnalysis {
+        tempo_bpm: 174.0,
+        tilt: df.tilt,
+        onset_density: df.onset_rate,
+        dynamic_range_db: 20.0 * df.crest.max(1.0).log10(),
+    };
+    let (d_theme, d_conf) = infer_theme_from_mix(&df, &dmix);
+    println!(
+        "FALLBACK dnb mix -> {:?} @ {:.2} (low={:.2} tilt={:+.2} onset={:.1}/s)",
+        d_theme, d_conf, df.low_ratio, df.tilt, df.onset_rate
+    );
+    assert_eq!(
+        d_theme,
+        SessionTheme::DnbBreaks,
+        "Master-alone mix fallback must infer DNB-BREAKS from a break+pad mix at 174 BPM"
+    );
+    assert!(d_conf >= MIX_FALLBACK_CONF_FLOOR, "dnb fallback conf {d_conf} below floor");
+
+    // --- (d) NODE-PRESENT path UNCHANGED: with real Node reports the Master still uses
+    //     the per-instrument `infer_theme`, and `infer_theme` with NO nodes still declines
+    //     to Generic (the fallback is caller-side, not inside infer_theme). ---
+    let nodes = [
+        NodeReport { ty: InstrumentType::Kick, features: mix_features(&kick) },
+        NodeReport { ty: InstrumentType::Bass, features: tf },
+    ];
+    let (n_theme, _n_conf) = infer_theme(&nodes[..], &tmix);
+    assert_eq!(
+        n_theme,
+        SessionTheme::DarkTechno,
+        "node-report path (infer_theme) must be unchanged"
+    );
+    assert_eq!(
+        infer_theme(&[], &tmix).0,
+        SessionTheme::Generic,
+        "infer_theme must still decline on empty nodes (fallback lives at the Master call site)"
+    );
 }
