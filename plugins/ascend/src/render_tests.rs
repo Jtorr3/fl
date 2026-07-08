@@ -139,6 +139,83 @@ fn every_preset_renders_and_passes_universal() {
     }
 }
 
+/// Free-run render: trigger the one-shot envelope (transport stopped) and capture `total`
+/// samples as a mono mixdown. Used by the audition probe to hold a steady tonal source.
+fn render_free_run(s: &Settings, total: usize) -> Vec<f32> {
+    let mut e = AscendEngine::new(SR);
+    e.configure(s);
+    e.set_transport(TransportFrame { playing: false, bar_pos: 0.0, bars_per_sample: 0.0 });
+    e.trigger_free();
+    let mut m = vec![0.0f32; total];
+    for j in 0..total {
+        let (a, b) = e.process_sample();
+        m[j] = 0.5 * (a + b);
+    }
+    m
+}
+
+/// SOUND-PASS audition render (permanent infra, `#[ignore]`d in normal runs).
+///
+/// Renders every factory preset AND `Settings::default()` as a full transport-driven riser
+/// build (its own countdown window at 130 BPM + a 1 s impact tail, mono mixdown) into
+/// renders/_audition/ASCEND/<QVS_AUDITION_DIR or "before">/<preset>.wav, plus a sustained
+/// pure-saw tonal probe that exposes the tonal stack's aliasing.
+///
+/// The probe holds a fixed high pitch (C5 root ≈ 523 Hz, above any factory preset's peak) with
+/// the SVF wide open (18 kHz) and the tonal source solo'd (all tonal, pure saw). Analyze it with
+/// `tools/audition.py analyze <probe> --sine-probe 523`. NOTE: the tonal stack always sums a
+/// root + a fifth (0.6·root + 0.4·fifth at 1.498·root), so the sine-probe's single "worst
+/// inharmonic" bin is dominated by the FIFTH partial, not aliasing — read the harmonic ladder and
+/// the sub-fundamental band ([<0.9·root]) for the true naive-saw alias floor instead.
+#[test]
+#[ignore]
+fn audition_render_musical_sources() {
+    let bpm = 130.0;
+    let subdir = std::env::var("QVS_AUDITION_DIR").unwrap_or_else(|_| "before".into());
+
+    // Every factory preset + the default state, as a full riser build.
+    let presets = load_all(PRESET_JSON);
+    let mut jobs: Vec<(String, Settings)> = presets
+        .iter()
+        .map(|p| (p.name.to_lowercase().replace([' ', '·', '-'], "_"), settings_from_preset(p)))
+        .collect();
+    jobs.push(("default".into(), Settings::default()));
+
+    for (fname, s) in &jobs {
+        let countdown = bars_to_samples(s.window_bars(), bpm);
+        let total = countdown + SR as usize; // + 1 s impact tail
+        let (l, r) = render_transport(s, bpm, total);
+        let m = mono(&l, &r);
+        let path = render_path("_audition/ASCEND", &format!("{subdir}/{fname}"));
+        suite_core::harness::write_wav(&path, &m, SR as u32).expect("write audition render");
+    }
+
+    // Tonal aliasing probe: pure saw, tonal solo'd, filter wide open, fixed high pitch (C5 root
+    // ≈ 523 Hz — higher than any factory preset reaches at env=1), no pitch rise so the pitch
+    // stays steady while the free-run envelope swells the level. This maximally exposes the
+    // naive-saw aliasing floor for tools/audition.py.
+    let probe = Settings {
+        key: 0,
+        octave: 5, // C5 ≈ 523 Hz root, fifth ≈ 784 Hz
+        balance: 1.0,           // all tonal
+        color: 0.0,
+        wave: 0.0,              // pure saw (worst case for aliasing)
+        filter_start_hz: 18_000.0,
+        filter_end_hz: 18_000.0, // SVF wide open throughout — never masks the aliasing
+        rise_st: 0.0,           // steady pitch
+        width: 0.0,
+        impact_on: false,
+        auto_cut: false,
+        free_len_s: 3.0,
+        level_db: -6.0,
+        ..Settings::default()
+    };
+    let m = render_free_run(&probe, (SR * 3.0) as usize);
+    let path = render_path("_audition/ASCEND", &format!("{subdir}/_saw_probe_c5"));
+    suite_core::harness::write_wav(&path, &m, SR as u32).expect("write saw probe");
+    eprintln!("[audition] wrote ASCEND renders + _saw_probe_c5 (root 523 Hz) to '{subdir}'");
+}
+
 /// Done-bar #1: 8 bars at 130 BPM, target = 8 → spectral centroid rises monotonically (windowed,
 /// ±tolerance) over the countdown.
 #[test]
