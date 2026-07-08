@@ -23,7 +23,6 @@ use nih_plug::prelude::*;
 use nih_plug_egui::{
     create_egui_editor,
     egui::{self, Vec2},
-    resizable_window::ResizableWindow,
     EguiState,
 };
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -353,7 +352,7 @@ impl Plugin for OverseerNode {
             |ctx, _| suite_core::ui::apply_theme(ctx),
             move |egui_ctx, setter, _state| {
                 suite_core::ui::apply_theme(egui_ctx);
-                ResizableWindow::new("qeynos-overseer-node-window")
+                suite_core::ui::ScaledWindow::new("qeynos-overseer-node-window", Vec2::new(560.0, 620.0))
                     .min_size(Vec2::new(500.0, 520.0))
                     .show(egui_ctx, egui_state.as_ref(), |ui| {
                         use suite_core::ui::labeled_slider as row;
@@ -856,7 +855,7 @@ impl Plugin for OverseerMaster {
             |ctx, _| suite_core::ui::apply_theme(ctx),
             move |egui_ctx, setter, _state| {
                 suite_core::ui::apply_theme(egui_ctx);
-                ResizableWindow::new("qeynos-overseer-master-window")
+                suite_core::ui::ScaledWindow::new("qeynos-overseer-master-window", Vec2::new(760.0, 680.0))
                     .min_size(Vec2::new(680.0, 560.0))
                     .show(egui_ctx, egui_state.as_ref(), |ui| {
                         use suite_core::ui::labeled_slider as row;

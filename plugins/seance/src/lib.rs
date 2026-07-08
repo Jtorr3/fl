@@ -11,7 +11,6 @@ use nih_plug::prelude::*;
 use nih_plug_egui::{
     create_egui_editor,
     egui::{self, Vec2},
-    resizable_window::ResizableWindow,
     EguiState,
 };
 use std::sync::Arc;
@@ -305,7 +304,7 @@ impl Plugin for Seance {
             |ctx, _| suite_core::ui::apply_theme(ctx),
             move |egui_ctx, setter, _state| {
                 suite_core::ui::apply_theme(egui_ctx);
-                ResizableWindow::new("qeynos-seance-window")
+                suite_core::ui::ScaledWindow::new("qeynos-seance-window", Vec2::new(560.0, 720.0))
                     .min_size(Vec2::new(500.0, 560.0))
                     .show(egui_ctx, egui_state.as_ref(), |ui| {
                         use suite_core::ui::labeled_slider as row;
