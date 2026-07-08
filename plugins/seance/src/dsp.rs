@@ -517,6 +517,9 @@ impl ShimmerVerb {
             for f in self.fdn.iter_mut() {
                 f.set_delays(&delays);
                 f.set_rt60(decay.max(0.1));
+                // Anti-metallic delay modulation (SOUND-PASS): smears the ghost-verb's
+                // discrete FDN modes so the drowned tail is a wash, not a ringing tone.
+                f.set_modulation(0.0002 * self.sr, 0.9);
             }
             self.cur_size = self.req_size;
             self.idle_size = self.req_size;

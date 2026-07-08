@@ -542,3 +542,33 @@ fn size_sweep_no_click() {
         "SIZE sweep produced a click: swept max adjacent diff {swept_max:.4} vs steady baseline {base_max:.4}"
     );
 }
+
+/// SOUND-PASS audition (permanent infra, `#[ignore]`d). Every preset + default over a
+/// formant vocal (2.5 s + 4 s silence tail — ghost-vocal shimmer/drown rings into the
+/// tail) as STEREO WAVs → renders/_audition/SEANCE/<QVS_AUDITION_DIR|before>/.
+#[test]
+#[ignore]
+fn audition_render_musical_sources() {
+    use suite_core::harness::write_wav_stereo;
+    let sr = SR;
+    let subdir = std::env::var("QVS_AUDITION_DIR").unwrap_or_else(|_| "before".into());
+    let tail = (sr * 4.0) as usize;
+    let mut vocal = synth_vocal(220.0, (sr * 2.5) as usize, sr);
+    vocal.extend(std::iter::repeat(0.0).take(tail));
+    let presets = load_all(PRESET_JSON);
+    let mut jobs: Vec<(String, Settings)> = presets
+        .iter()
+        .map(|p| {
+            (p.name.to_lowercase().replace([' ', '·', '-', '/'], "_"), settings_from_preset(p))
+        })
+        .collect();
+    jobs.push(("default".into(), Settings::default()));
+    for (fname, s) in &jobs {
+        let mut l = vocal.clone();
+        let mut r = vocal.clone();
+        let mut core = SeanceCore::new(sr);
+        core.process_stereo(&mut l, &mut r, s);
+        let path = render_path("_audition/SEANCE", &format!("{subdir}/{fname}__vocal"));
+        write_wav_stereo(&path, &l, &r, sr as u32).expect("write audition");
+    }
+}
