@@ -525,6 +525,53 @@ mod render_tests {
         }
     }
 
+    /// SOUND-PASS audition render: every factory preset + `Settings::default()` (label
+    /// "default") over the genre-right dark-techno kick loop, ~4 s + a 1 s tail so the rumble
+    /// decay is captured. Writes renders/_audition/UNDERTOW/<QVS_AUDITION_DIR>/<preset>.wav.
+    /// `#[ignore]` (audition-only; run with `-- --ignored`).
+    #[test]
+    #[ignore]
+    fn audition_render_all_presets() {
+        use suite_core::harness::render_path;
+        use suite_core::testsig::synth_kick_loop;
+        let sr = 48_000.0f32;
+        let subdir = std::env::var("QVS_AUDITION_DIR").unwrap_or_else(|_| "before".to_string());
+        // 140 BPM, 2 bars ≈ 3.43 s of kick loop + 1 s silent tail so the rumble decay rings out.
+        // synth_kick_loop peaks at ~0.9; scale to a realistic in-mix kick level (~-6 dBFS) so the
+        // dry-passthrough + added rumble keeps headroom under 0 dBFS (the universal ceiling).
+        let mut loop_buf = synth_kick_loop(140.0, 2, sr);
+        for v in loop_buf.iter_mut() {
+            *v *= 0.20;
+        }
+        let tail = (sr * 1.0) as usize;
+        let mut source = loop_buf.clone();
+        source.extend(std::iter::repeat(0.0f32).take(tail));
+
+        let plugin_dir = format!("_audition/UNDERTOW/{subdir}");
+        let render_one = |label: &str, s: &Settings| {
+            let mut core = UndertowCore::new(sr);
+            let mut out = source.clone();
+            core.process_mono(&mut out, s);
+            // Audition harness: don't abort on the 0 dBFS ceiling (that's the canonical
+            // gate test's job); render everything and let audition.py true-peak flag it.
+            // Still assert finiteness so a genuine blow-up is caught.
+            let peak = out.iter().fold(0.0f32, |a, &v| a.max(v.abs()));
+            assert!(peak.is_finite(), "non-finite audition render for {label}");
+            let peak_db = 20.0 * peak.max(1e-12).log10();
+            let fname = label.to_lowercase().replace([' ', '·', '-'], "_");
+            let path = render_path(&plugin_dir, &fname);
+            write_wav(&path, &out, sr as u32).expect("write audition render");
+            println!("AUDITION_RENDER {label} peak {peak_db:+.2} dBFS -> {}", path.display());
+        };
+
+        render_one("default", &Settings::default());
+        let presets = load_all(PRESET_JSON);
+        for p in &presets {
+            let s = settings_from_preset(p);
+            render_one(&p.name, &s);
+        }
+    }
+
     /// Write one full-mix render and one rumble-only render (dry level 0) to renders/UNDERTOW/.
     #[test]
     fn full_and_rumble_only_renders() {

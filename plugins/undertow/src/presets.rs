@@ -81,12 +81,17 @@ pub fn note_name_to_index(s: &str) -> Option<i32> {
 /// never settings descriptions. Encodings: see the module-level note above.
 ///
 /// Categories (preset-bar sections): Techno Rumble / DnB Sub / Ducked Bed / Tonal / Extreme.
+/// SOUND-PASS (UNDERTOW) note: the bank was level-rebalanced so every preset lands in a
+/// consistent, headroomed loudness window over a normal-hot kick (was an ~18 dB RMS spread with
+/// two presets clipping); the `rumble` dB values below are the calibrated levels. Two sonic
+/// duplicates were pruned — "Peak Time Roller" (a near-twin of Rolling Rumble: A1, size 0.7, long
+/// tail) and "Melodic Rumble" (a near-twin of Hypnotic Wash Low: E1, high tune amount).
 pub const PRESET_JSON: &[&str] = &[
     // ---- Techno Rumble ----------------------------------------------------
     // Long, tuned, hypnotic roll — melodic-techno low-end that hums a note.
     r#"{ "name": "Rolling Rumble", "category": "Techno Rumble", "strip": 0.55, "drive": 0.35, "size": 0.7, "decay": 1.6,
          "lpfreq": 130.0, "lpres": 1.6, "tunenote": 21, "tuneamt": 0.45, "duckdepth": 0.6,
-         "duckrel": 210.0, "rumble": -2.0, "width": 0.3, "dry": 0.0, "trim": 0.0 }"#,
+         "duckrel": 210.0, "rumble": -9.0, "width": 0.3, "dry": 0.0, "trim": 0.0 }"#,
     // Tight, punchy, hard-techno: short tail, aggressive duck, strong strip, narrow.
     r#"{ "name": "Tight Modern Techno", "category": "Techno Rumble", "strip": 0.75, "drive": 0.45, "size": 0.35, "decay": 0.5,
          "lpfreq": 110.0, "lpres": 1.0, "tunenote": 21, "tuneamt": 0.0, "duckdepth": 0.8,
@@ -99,19 +104,15 @@ pub const PRESET_JSON: &[&str] = &[
     r#"{ "name": "Basement Pressure", "category": "Techno Rumble", "strip": 0.6, "drive": 0.5, "size": 0.55, "decay": 1.1,
          "lpfreq": 120.0, "lpres": 1.5, "tunenote": 19, "tuneamt": 0.25, "duckdepth": 0.7,
          "duckrel": 150.0, "rumble": -3.5, "width": 0.25, "dry": 0.0, "trim": -1.0 }"#,
-    // Driving peak-time roll: longer tail, stronger tune hum, wider recovery.
-    r#"{ "name": "Peak Time Roller", "category": "Techno Rumble", "strip": 0.6, "drive": 0.45, "size": 0.7, "decay": 1.8,
-         "lpfreq": 140.0, "lpres": 1.4, "tunenote": 21, "tuneamt": 0.4, "duckdepth": 0.65,
-         "duckrel": 200.0, "rumble": -3.0, "width": 0.3, "dry": 0.0, "trim": 0.0 }"#,
     // ---- DnB Sub ----------------------------------------------------------
     // Atmospheric-dnb wash tuned to E1: washy, wide, strong resonant sing.
     r#"{ "name": "Sewerslvt Sub", "category": "DnB Sub", "strip": 0.45, "drive": 0.4, "size": 0.75, "decay": 2.0,
          "lpfreq": 165.0, "lpres": 1.6, "tunenote": 16, "tuneamt": 0.6, "duckdepth": 0.55,
-         "duckrel": 230.0, "rumble": -3.0, "width": 0.45, "dry": 0.0, "trim": -0.5 }"#,
+         "duckrel": 230.0, "rumble": -6.0, "width": 0.45, "dry": 0.0, "trim": -0.5 }"#,
     // Half-time atmospheric bed tuned to D1: huge, long, wide, slow recovery.
     r#"{ "name": "Atmospheric Roller", "category": "DnB Sub", "strip": 0.5, "drive": 0.35, "size": 0.8, "decay": 2.3,
          "lpfreq": 155.0, "lpres": 1.3, "tunenote": 14, "tuneamt": 0.5, "duckdepth": 0.5,
-         "duckrel": 250.0, "rumble": -2.5, "width": 0.5, "dry": 0.0, "trim": -0.5 }"#,
+         "duckrel": 250.0, "rumble": -4.7, "width": 0.5, "dry": 0.0, "trim": -0.5 }"#,
     // Smooth, clean liquid-dnb sub on F1: gentle drive, subtle duck.
     r#"{ "name": "Liquid Sub Bed", "category": "DnB Sub", "strip": 0.4, "drive": 0.25, "size": 0.6, "decay": 1.5,
          "lpfreq": 175.0, "lpres": 1.1, "tunenote": 17, "tuneamt": 0.45, "duckdepth": 0.45,
@@ -124,7 +125,7 @@ pub const PRESET_JSON: &[&str] = &[
     // Huge, dark, cavernous late field with a long recovery.
     r#"{ "name": "Cavern Floor", "category": "Ducked Bed", "strip": 0.45, "drive": 0.3, "size": 0.9, "decay": 2.6,
          "lpfreq": 210.0, "lpres": 1.1, "tunenote": 21, "tuneamt": 0.2, "duckdepth": 0.4,
-         "duckrel": 270.0, "rumble": -1.0, "width": 0.55, "dry": 0.0, "trim": -1.0 }"#,
+         "duckrel": 270.0, "rumble": -3.7, "width": 0.55, "dry": 0.0, "trim": -1.0 }"#,
     // Low, subtle, ghostly bed that sits far under the kick; soft duck, quiet.
     r#"{ "name": "Ghost Bed", "category": "Ducked Bed", "strip": 0.5, "drive": 0.3, "size": 0.55, "decay": 1.3,
          "lpfreq": 130.0, "lpres": 1.2, "tunenote": 21, "tuneamt": 0.1, "duckdepth": 0.4,
@@ -138,10 +139,6 @@ pub const PRESET_JSON: &[&str] = &[
     r#"{ "name": "Hypnotic Wash Low", "category": "Tonal", "strip": 0.5, "drive": 0.35, "size": 0.65, "decay": 1.9,
          "lpfreq": 150.0, "lpres": 1.4, "tunenote": 16, "tuneamt": 0.7, "duckdepth": 0.5,
          "duckrel": 220.0, "rumble": -3.0, "width": 0.35, "dry": 0.0, "trim": 0.0 }"#,
-    // Pitched E1 rumble with a heavy tune peak — a low melodic note that rings.
-    r#"{ "name": "Melodic Rumble", "category": "Tonal", "strip": 0.5, "drive": 0.35, "size": 0.6, "decay": 1.7,
-         "lpfreq": 150.0, "lpres": 1.5, "tunenote": 16, "tuneamt": 0.8, "duckdepth": 0.5,
-         "duckrel": 200.0, "rumble": -3.5, "width": 0.3, "dry": 0.0, "trim": -0.5 }"#,
     // Deep C1 drone: earthquake-low tonal hum, long tail, strong resonance.
     r#"{ "name": "Tectonic Hum", "category": "Tonal", "strip": 0.55, "drive": 0.45, "size": 0.7, "decay": 2.2,
          "lpfreq": 135.0, "lpres": 1.6, "tunenote": 12, "tuneamt": 0.7, "duckdepth": 0.45,
@@ -150,15 +147,15 @@ pub const PRESET_JSON: &[&str] = &[
     // Saturated drone bed: heavy drive, long tail, thickened body.
     r#"{ "name": "Distorted Drone Bed", "category": "Extreme", "strip": 0.6, "drive": 0.85, "size": 0.6, "decay": 2.1,
          "lpfreq": 180.0, "lpres": 1.5, "tunenote": 21, "tuneamt": 0.3, "duckdepth": 0.45,
-         "duckrel": 190.0, "rumble": -4.0, "width": 0.4, "dry": 0.0, "trim": -1.5 }"#,
+         "duckrel": 190.0, "rumble": -8.5, "width": 0.4, "dry": 0.0, "trim": -1.5 }"#,
     // Colossal collapse: near-max size, longest tail, heavy drive, deep field.
     r#"{ "name": "Subterranean Collapse", "category": "Extreme", "strip": 0.6, "drive": 0.8, "size": 0.95, "decay": 2.8,
          "lpfreq": 200.0, "lpres": 1.5, "tunenote": 19, "tuneamt": 0.4, "duckdepth": 0.5,
-         "duckrel": 260.0, "rumble": -4.0, "width": 0.5, "dry": 0.0, "trim": -2.0 }"#,
+         "duckrel": 260.0, "rumble": -10.0, "width": 0.5, "dry": 0.0, "trim": -2.0 }"#,
     // Fully overdriven abyss: max drive, strong strip, resonant and aggressive.
     r#"{ "name": "Overdriven Abyss", "category": "Extreme", "strip": 0.7, "drive": 0.95, "size": 0.65, "decay": 1.9,
          "lpfreq": 190.0, "lpres": 1.7, "tunenote": 21, "tuneamt": 0.35, "duckdepth": 0.6,
-         "duckrel": 170.0, "rumble": -4.5, "width": 0.35, "dry": 0.0, "trim": -2.5 }"#,
+         "duckrel": 170.0, "rumble": -8.0, "width": 0.35, "dry": 0.0, "trim": -2.5 }"#,
     // Maximum-depth pump: full duck, fast recovery, narrow and relentless.
     r#"{ "name": "Total Duck", "category": "Extreme", "strip": 0.65, "drive": 0.5, "size": 0.5, "decay": 1.2,
          "lpfreq": 125.0, "lpres": 1.4, "tunenote": 21, "tuneamt": 0.0, "duckdepth": 1.0,
