@@ -66,7 +66,60 @@ in → 4-band EQ → 3-band multiband comp (LR4 splits on TPT SVFs)
 | Lim Release | 10–1000 ms | limiter gain-envelope release |
 | Mix | 0–100 % | latency-matched dry/wet |
 
-Presets: **Techno Master**, **Gentle Master**, **Loud & Proud**.
+Presets are **theme-tagged** thematic banks (see OVERSEER-ENRICH below).
+
+## OVERSEER-ENRICH — auto-classification, LEARN, theme assist, thematic banks
+
+OVERSEER doesn't need to be *told* what a track is — it listens.
+
+### Instrument auto-classification (Node)
+- Each Node runs a lightweight, allocation-free **feature extractor** on its own input
+  (`suite_core::classify`): rolling ~4 s stats of low-band (<120 Hz) ratio, spectral
+  centroid + tilt, onset rate + crest, pitch confidence + pitched-frame ratio, a 5–9 kHz
+  sibilance ratio, a sustain estimate and stereo width — via a cheap SVF filterbank, two
+  envelope followers and the suite pitch tracker. It never alters the audio.
+- A **rule/score classifier** maps those features to `(InstrumentType, confidence)`:
+  KICK, BASS, RUMBLE, PERC, HATS, SNARE, BREAKS, VOCAL, PAD, LEAD, ATMOS, FX, BUS.
+  Below a confidence margin the type stays GENERIC (no false confidence on noise/silence).
+- **Instrument Type** param: `Auto` (default, follows the classifier) or a concrete type
+  (pins it). The Node header shows the guessed type + a confidence %; the preset bar filters
+  the factory bank to the current type.
+- Nodes publish their features + effective type over the same-DLL **Bus** for the Master.
+
+### LEARN (deliberate capture — both plugins)
+- **Node LEARN:** press, play the track's most representative ~8 s; the Node captures a
+  focused feature window (progress shown), then **commits**: the type is locked (overriding
+  drift), context-tuned defaults are applied, and **ghost suggestions** (low-shelf move from
+  the measured low-band excess; comp threshold/ratio from the crest factor) appear with an
+  **APPLY** button. The lock + suggestions persist with the project. The window captures
+  *exactly* N seconds — the committed type matches what played during the window even if a
+  different sound follows.
+- **Master LEARN THEME:** press, play the fullest ~12 s; the Master captures its mix
+  analysis while reading every live Node, then **locks** the inferred theme and freezes the
+  assist targets. A summary card shows the theme, per-track types, and the assist moves.
+
+### Session-theme inference + assist (Master)
+- The Master aggregates the live Nodes' types/features with its own mix analysis (transport
+  tempo, spectral tilt, onset density, dynamic range) into a **THEME**: DARK-TECHNO,
+  DNB-BREAKS, AMBIENT, HOUSE-GROOVE, or GENERIC (with confidence, shown on the GUI).
+- **ASSIST** knob (0 = display only, default **30 %**) scales how far theme-derived targets
+  nudge the master EQ tilt, multiband-comp character (glue vs punch) and limiter drive.
+  **SUGGEST-ONLY** keeps the theme advisory. Assist is a **bit-exact identity at strength 0**
+  — with assist at 0 the audio path is unchanged from pre-enrich (verified by a null test).
+- The Master grid + summary card badge each Node with its type (type-colored). The Master
+  preset bar filters the factory bank by the inferred theme.
+
+### Context-tuned defaults (per type)
+Selecting a type (or committing a LEARN) applies documented starting settings — e.g. KICK =
+mono-low width + fast comp; VOCAL = gentle knee + presence bands; PAD = wide + slow glue;
+PERC = high-passed + fast/bright. (`enrich::context_defaults`.)
+
+### Thematic factory banks
+- Node: ≥6 purpose-named presets per common type (KICK/BASS/VOCAL/PAD/PERC/BUS) — e.g.
+  *Warehouse Thump*, *Rumble Bed Glue*, *Drowned Ghost Sit*, *Grief Wash*, *Warehouse Tops*,
+  *Drum Bus Glue* — tagged by `category`.
+- Master: theme banks (*Warehouse Master*, *Neurofunk Master*, *Ambient Bed*, *House Punch*,
+  *Gentle Master*, …) tagged by theme.
 
 ## Done-bar verification (offline tests, `cargo test -p overseer --release`)
 
@@ -77,5 +130,14 @@ Presets: **Techno Master**, **Gentle Master**, **Loud & Proud**.
    K-weighting test hook disabled the meter reads −20.0 ±0.1.
 3. **Bus round-trip:** Node registers, Master writes an override, the Node's effective
    param reflects it the next block; a local touch steals control back; dropped Nodes GC.
+4. **Classifier fixtures** (`suite_core::classify` + in-process bus): synth_kick train →
+   KICK, sustained/sliding saw → BASS, synth_vocal → VOCAL, noise-burst train → PERC, wide
+   chord pad → PAD (all above the confidence margin); white noise/silence stay below margin.
+5. **LEARN window:** captures exactly N samples (fake transport) and the committed type
+   matches the fixture played during the window even when a different fixture follows.
+6. **Theme:** kick + rumble + pad Node streams at 130 BPM through the Bus → DARK-TECHNO.
+7. **Assist null:** assist at strength 0 renders bit-identically to the pre-enrich master.
+8. **Context defaults:** KICK-vs-VOCAL default diff table asserted; every bank preset loads
+   + passes universal render assertions; old projects (no type param) default to AUTO.
 
 Renders: `renders/OVERSEER/*.wav` (each preset over synthetic kick/vocal/mix signals).
