@@ -262,7 +262,10 @@ fn editor_ui(
     setter: &ParamSetter,
     view: &Arc<Mutex<XrayView>>,
 ) {
-    use suite_core::ui::{labeled_knob, param_widget, ACCENT, PANEL, TEXT, TEXT_DIM};
+    use suite_core::ui::{
+        console_on, crt_frame, labeled_knob, param_widget, ACCENT, PANEL, PHOSPHOR_DIM, TEXT,
+        TEXT_DIM,
+    };
 
     ui.add_space(4.0);
     ui.horizontal(|ui| {
@@ -296,51 +299,67 @@ fn editor_ui(
     let soloed = view.lock().map(|v| v.soloed).unwrap_or(None);
     let mut hovered: Option<u64> = None;
 
-    // ---- Analyzer panel ----------------------------------------------------
-    let avail_w = ui.available_width();
+    // ---- Analyzer panel (recessed CRT bay) ---------------------------------
+    // The multicolor per-slot curves (golden-angle hue walk) and the legend
+    // hover/click solo-dim below are the FUNCTIONAL product and are unchanged;
+    // CONSOLE only re-skins the chrome — glass background via crt_frame,
+    // gridlines/axis text → PHOSPHOR_DIM. THEME-OFF restores the original look.
+    let console = console_on(ui.ctx());
     let panel_h = (ui.available_height() - 150.0).clamp(200.0, 420.0);
-    let (rect, _resp) =
-        ui.allocate_exact_size(Vec2::new(avail_w, panel_h), egui::Sense::hover());
-    let painter = ui.painter_at(rect);
-    painter.rect_filled(rect, 4.0, PANEL);
+    let rect = crt_frame(ui, "xray-crt", panel_h + 16.0, |ui| {
+        let (rect, _resp) = ui.allocate_exact_size(
+            Vec2::new(ui.available_width(), panel_h),
+            egui::Sense::hover(),
+        );
+        let painter = ui.painter_at(rect);
+        // Original panel fill only when CONSOLE is off (else the glass shows through).
+        if !console {
+            painter.rect_filled(rect, 4.0, PANEL);
+        }
 
-    // Grid: decade freq lines + dB lines.
-    let grid_col = egui::Color32::from_rgb(40, 43, 48);
-    let label_col = TEXT_DIM;
-    for &f in &[100.0f32, 1_000.0, 10_000.0] {
-        let x = rect.left() + freq_frac(f) * rect.width();
-        painter.line_segment(
-            [egui::pos2(x, rect.top()), egui::pos2(x, rect.bottom())],
-            egui::Stroke::new(1.0, grid_col),
-        );
-        let txt = if f >= 1_000.0 {
-            format!("{:.0}k", f / 1_000.0)
+        // Grid: decade freq lines + dB lines.
+        let grid_col = if console {
+            PHOSPHOR_DIM
         } else {
-            format!("{f:.0}")
+            egui::Color32::from_rgb(40, 43, 48)
         };
-        painter.text(
-            egui::pos2(x + 2.0, rect.bottom() - 12.0),
-            egui::Align2::LEFT_TOP,
-            txt,
-            egui::FontId::proportional(10.0),
-            label_col,
-        );
-    }
-    for &db in &[0.0f32, -24.0, -48.0, -72.0] {
-        let yn = (db - DB_BOT) / (DB_TOP - DB_BOT);
-        let y = rect.bottom() - yn * rect.height();
-        painter.line_segment(
-            [egui::pos2(rect.left(), y), egui::pos2(rect.right(), y)],
-            egui::Stroke::new(1.0, grid_col),
-        );
-        painter.text(
-            egui::pos2(rect.left() + 2.0, y - 11.0),
-            egui::Align2::LEFT_TOP,
-            format!("{db:.0}"),
-            egui::FontId::proportional(10.0),
-            label_col,
-        );
-    }
+        let label_col = if console { PHOSPHOR_DIM } else { TEXT_DIM };
+        for &f in &[100.0f32, 1_000.0, 10_000.0] {
+            let x = rect.left() + freq_frac(f) * rect.width();
+            painter.line_segment(
+                [egui::pos2(x, rect.top()), egui::pos2(x, rect.bottom())],
+                egui::Stroke::new(1.0, grid_col),
+            );
+            let txt = if f >= 1_000.0 {
+                format!("{:.0}k", f / 1_000.0)
+            } else {
+                format!("{f:.0}")
+            };
+            painter.text(
+                egui::pos2(x + 2.0, rect.bottom() - 12.0),
+                egui::Align2::LEFT_TOP,
+                txt,
+                egui::FontId::proportional(10.0),
+                label_col,
+            );
+        }
+        for &db in &[0.0f32, -24.0, -48.0, -72.0] {
+            let yn = (db - DB_BOT) / (DB_TOP - DB_BOT);
+            let y = rect.bottom() - yn * rect.height();
+            painter.line_segment(
+                [egui::pos2(rect.left(), y), egui::pos2(rect.right(), y)],
+                egui::Stroke::new(1.0, grid_col),
+            );
+            painter.text(
+                egui::pos2(rect.left() + 2.0, y - 11.0),
+                egui::Align2::LEFT_TOP,
+                format!("{db:.0}"),
+                egui::FontId::proportional(10.0),
+                label_col,
+            );
+        }
+        rect
+    });
 
     // Curves are drawn AFTER the legend so this frame's hover/solo can dim the right ones.
 
@@ -414,7 +433,9 @@ fn editor_ui(
     }
 
     // Now draw the curves with the resolved focus (hover this frame, else solo).
+    // Clipped to the panel rect (inside the CRT glass); colors are untouched.
     let focus = hovered.or(soloed);
+    let painter = ui.painter_at(rect);
     for snap in &snaps {
         let base = slot_color(snap.index);
         let dim = focus.is_some() && focus != Some(snap.instance_id);

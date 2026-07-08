@@ -451,8 +451,27 @@ impl Plugin for Chorale {
                         );
                         ui.separator();
 
-                        // Resonator-activity display.
-                        res_activity(ui, &activity);
+                        // Resonator-activity display, recessed into the CONSOLE CRT bay. The
+                        // live per-resonator energy bars ARE the telemetry (GUI-thread reads of
+                        // the published activity envelope; process() untouched). CONSOLE re-skins
+                        // the bars to phosphor amber over glass; THEME-OFF keeps the original
+                        // panel look (the same bars still render — guardrail #3).
+                        suite_core::ui::crt_frame(ui, "chorale-crt", 76.0, |ui| {
+                            let console = suite_core::ui::console_on(ui.ctx());
+                            ui.label(
+                                egui::RichText::new("CHORALE · RESONATOR BANK")
+                                    .color(if console {
+                                        suite_core::ui::PHOSPHOR
+                                    } else {
+                                        suite_core::ui::TEXT_DIM
+                                    })
+                                    .monospace()
+                                    .strong()
+                                    .size(12.0),
+                            );
+                            ui.add_space(2.0);
+                            res_activity(ui, &activity, console);
+                        });
                         ui.add_space(6.0);
 
                         egui::Grid::new("chorale-tuning")
@@ -576,15 +595,25 @@ impl Drop for Chorale {
     }
 }
 
-/// Resonator-activity bars showing per-resonator energy (cheap; optional GUI extra).
-fn res_activity(ui: &mut egui::Ui, activity: &[AtomicF32]) {
+/// Resonator-activity bars showing per-resonator energy (cheap; optional GUI extra). `console`
+/// (CONSOLE v2 active) drives the re-skin: phosphor bars over the CRT glass vs. the original
+/// amber-on-panel look. Behavior/values are identical in both.
+fn res_activity(ui: &mut egui::Ui, activity: &[AtomicF32], console: bool) {
     ui.ctx().request_repaint();
     let n = activity.len();
     let avail = ui.available_width().min(420.0);
     let size = Vec2::new(avail, 42.0);
     let (rect, _resp) = ui.allocate_exact_size(size, egui::Sense::hover());
     let painter = ui.painter_at(rect);
-    painter.rect_filled(rect, 3.0, suite_core::ui::PANEL);
+    // Panel fill only when CONSOLE is off (else the CRT glass shows through the frame).
+    if !console {
+        painter.rect_filled(rect, 3.0, suite_core::ui::PANEL);
+    }
+    let bar_col = if console {
+        suite_core::ui::PHOSPHOR
+    } else {
+        suite_core::ui::ACCENT
+    };
     let gap = 2.0;
     let bw = (rect.width() - gap * (n as f32 + 1.0)) / n as f32;
     for i in 0..n {
@@ -595,7 +624,7 @@ fn res_activity(ui: &mut egui::Ui, activity: &[AtomicF32]) {
             egui::pos2(x0, rect.bottom() - 3.0 - h),
             egui::pos2(x0 + bw, rect.bottom() - 3.0),
         );
-        painter.rect_filled(bar, 1.0, suite_core::ui::ACCENT);
+        painter.rect_filled(bar, 1.0, bar_col);
     }
 }
 

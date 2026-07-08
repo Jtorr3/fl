@@ -476,6 +476,58 @@ impl Plugin for Halt {
                         );
                         ui.separator();
 
+                        // CONSOLE v2 CRT telemetry bay — honest live state (the same values
+                        // shown on the controls below; GUI-thread reads only, process()
+                        // untouched). ACTIVE reads the same mode bools the buttons drive. In
+                        // THEME-OFF this degrades to a plain readout panel.
+                        let active = {
+                            let mut m: Vec<&str> = Vec::new();
+                            if params.tape_stop.value() {
+                                m.push("TAPE-STOP");
+                            }
+                            if params.stutter.value() {
+                                m.push("STUTTER");
+                            }
+                            if params.reverse.value() {
+                                m.push("REVERSE");
+                            }
+                            if params.half_speed.value() {
+                                m.push("HALF-SPEED");
+                            }
+                            if m.is_empty() {
+                                "—  (passthrough)".to_string()
+                            } else {
+                                m.join(" + ")
+                            }
+                        };
+                        suite_core::ui::crt_lines(
+                            ui,
+                            "halt-crt",
+                            "HALT · BUFFER FX",
+                            &[
+                                ("ACTIVE", active),
+                                (
+                                    "STOP",
+                                    format!(
+                                        "{} · curve {} · {}",
+                                        params.tape_sync, params.tape_curve, params.tape_release
+                                    ),
+                                ),
+                                (
+                                    "STUTTER",
+                                    format!(
+                                        "{} · decay {} · {} · q {}",
+                                        params.stutter_div,
+                                        params.stutter_decay,
+                                        params.stutter_pitch,
+                                        params.quantize
+                                    ),
+                                ),
+                                ("MIX", format!("{} · out {}", params.mix, params.out)),
+                            ],
+                        );
+                        ui.add_space(4.0);
+
                         // Big mode buttons (toggle the momentary bools; last-pressed wins).
                         ui.horizontal(|ui| {
                             mode_button(ui, setter, &params.tape_stop, "TAPE STOP");

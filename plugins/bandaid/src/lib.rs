@@ -308,6 +308,50 @@ impl Plugin for Bandaid {
                         );
                         ui.separator();
 
+                        // CONSOLE v2 CRT telemetry bay — honest live state (the same values
+                        // shown on the controls below; GUI-thread reads only, process()
+                        // untouched). In THEME-OFF this degrades to a plain readout panel.
+                        suite_core::ui::crt_lines(
+                            ui,
+                            "bandaid-crt",
+                            "BANDAID · TRANSIENT",
+                            &[
+                                (
+                                    "XOVER",
+                                    format!("{} · {}", params.xover_low, params.xover_high),
+                                ),
+                                (
+                                    "LOW",
+                                    format!(
+                                        "atk {} · sus {}",
+                                        params.low_attack, params.low_sustain
+                                    ),
+                                ),
+                                (
+                                    "MID",
+                                    format!(
+                                        "atk {} · sus {}",
+                                        params.mid_attack, params.mid_sustain
+                                    ),
+                                ),
+                                (
+                                    "HIGH",
+                                    format!(
+                                        "atk {} · sus {}",
+                                        params.high_attack, params.high_sustain
+                                    ),
+                                ),
+                                (
+                                    "GLOBAL",
+                                    format!(
+                                        "det {} · mix {} · out {}",
+                                        params.detector, params.mix, params.out
+                                    ),
+                                ),
+                            ],
+                        );
+                        ui.add_space(4.0);
+
                         // Global row: crossovers + detector + mix + out.
                         egui::Grid::new("bandaid-global")
                             .num_columns(5)

@@ -308,6 +308,41 @@ impl Plugin for Patina {
                         );
                         ui.separator();
 
+                        // CONSOLE v2 CRT telemetry bay — honest live state (the same values
+                        // shown on the controls below; GUI-thread reads only, process()
+                        // untouched). In THEME-OFF this degrades to a plain readout panel.
+                        suite_core::ui::crt_lines(
+                            ui,
+                            "patina-crt",
+                            "PATINA · LO-FI",
+                            &[
+                                ("AGE", format!("{}", params.age)),
+                                (
+                                    "WOW/FLT",
+                                    format!(
+                                        "wow {} · rate {} · flut {}",
+                                        params.wow, params.wow_rate, params.flutter
+                                    ),
+                                ),
+                                (
+                                    "TAPE",
+                                    format!(
+                                        "sat {} · bump {} · azi {}",
+                                        params.sat, params.bump, params.azimuth
+                                    ),
+                                ),
+                                (
+                                    "NOISE",
+                                    format!(
+                                        "hiss {} · hum {} · crk {}",
+                                        params.hiss, params.hum, params.crackle
+                                    ),
+                                ),
+                                ("MIX", format!("{} · out {}", params.mix, params.out)),
+                            ],
+                        );
+                        ui.add_space(4.0);
+
                         // AGE macro + mix/out headline row.
                         egui::Grid::new("patina-macro")
                             .num_columns(3)
