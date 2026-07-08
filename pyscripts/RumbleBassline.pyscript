@@ -1,0 +1,387 @@
+"""RumbleBassline - FL Studio Piano Roll script (Qeynos W1).
+
+Generates offbeat / rolling *rumble-bass* note patterns that lock AROUND a
+4-on-the-floor kick (dark / hard techno). The kick is assumed to sit on the
+beats (PPQ positions 0, 1, 2, 3 of every 4/4 bar); this generator writes bass
+notes that AVOID those kick positions:
+
+  * Offbeat 8ths  - one accented note on the "and" of each beat (the classic
+                    rolling-techno offbeat bass). Nothing on the beats at all.
+  * Rolling 16ths - a continuous stream of 16ths; the ON-BEAT 16ths (which land
+                    on the kick) are kept but GHOSTED at ghost velocity so they
+                    duck under the kick, the offbeats are accented.
+  * Gallop        - per beat: a ghosted on-beat 16th + an accented "and" + a
+                    ghosted "a" (the horse-gallop that ducks the kick).
+  * Broken        - a fixed syncopated 16th figure that never touches a beat.
+
+Pitch is ROOT-DOMINANT (all base notes are the root, kept in the low register)
+with occasional passing tones from the selected scale (b2 for phrygian flavour,
+the 5th, the b7) at low probability, and only on the extra "fill" ghost 16ths.
+Velocities are two-tier (accent on the offbeats, ghost everywhere else) with a
+seeded, deterministic humanize on both velocity and timing (timing bounded to
++/-5 ticks). A Fill-density control sprinkles extra ghost 16ths into the gaps.
+
+------------------------------------------------------------------------------
+Design choices (documented per the work order):
+
+* SELF-CONTAINED single file. FL Studio's piano-roll script sandbox blocks file
+  access (see the machine's existing ComposeWithLLM.pyscript header), so an
+  adjacent shared `.py` helper module cannot be imported reliably - everything
+  lives here.
+
+* APPEND, not clear-and-write. ComposeWithLLM's default action ADDS notes to the
+  score (it only clears on an explicit request), so this script does the same: it
+  appends the generated pattern to whatever is already in the piano roll. Clear
+  the piano roll first (Ctrl+A, Delete) if you want a fresh pattern. Generation
+  starts at the timeline SELECTION start if one exists, else at tick 0.
+
+* The generation logic is the pure function `generate_bassline(...)`, which has
+  NO dependency on `flpianoroll` and returns plain dicts. FL only ever calls
+  `createDialog()` / `apply(form)`. This split lets the offline test gate
+  (pyscripts/tests/test_rumble.py) import and exercise the generator with a mock
+  `flpianoroll`, since FL cannot run headless. The `import flpianoroll` is guarded
+  so the module imports cleanly outside FL.
+------------------------------------------------------------------------------
+"""
+
+import random
+
+# FL injects `flpianoroll` at runtime; guard the import so the module can also be
+# imported by the offline test harness (and by a mock) outside FL Studio.
+try:
+    import flpianoroll as flp
+except ImportError:  # running under the offline test gate / mock
+    flp = None
+
+
+# --------------------------------------------------------------------------- #
+# Music theory tables
+# --------------------------------------------------------------------------- #
+
+# Semitone offsets from the root for each supported scale.
+SCALES = {
+    "minor":          [0, 2, 3, 5, 7, 8, 10],   # natural minor / Aeolian
+    "phrygian":       [0, 1, 3, 5, 7, 8, 10],   # b2 gives the dark flavour
+    "harmonic_minor": [0, 2, 3, 5, 7, 8, 11],
+}
+
+# Candidate passing tones (semitones above root) - the b2, the 5th, the b7.
+# Only those that actually belong to the chosen scale are used.
+PASSING_CANDIDATES = [1, 7, 10]
+
+PATTERNS = ("offbeat_8ths", "rolling_16ths", "gallop", "broken")
+
+# The 16th-note indices (0..15 within a 4/4 bar) that the fixed Broken figure
+# hits - deliberately never a multiple of 4, so it never touches a kick.
+BROKEN_IDX = (2, 3, 6, 10, 11, 14)
+
+# Combo option lists (also used to map dialog indices -> internal values).
+NOTE_NAMES = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
+OCTAVE_LABELS = ("0", "1", "2", "3", "4")
+SCALE_LABELS = ("Minor", "Phrygian", "Harmonic Minor")
+SCALE_KEYS = ("minor", "phrygian", "harmonic_minor")
+PATTERN_LABELS = ("Offbeat 8ths", "Rolling 16ths", "Gallop", "Broken")
+
+
+def note_name_to_midi(pitch_class, octave):
+    """MIDI number from a pitch-class index (C=0..B=11) and an octave.
+
+    Standard MIDI numbering (C-1 = 0), so C0 = 12 and the default F1 = 29
+    (~43.6 Hz - a proper rumble-bass root). Note: FL's piano roll *labels*
+    octaves one higher than this scientific convention, but the note NUMBER is
+    what matters and is what FL's Note.number expects.
+    """
+    return (int(octave) + 1) * 12 + int(pitch_class)
+
+
+# --------------------------------------------------------------------------- #
+# Pattern definition -> per-bar slot list
+# --------------------------------------------------------------------------- #
+
+def _bar_slots(pattern, ppq):
+    """Return the base note slots for ONE bar as a list of dicts:
+
+        {"tick": <ticks from bar start>, "role": "accent"|"ghost",
+         "len": <note length in ticks>, "on_beat": <bool>}
+
+    `on_beat` is True when the slot lands exactly on a kick (a beat). Such slots
+    are ALWAYS role "ghost" (never accent), so they duck under the kick.
+    """
+    step16 = ppq // 4          # one 16th note
+    step8 = ppq // 2           # one 8th note
+    slots = []
+
+    if pattern == "offbeat_8ths":
+        # The "and" of each beat: 16th index 2, 6, 10, 14. All accented.
+        for beat in range(4):
+            idx = beat * 4 + 2
+            slots.append({"idx": idx, "tick": idx * step16,
+                          "role": "accent", "len": step8})
+
+    elif pattern == "rolling_16ths":
+        # Every 16th. On-beat 16ths (idx % 4 == 0) are ghosted; the "and"
+        # (idx % 4 == 2) is accented; the "e"/"a" are ghosts.
+        for idx in range(16):
+            role = "accent" if idx % 4 == 2 else "ghost"
+            slots.append({"idx": idx, "tick": idx * step16,
+                          "role": role, "len": step16})
+
+    elif pattern == "gallop":
+        # Per beat: on-beat (ghost) + "and" (accent) + "a" (ghost).
+        for beat in range(4):
+            for off in (0, 2, 3):
+                idx = beat * 4 + off
+                role = "accent" if off == 2 else "ghost"
+                slots.append({"idx": idx, "tick": idx * step16,
+                              "role": role, "len": step16})
+
+    elif pattern == "broken":
+        # A fixed syncopated figure that never lands on a beat.
+        for idx in BROKEN_IDX:
+            role = "accent" if idx % 4 == 2 else "ghost"
+            slots.append({"idx": idx, "tick": idx * step16,
+                          "role": role, "len": step16})
+
+    else:
+        raise ValueError("unknown pattern: %r" % (pattern,))
+
+    for s in slots:
+        s["on_beat"] = (s["idx"] % 4 == 0)
+    slots.sort(key=lambda s: s["idx"])
+    return slots
+
+
+def _passing_pool(scale_key):
+    """Passing tones (semitones above root) that belong to the scale."""
+    offsets = SCALES[scale_key]
+    pool = [c for c in PASSING_CANDIDATES if c in offsets]
+    return pool or [7]   # fall back to the 5th if nothing qualifies
+
+
+# --------------------------------------------------------------------------- #
+# The pure generator (importable & fully deterministic per seed)
+# --------------------------------------------------------------------------- #
+
+def generate_bassline(
+    root_note,
+    scale,
+    pattern,
+    bars,
+    ppq,
+    note_length_pct=75.0,
+    ghost_vel=35.0,
+    accent_vel=95.0,
+    humanize_vel=8.0,
+    humanize_ticks=3,
+    fill_density=20.0,
+    seed=1,
+    passing_prob=0.35,
+):
+    """Generate a rumble-bassline as a list of note-event dicts.
+
+    Parameters
+    ----------
+    root_note : int          MIDI number of the root (see note_name_to_midi).
+    scale     : str          one of SCALES ("minor"/"phrygian"/"harmonic_minor").
+    pattern   : str          one of PATTERNS.
+    bars      : int          1..8.
+    ppq       : int          ticks per quarter note (from flp.score.PPQ).
+    note_length_pct : float  note length as a % of its grid step.
+    ghost_vel : float        ghost velocity, 0..60 (%).
+    accent_vel: float        accent velocity, 40..100 (%).
+    humanize_vel : float     +/- velocity jitter (%), applied post-tier.
+    humanize_ticks : int     +/- timing jitter in ticks; clamped to <= 5.
+    fill_density : float     0..100 (%) probability of an extra ghost 16th in a gap.
+    seed : int               RNG seed -> fully deterministic output.
+    passing_prob : float     probability a FILL note uses a passing tone vs root.
+
+    Returns
+    -------
+    list of dict, each with:
+        number        : MIDI note number
+        time          : start tick (>= 0), post-humanize
+        length        : length in ticks (>= 1)
+        velocity      : float 0..1, post-humanize
+        nominal_time  : start tick BEFORE timing humanize
+        nominal_velocity : tier velocity BEFORE velocity humanize (0..1)
+        role          : "accent" | "ghost"
+        ghost         : bool  (role == "ghost")
+        accent        : bool  (role == "accent")
+        on_beat       : bool  (nominal_time lands on a kick / beat)
+        fill          : bool  (an extra fill-density ghost, not a base slot)
+    """
+    if pattern not in PATTERNS:
+        raise ValueError("unknown pattern: %r" % (pattern,))
+    if scale not in SCALES:
+        raise ValueError("unknown scale: %r" % (scale,))
+
+    bars = max(1, min(8, int(bars)))
+    ppq = int(ppq)
+    step16 = ppq // 4
+    bar_ticks = ppq * 4
+
+    ht = min(5, max(0, int(humanize_ticks)))          # bound timing jitter to +/-5
+    hv = max(0.0, float(humanize_vel)) / 100.0
+    ghost_v = max(0.0, min(1.0, float(ghost_vel) / 100.0))
+    accent_v = max(0.0, min(1.0, float(accent_vel) / 100.0))
+    fill_p = max(0.0, min(1.0, float(fill_density) / 100.0))
+    length_scale = max(0.01, float(note_length_pct) / 100.0)
+    pool = _passing_pool(scale)
+
+    rng = random.Random(int(seed))
+
+    base_slots = _bar_slots(pattern, ppq)
+    # Which 16th indices the base pattern already occupies (for fill gaps).
+    occupied = set(s["idx"] for s in base_slots)
+    # Fills go ONLY into non-beat gaps (i % 4 != 0), so an extra ghost never
+    # lands on the kick - keeping the whole pattern locked around the beats.
+    empty_idx = [i for i in range(16) if i not in occupied and i % 4 != 0]
+
+    notes = []
+
+    def _humanize(nominal_tick, nominal_v):
+        v_jit = rng.uniform(-hv, hv) if hv > 0 else 0.0
+        t_jit = rng.randint(-ht, ht) if ht > 0 else 0
+        vel = max(0.02, min(1.0, nominal_v + v_jit))
+        t = max(0, nominal_tick + t_jit)
+        return t, vel
+
+    # --- base pattern (draw order fixed: bars outer, slots by index) --------- #
+    for bar in range(bars):
+        bar_start = bar * bar_ticks
+        for s in base_slots:
+            nominal_tick = bar_start + s["tick"]
+            nominal_v = ghost_v if s["role"] == "ghost" else accent_v
+            t, vel = _humanize(nominal_tick, nominal_v)
+            length = max(1, int(round(s["len"] * length_scale)))
+            notes.append({
+                "number": root_note,
+                "time": t,
+                "length": length,
+                "velocity": vel,
+                "nominal_time": nominal_tick,
+                "nominal_velocity": nominal_v,
+                "role": s["role"],
+                "ghost": s["role"] == "ghost",
+                "accent": s["role"] == "accent",
+                "on_beat": s["on_beat"],
+                "fill": False,
+            })
+
+    # --- fills (extra ghost 16ths in the empty slots) ------------------------ #
+    fill_len = max(1, int(round(step16 * length_scale)))
+    for bar in range(bars):
+        bar_start = bar * bar_ticks
+        for idx in empty_idx:
+            if rng.random() >= fill_p:
+                continue
+            # low-probability passing tone, else root; fills are always ghosts.
+            if pool and rng.random() < passing_prob:
+                number = root_note + rng.choice(pool)
+            else:
+                number = root_note
+            nominal_tick = bar_start + idx * step16
+            t, vel = _humanize(nominal_tick, ghost_v)
+            notes.append({
+                "number": number,
+                "time": t,
+                "length": fill_len,
+                "velocity": vel,
+                "nominal_time": nominal_tick,
+                "nominal_velocity": ghost_v,
+                "role": "ghost",
+                "ghost": True,
+                "accent": False,
+                "on_beat": (idx % 4 == 0),   # empties are never on-beat, but be safe
+                "fill": True,
+            })
+
+    notes.sort(key=lambda n: (n["time"], n["number"]))
+    return notes
+
+
+def expected_note_count(pattern, bars):
+    """Base note count (fill_density = 0) for a pattern - used by the tests."""
+    per_bar = {
+        "offbeat_8ths": 4,
+        "rolling_16ths": 16,
+        "gallop": 12,
+        "broken": 6,
+    }[pattern]
+    return per_bar * int(bars)
+
+
+# --------------------------------------------------------------------------- #
+# FL Studio dialog + apply glue (only runs inside FL)
+# --------------------------------------------------------------------------- #
+
+def createDialog():
+    """Build the ScriptDialog FL shows before running the script."""
+    form = flp.ScriptDialog(
+        "Rumble Bassline",
+        "Generate offbeat / rolling rumble-bass patterns that lock around a "
+        "4-on-the-floor kick. Notes avoid the beats (kick positions); on-beat "
+        "notes, when used, are ghosted under the kick.",
+    )
+    form.AddInputCombo("Root note", ",".join(NOTE_NAMES), 5)      # default F
+    form.AddInputCombo("Octave", ",".join(OCTAVE_LABELS), 1)     # default 1 -> F1
+    form.AddInputCombo("Scale", ",".join(SCALE_LABELS), 0)       # Minor
+    form.AddInputCombo("Pattern", ",".join(PATTERN_LABELS), 0)   # Offbeat 8ths
+    form.AddInputKnobInt("Bars", 2, 1, 8)
+    form.AddInputKnob("Note length %", 75, 10, 150)
+    form.AddInputKnobInt("Ghost velocity %", 35, 0, 60)
+    form.AddInputKnobInt("Accent velocity %", 95, 40, 100)
+    form.AddInputKnobInt("Humanize velocity +/-", 8, 0, 40)
+    form.AddInputKnobInt("Humanize timing +/- ticks", 3, 0, 5)
+    form.AddInputKnobInt("Fill density %", 20, 0, 100)
+    form.AddInputKnobInt("Seed", 1, 0, 9999)
+    return form
+
+
+def _selection_start_ticks():
+    """Timeline selection start (ticks) if a selection exists, else 0."""
+    try:
+        sel = flp.score.getTimelineSelection()   # (start, end) in ticks
+    except Exception:
+        return 0
+    try:
+        start, end = sel[0], sel[1]
+    except (TypeError, IndexError):
+        return 0
+    if end is not None and end > start and start >= 0:
+        return int(start)
+    return 0
+
+
+def apply(form):
+    """FL calls this with the filled-in dialog; write the pattern to the score."""
+    root = note_name_to_midi(
+        int(form.GetInputValue("Root note")),
+        OCTAVE_LABELS[int(form.GetInputValue("Octave"))],
+    )
+    scale = SCALE_KEYS[int(form.GetInputValue("Scale"))]
+    pattern = PATTERNS[int(form.GetInputValue("Pattern"))]
+
+    notes = generate_bassline(
+        root_note=root,
+        scale=scale,
+        pattern=pattern,
+        bars=int(form.GetInputValue("Bars")),
+        ppq=int(flp.score.PPQ),
+        note_length_pct=float(form.GetInputValue("Note length %")),
+        ghost_vel=float(form.GetInputValue("Ghost velocity %")),
+        accent_vel=float(form.GetInputValue("Accent velocity %")),
+        humanize_vel=float(form.GetInputValue("Humanize velocity +/-")),
+        humanize_ticks=int(form.GetInputValue("Humanize timing +/- ticks")),
+        fill_density=float(form.GetInputValue("Fill density %")),
+        seed=int(form.GetInputValue("Seed")),
+    )
+
+    start = _selection_start_ticks()
+    for nd in notes:
+        n = flp.Note()
+        n.number = int(nd["number"])
+        n.time = int(start + nd["time"])
+        n.length = int(nd["length"])
+        n.velocity = float(nd["velocity"])
+        flp.score.addNote(n)

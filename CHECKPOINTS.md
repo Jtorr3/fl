@@ -106,6 +106,19 @@
 - [ ] Spot-check each plugin GUI inside FL (OpenGL/DPI quirks aren't machine-testable).
 - [ ] Delete the orphaned GitHub repo Jtorr3/qeynos-vst-suite (my token lacks
       delete_repo scope). Also decide if Jtorr3/fl should be private (it is public).
+- [ ] **W1-RUMBLE-BASSLINE (shipped 2026-07-07): run the piano-roll script in FL.**
+      Copied to `Documents\Image-Line\FL Studio\Settings\Piano roll scripts\RumbleBassline.pyscript`
+      (alongside ComposeWithLLM). Offline gate passes 12/12 via a mock `flpianoroll`,
+      but FL's piano-roll script engine cannot be driven headless — so verify live:
+      open the Piano roll on a bass channel, **Tools → Scripting → Rumble Bassline**,
+      confirm the dialog shows all inputs (root/octave/scale/pattern/bars/lengths/
+      velocities/humanize/fills/seed), click OK, and check the generated notes sit
+      between the kicks (offbeats accented, on-beat notes ghosted). Try each pattern
+      (Offbeat 8ths / Rolling 16ths / Gallop / Broken). Notes APPEND (clear the roll
+      first for a fresh pattern) and start at the timeline selection if one is set.
+      If the script doesn't appear in the menu, FL may need a rescan / restart, or the
+      Documents redirect (OneDrive) may point elsewhere than FL's configured user data
+      folder — check FL's *File settings → user data folder* and copy it there.
 
 ## Toolchain note (informational — the loop handles it, but a fresh clone won't)
 - `tools/bin/` is gitignored, including `tools/bin/mingw64` (portable MinGW-w64
