@@ -1,0 +1,17 @@
+[package]
+name = "pluck"
+version = "0.1.0"
+edition = "2021"
+license = "ISC"
+description = "Qeynos PLUCK — Karplus-Strong strummer (6 sympathetic strings, chord/MIDI/key-detect tuning, audio-excited strum, modal body)"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+nih_plug = { workspace = true }
+nih_plug_egui = { workspace = true }
+suite-core = { path = "../../suite-core" }
+
+[dev-dependencies]
+suite-core = { path = "../../suite-core" }
