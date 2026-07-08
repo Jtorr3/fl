@@ -35,6 +35,10 @@ const HUM_REDRAW_MS: f32 = 45.0;
 const HUM_SMOOTH_MS: f32 = 130.0;
 /// Default frozen pitch before the first confident detect (A3).
 const DEFAULT_F0: f32 = 220.0;
+/// Confidence-gate hysteresis: once engaged, the gate only releases when the (median-filtered)
+/// confidence falls this far below the engage threshold, so a confidence hovering at the setting
+/// can't chatter the retune on/off frame-to-frame.
+const GATE_HYST: f32 = 0.12;
 /// Wet-path safety-clip knee (identity below, tanh above → |y| < 1).
 const CLIP_KNEE: f32 = 0.9;
 
@@ -365,12 +369,14 @@ impl RetunePitch {
         self.conf
     }
 
+    /// Push one input sample. Returns `true` on the samples where a fresh hop analysis ran (a new
+    /// per-hop f0 / confidence is available) so the caller can update hop-rate state exactly once.
     #[inline]
-    fn push(&mut self, x: f32) {
+    fn push(&mut self, x: f32) -> bool {
         let lp = self.aa.process(x).lp;
         self.decim_count += 1;
         if self.decim_count < self.decim {
-            return;
+            return false;
         }
         self.decim_count = 0;
         let n = self.ring.len();
@@ -395,7 +401,50 @@ impl RetunePitch {
                 }
                 self.f0 = median3(&self.med);
             }
+            return true;
         }
+        false
+    }
+}
+
+/// Confidence gate: median-of-3 (over analysis hops) + two-threshold hysteresis. The raw per-hop
+/// MPM confidence dips for a single frame on breathy material; feeding it straight into a single-
+/// threshold gate toggles the retune on/off at the ~21 ms hop rate — an audible gurgle (at Retune
+/// 0 it alternates ratio 1.0 ↔ full correction). The median rejects single-frame dips; the
+/// hysteresis keeps a confidence hovering at the threshold from chattering. Updated once per hop.
+struct ConfGate {
+    med: [f32; 3],
+    pos: usize,
+    open: bool,
+}
+impl ConfGate {
+    fn new() -> Self {
+        Self { med: [0.0; 3], pos: 0, open: false }
+    }
+    fn reset(&mut self) {
+        self.med = [0.0; 3];
+        self.pos = 0;
+        self.open = false;
+    }
+    /// Feed one raw per-hop confidence; returns the (possibly unchanged) gate state. `gate` is the
+    /// engage threshold, `hyst` the release margin below it.
+    fn update(&mut self, raw: f32, gate: f32, hyst: f32) -> bool {
+        self.med[self.pos] = raw;
+        self.pos = (self.pos + 1) % 3;
+        let c = median3(&self.med);
+        let lo = (gate - hyst).max(0.0);
+        if self.open {
+            if c < lo {
+                self.open = false;
+            }
+        } else if c >= gate {
+            self.open = true;
+        }
+        self.open
+    }
+    #[inline]
+    fn is_open(&self) -> bool {
+        self.open
     }
 }
 
@@ -416,6 +465,7 @@ pub struct VoxCore {
     settings: Settings,
 
     tracker: RetunePitch,
+    gate: ConfGate,
     shift_l: ShiftEngine,
     shift_r: ShiftEngine,
     dry_l: DelayLine,
@@ -472,6 +522,7 @@ impl VoxCore {
             sr,
             settings: d,
             tracker,
+            gate: ConfGate::new(),
             shift_l,
             shift_r,
             dry_l,
@@ -502,6 +553,7 @@ impl VoxCore {
 
     pub fn reset(&mut self) {
         self.tracker.reset();
+        self.gate.reset();
         self.shift_l.reset();
         self.shift_r.reset();
         self.dry_l.reset();
@@ -560,11 +612,16 @@ impl VoxCore {
 
         // Detect pitch on the mono sum.
         let mono = 0.5 * (in_l + in_r);
-        self.tracker.push(mono);
+        let new_hop = self.tracker.push(mono);
         let detected = self.tracker.f0().max(1.0e-3);
         let conf = self.tracker.confidence();
         let s = self.settings;
-        let pitched = conf >= s.conf_gate;
+        // Gate the retune through a median-3 + hysteresis stage (updated once per analysis hop),
+        // so a single-frame confidence dip on breathy material can't gurgle the correction on/off.
+        if new_hop {
+            self.gate.update(conf, s.conf_gate, GATE_HYST);
+        }
+        let pitched = self.gate.is_open();
 
         // Choose the target and the raw correction (cents).
         let (corr_base, target_hz, active) = if s.midi_mode {
@@ -667,6 +724,47 @@ mod tests {
         let f = 260.0f32; // ~C4 (261.63) minus a bit
         let snapped = nearest_scale_hz(f, 0, 0);
         assert!((snapped - 261.63).abs() < 1.0, "chromatic snap to C4, got {snapped}");
+    }
+
+    #[test]
+    fn conf_gate_ignores_single_frame_dip_but_follows_sustained_drop() {
+        let (gate, hyst) = (0.6f32, GATE_HYST);
+        let mut g = ConfGate::new();
+        // Sustained high confidence opens the gate.
+        for _ in 0..3 {
+            g.update(0.9, gate, hyst);
+        }
+        assert!(g.is_open(), "gate should open on sustained high confidence");
+        // A single-frame dip to ~0 must NOT close it (median-3 rejects the lone outlier).
+        assert!(g.update(0.0, gate, hyst), "single-frame confidence dip toggled the gate");
+        g.update(0.9, gate, hyst); // recover
+        assert!(g.is_open());
+        // A sustained drop below the release threshold (gate−hyst) DOES close it.
+        for _ in 0..3 {
+            g.update(0.1, gate, hyst);
+        }
+        assert!(!g.is_open(), "sustained low confidence should close the gate");
+    }
+
+    #[test]
+    fn conf_gate_hysteresis_holds_in_band() {
+        let (gate, hyst) = (0.6f32, GATE_HYST);
+        let mut g = ConfGate::new();
+        for _ in 0..3 {
+            g.update(0.65, gate, hyst);
+        }
+        assert!(g.is_open());
+        // A value between the release (0.48) and engage (0.60) thresholds must keep it open.
+        for _ in 0..3 {
+            g.update(0.55, gate, hyst);
+        }
+        assert!(g.is_open(), "confidence inside the hysteresis band should hold the gate open");
+        // From a closed start the same in-band value must NOT open it.
+        let mut g2 = ConfGate::new();
+        for _ in 0..3 {
+            g2.update(0.55, gate, hyst);
+        }
+        assert!(!g2.is_open(), "in-band value should not engage a closed gate");
     }
 
     #[test]

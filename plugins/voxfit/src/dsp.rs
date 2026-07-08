@@ -59,6 +59,12 @@ const MAX_HARSH_CUT_DB: f32 = 18.0;
 /// Wet-path safety-clip knee (identity below, tanh above → |y| < 1).
 const CLIP_KNEE: f32 = 0.9;
 
+/// Effective formant ratio within this of unity → bypass the phase vocoder (it is an audible-
+/// but-pointless identity there, nulling only ~−15 dB and smearing transients).
+const FORMANT_BYPASS_EPS: f32 = 1.0e-4;
+/// Crossfade time (ms) between the PV output and the latency-matched dry when the bypass toggles.
+const PV_XFADE_MS: f32 = 15.0;
+
 // ---------------------------------------------------------------------------
 // Small helpers
 // ---------------------------------------------------------------------------
@@ -373,6 +379,11 @@ pub struct VoxFitCore {
     eq_tilt: OnePole,
     eq_prox: OnePole,
     eq_air: OnePole,
+
+    // PV-bypass crossfade: 0 = full phase-vocoder output into the character chain, 1 = the
+    // latency-matched dry (bypass). Ramps by `pv_xf_step` per sample when the target flips.
+    pv_bypass: f32,
+    pv_xf_step: f32,
 }
 
 impl VoxFitCore {
@@ -419,6 +430,8 @@ impl VoxFitCore {
             eq_tilt: mk_eq(d.tilt_db),
             eq_prox: mk_eq(d.prox_db),
             eq_air: mk_eq(d.air_db),
+            pv_bypass: if (d.formant_ratio - 1.0).abs() < FORMANT_BYPASS_EPS { 1.0 } else { 0.0 },
+            pv_xf_step: 1.0 / (PV_XFADE_MS * 0.001 * sr).max(1.0),
         };
         core.strip_l.configure_eq(d.tilt_db, d.prox_db, d.air_db, sr);
         core.strip_r.configure_eq(d.tilt_db, d.prox_db, d.air_db, sr);
@@ -447,6 +460,8 @@ impl VoxFitCore {
         self.eq_tilt.reset(self.settings.tilt_db);
         self.eq_prox.reset(self.settings.prox_db);
         self.eq_air.reset(self.settings.air_db);
+        self.pv_bypass =
+            if (self.settings.formant_ratio - 1.0).abs() < FORMANT_BYPASS_EPS { 1.0 } else { 0.0 };
         self.strip_l
             .configure_eq(self.settings.tilt_db, self.settings.prox_db, self.settings.air_db, self.sr);
         self.strip_r
@@ -454,7 +469,12 @@ impl VoxFitCore {
     }
 
     /// Latch a settings snapshot and step the block-rate EQ smoothers / reconfigure the shelves.
-    pub fn configure(&mut self, s: &Settings) {
+    /// `block_size` is the number of samples this configure covers (the host buffer length): the
+    /// EQ smoothers are stepped **once per block**, so their one-pole coefficient is derived
+    /// against the *block* rate (`sr / block_size`) — giving a ~`SMOOTH_MS` settle in real time
+    /// regardless of buffer size. (Previously the coefficient was cut for the *sample* rate but
+    /// only advanced once per block, making tone knobs / preset loads creep in over seconds.)
+    pub fn configure(&mut self, s: &Settings, block_size: usize) {
         self.settings = *s;
         self.shift_l.set_envelope_preserve(true);
         self.shift_r.set_envelope_preserve(true);
@@ -469,6 +489,11 @@ impl VoxFitCore {
         self.sm_mix.set(s.mix);
         self.sm_out.set(s.out_gain);
 
+        // Re-derive the EQ smoother coefficients for the block cadence, then take one step.
+        let block_rate = (self.sr / block_size.max(1) as f32).max(1.0);
+        self.eq_tilt.set_time(SMOOTH_MS, block_rate);
+        self.eq_prox.set_time(SMOOTH_MS, block_rate);
+        self.eq_air.set_time(SMOOTH_MS, block_rate);
         let tilt = self.eq_tilt.process(s.tilt_db);
         let prox = self.eq_prox.process(s.prox_db);
         let air = self.eq_air.process(s.air_db);
@@ -488,19 +513,35 @@ impl VoxFitCore {
         let out_g = self.sm_out.next();
         let listen = self.settings.deess_listen;
 
-        // Pitch-independent formant shift.
+        // Pitch-independent formant shift. The engine is fed **every** sample even while the
+        // bypass is engaged, so its phase-vocoder state stays warm and re-engaging is click-free.
         self.shift_l.set_formant_ratio(formant);
         self.shift_r.set_formant_ratio(formant);
         let sl = self.shift_l.process(in_l);
         let sr = self.shift_r.process(in_r);
 
-        // Character chain.
-        let wl = self.strip_l.process(sl, deess_thresh, deess_amount, listen, harsh_thresh, harsh_amount);
-        let wr = self.strip_r.process(sr, deess_thresh, deess_amount, listen, harsh_thresh, harsh_amount);
-
-        // Latency-matched dry.
+        // Latency-matched dry (also the character-chain source when the PV is bypassed — the dry
+        // line is already delayed by exactly the ShiftEngine latency, so no extra delay needed).
         let dl = self.dry_l.process(in_l);
         let dr = self.dry_r.process(in_r);
+
+        // PV bypass: at unity effective formant the phase vocoder is a lossy identity (nulls only
+        // ~−15 dB, smears transients), so a de-ess/tilt/air-only use still pays for PV coloration.
+        // Crossfade the character-chain input between the PV output and the latency-matched dry;
+        // PDC and the dry mix path are unchanged.
+        let bypass_target =
+            if (self.settings.formant_ratio - 1.0).abs() < FORMANT_BYPASS_EPS { 1.0 } else { 0.0 };
+        if self.pv_bypass < bypass_target {
+            self.pv_bypass = (self.pv_bypass + self.pv_xf_step).min(bypass_target);
+        } else if self.pv_bypass > bypass_target {
+            self.pv_bypass = (self.pv_bypass - self.pv_xf_step).max(bypass_target);
+        }
+        let src_l = sl + self.pv_bypass * (dl - sl);
+        let src_r = sr + self.pv_bypass * (dr - sr);
+
+        // Character chain.
+        let wl = self.strip_l.process(src_l, deess_thresh, deess_amount, listen, harsh_thresh, harsh_amount);
+        let wr = self.strip_r.process(src_r, deess_thresh, deess_amount, listen, harsh_thresh, harsh_amount);
 
         // Mix (mix=0 → latency-matched dry, exact) + out trim, safety-clipped.
         let out_l = safety_clip(out_g * ((1.0 - mix) * dl + mix * wl));
@@ -510,10 +551,10 @@ impl VoxFitCore {
 
     /// Offline convenience: process stereo slices in place with fixed settings.
     pub fn process_stereo(&mut self, left: &mut [f32], right: &mut [f32], s: &Settings) {
-        self.configure(s);
-        self.reset();
-        self.configure(s);
         let n = left.len().min(right.len());
+        self.configure(s, n.max(1));
+        self.reset();
+        self.configure(s, n.max(1));
         for i in 0..n {
             let (l, r) = self.process_sample(left[i], right[i]);
             left[i] = l;
@@ -523,9 +564,10 @@ impl VoxFitCore {
 
     /// Offline mono convenience: duplicate to stereo, process, return the L channel.
     pub fn process_mono(&mut self, buf: &mut [f32], s: &Settings) {
-        self.configure(s);
+        let n = buf.len().max(1);
+        self.configure(s, n);
         self.reset();
-        self.configure(s);
+        self.configure(s, n);
         for x in buf.iter_mut() {
             let (l, _r) = self.process_sample(*x, *x);
             *x = l;
@@ -574,9 +616,9 @@ mod tests {
         c.air_db = 4.0;
         c.mix = 0.0; // dry
         let s = c.resolve();
-        core.configure(&s);
+        core.configure(&s, 512);
         core.reset();
-        core.configure(&s);
+        core.configure(&s, 512);
         let input = suite_core::testsig::synth_vocal(150.0, (sr * 0.5) as usize, sr);
         let lat = MAIN_FFT;
         let mut max_err = 0.0f32;
@@ -587,6 +629,109 @@ mod tests {
             }
         }
         assert!(max_err < 1.0e-5, "mix=0 not equal to latency-delayed dry: {max_err}");
+    }
+
+    #[test]
+    fn tone_smoother_settles_in_block_time() {
+        // Drive configure() at a realistic 512-sample / 48 kHz block cadence with a step change in
+        // tilt and assert the smoothed EQ target reaches >90% of the step within ~30 ms of block-
+        // time (a handful of blocks) — not the seconds the mis-scaled per-sample coefficient gave.
+        let sr = 48_000.0f32;
+        let block = 512usize;
+        let block_ms = 1000.0 * block as f32 / sr;
+        let mut core = VoxFitCore::new(sr);
+        core.reset(); // EQ smoothers jump to the default (tilt 0)
+        let mut c = Controls::default();
+        c.tilt_db = 6.0;
+        let s = c.resolve();
+        let target = s.tilt_db;
+        let mut settle_ms = f32::INFINITY;
+        for b in 1..=64 {
+            core.configure(&s, block);
+            if core.eq_tilt.value() >= 0.9 * target {
+                settle_ms = b as f32 * block_ms;
+                break;
+            }
+        }
+        assert!(
+            settle_ms <= 35.0,
+            "tilt smoother reached 90% in {settle_ms} ms of block-time (want ~30 ms / a few blocks, not seconds)"
+        );
+    }
+
+    #[test]
+    fn unity_formant_bypasses_pv_and_nulls_dry() {
+        // At formant = 0 st (unity) + all character neutral + mix = 1, the wet path should bypass
+        // the phase vocoder and null against the latency-delayed dry far better than the PV
+        // identity (~−15 dB). Assert the residual is well below −40 dB.
+        let sr = 48_000.0f32;
+        let mut core = VoxFitCore::new(sr);
+        let s = Controls::default().resolve(); // formant 0, neutral, mix 1
+        core.configure(&s, 512);
+        core.reset();
+        core.configure(&s, 512);
+        let input = suite_core::testsig::synth_vocal(150.0, (sr * 0.7) as usize, sr);
+        let lat = MAIN_FFT;
+        let start = lat + 4096;
+        let mut num = 0.0f64;
+        let mut den = 0.0f64;
+        for (i, &x) in input.iter().enumerate() {
+            let (l, _r) = core.process_sample(x, x);
+            if i >= start {
+                let d = input[i - lat];
+                let e = (l - d) as f64;
+                num += e * e;
+                den += (d as f64) * (d as f64);
+            }
+        }
+        let residual_db = 10.0 * (num / den.max(1e-20)).log10();
+        assert!(
+            residual_db < -40.0,
+            "unity-formant wet path residual {residual_db:.1} dB not below −40 dB (PV bypass failed)"
+        );
+    }
+
+    #[test]
+    fn pv_bypass_toggle_is_click_free() {
+        // Toggling the formant between unity (bypass) and a shift (PV engaged) must crossfade —
+        // no full-scale single-sample discontinuity. Feed a steady tone and switch mid-stream.
+        let sr = 48_000.0f32;
+        let mut core = VoxFitCore::new(sr);
+        let neutral = Controls::default().resolve(); // unity → bypass
+        let shifted = {
+            let mut c = Controls::default();
+            c.formant_st = 4.0;
+            c.resolve()
+        };
+        let n = 12_288usize;
+        core.configure(&neutral, 512);
+        core.reset();
+        let mut prev = 0.0f32;
+        let mut max_jump = 0.0f32;
+        for i in 0..n {
+            let s = if i < n / 2 {
+                &neutral
+            } else if i < 3 * n / 4 {
+                &shifted
+            } else {
+                &neutral
+            };
+            if i % 512 == 0 {
+                core.configure(s, 512);
+            }
+            let x = 0.2 * (std::f32::consts::TAU * 220.0 * i as f32 / sr).sin();
+            let (l, _r) = core.process_sample(x, x);
+            if i > MAIN_FFT + 1024 {
+                max_jump = max_jump.max((l - prev).abs());
+            }
+            prev = l;
+        }
+        // A 220 Hz, 0.2-amp sine steps ≲0.007/sample; a missing crossfade would swap PV↔dry
+        // instantly (a jump of order 0.1–0.4). Catch that without false-tripping on the tone.
+        assert!(
+            max_jump < 0.1,
+            "PV bypass toggle produced a {max_jump:.3} sample jump (click — crossfade missing)"
+        );
     }
 
     #[test]

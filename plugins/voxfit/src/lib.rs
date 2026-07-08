@@ -312,9 +312,9 @@ impl Plugin for VoxFit {
         let _ftz = suite_core::dsp::ScopedFtz::enable();
 
         let s = self.params.controls().resolve();
-        self.core.configure(&s);
-
         let num_samples = buffer.samples();
+        self.core.configure(&s, num_samples);
+
         let main = buffer.as_slice();
         let num_main = main.len();
         if num_main == 0 {
