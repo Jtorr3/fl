@@ -609,6 +609,141 @@ fn stopped_transport_free_runs_at_tempo() {
     );
 }
 
+// ---------------------------------------------------------------------------
+// Regression (SOUND-PASS): slice edges must be click-free even when the grain's gate
+// outlasts the slice. A coarse-step / fine-grid, gate = 1.0 pattern makes each step's slice
+// SHORTER than the step, so the read exhausts the slice mid-grain. The old engine froze
+// `read_pos` on the slice's last sample and held it — a DC pedestal AND a discontinuity into
+// the freeze (an audible slice-edge CLICK, worst when the frozen sample sat on a transient).
+// Capping the grain to its slice length makes the raised-cosine fade-out land on the boundary
+// instead. Driven with a real break (sharp transients) so any freeze lands on steep content.
+// ---------------------------------------------------------------------------
+#[test]
+fn slice_boundaries_are_click_free() {
+    let bpm = 140.0;
+    let steps = 16usize; // coarse steps ...
+    let cycle = bars_to_samples(2.0, bpm);
+    let total = 4 * cycle;
+    // Smooth chirp source (180→780 Hz). A regression for *synthesis* clicks must use a source
+    // with no discontinuities of its own — driven with a transient break, the break's own drum
+    // hits trip the |Δ|-outlier detector (~100 hits over the render) and the slicer faithfully
+    // reproduces them, so the metric can't separate a real slice-edge click from the material.
+    // Against a continuous tone, any |Δ| outlier in the wet is unambiguously the engine's fault
+    // (a read-freeze pedestal, an unfaded slice edge, or a retrigger discontinuity).
+    let mut inbuf = vec![0.0f32; total];
+    let mut ph = 0.0f64;
+    for (n, x) in inbuf.iter_mut().enumerate() {
+        let f = 180.0 + 600.0 * (n as f64 / total as f64);
+        ph += 2.0 * std::f64::consts::PI * f / SR as f64;
+        *x = 0.6 * ph.sin() as f32;
+    }
+    let input = &inbuf[..];
+
+    let mut grid = straight_grid(steps);
+    for s in grid.iter_mut().take(steps) {
+        s.gate = 1.0; // full-step gate → the read runs out of slice well before the step ends
+    }
+    let s = Settings {
+        slice_mode: SliceMode::Grid,
+        grid_div: GridDiv::ThirtySecond, // ... vs a fine 64-slice grid → slice ≈ 1/4 of a step
+        steps,
+        swing: 0.0,
+        mix: 1.0,
+        out_db: 0.0,
+        ..Settings::default()
+    };
+    let (l, _r) = render(&s, &grid, input, bpm);
+
+    // Warm region (after the first capture cycle).
+    let w = &l[cycle.min(l.len())..];
+    assert!(w.len() > 16, "render too short");
+
+    // Per-sample |Δ| vs a local 50 ms RMS-of-Δ floor (mirrors tools/audition.py's click
+    // detector). A clamp-hold freeze on a transient spikes this; a clean fade keeps it bounded.
+    let d: Vec<f32> = w.windows(2).map(|p| (p[1] - p[0]).abs()).collect();
+    let n = d.len();
+    let mut ps = vec![0.0f64; n + 1];
+    for i in 0..n {
+        ps[i + 1] = ps[i] + (d[i] as f64) * (d[i] as f64);
+    }
+    let win = (0.05 * SR) as usize;
+    let mut audible_clicks = 0usize;
+    let mut worst = 0.0f32;
+    for i in win..n.saturating_sub(win) {
+        let ms = ((ps[i + win] - ps[i - win]) / (2 * win) as f64) as f32;
+        let floor = ms.sqrt() + 1e-9;
+        let ratio = d[i] / floor;
+        // "Audible": a real jump (|Δ| > 0.02 ≈ −34 dBFS) that is also a local outlier.
+        if d[i] > 0.02 && ratio > 8.0 {
+            audible_clicks += 1;
+            worst = worst.max(ratio);
+        }
+    }
+    assert_eq!(
+        audible_clicks, 0,
+        "slice-edge clicks: {audible_clicks} audible discontinuities (worst ratio {worst:.1}) — \
+         the read froze on a slice edge instead of fading out"
+    );
+
+    // The clamp-hold also left a DC pedestal (it held a nonzero last sample for most of each
+    // step). A clean fade-out returns to zero, so the mean stays near zero.
+    let dc = w.iter().sum::<f32>() / w.len() as f32;
+    assert!(dc.abs() < 5e-3, "DC pedestal {dc:.4} — the read froze on the slice edge");
+}
+
+// ---------------------------------------------------------------------------
+// SOUND-PASS audition render (permanent infra, `#[ignore]`d in normal runs).
+// Renders every factory preset AND the default project state over a genre-right
+// musical source — an amen-style break at 140 BPM, driven through a rolling
+// FakeTransport so the internal 2-bar latch fires each pattern wrap and the
+// step sequencer actually chops — into
+// renders/_audition/CLEAVE/<QVS_AUDITION_DIR or "before">/<preset>.wav.
+// Analyzed offline by tools/audition.py (watch the CLICK count at slice edges).
+// ---------------------------------------------------------------------------
+#[test]
+#[ignore]
+fn audition_render_musical_sources() {
+    let bpm = 140.0;
+    let subdir = std::env::var("QVS_AUDITION_DIR").unwrap_or_else(|_| "before".into());
+
+    // Genre-right source: an amen-style break at 140 BPM (KAS:ST transients /
+    // Cynthoni break-chops reference bar). Tile it so the rolling transport runs
+    // through several 2-bar pattern cycles (the fixed short-loop latch path and the
+    // internal on_wrap latch both exercise; the first cycle only warms the buffer).
+    let one = testsig::synth_break(bpm as f32, 4, SR); // 4 bars = 2 pattern cycles
+    let mut input = Vec::with_capacity(one.len() * 2);
+    for _ in 0..2 {
+        input.extend_from_slice(&one); // 8 bars = 4 pattern cycles
+    }
+    let cycle = bars_to_samples(2.0, bpm); // one pattern (2-bar) cycle, in samples
+
+    // Every factory preset plus the default project state (labelled "default").
+    let presets = load_all(PRESET_JSON);
+    let mut jobs: Vec<(String, Settings, Vec<StepData>)> = presets
+        .iter()
+        .map(|p| {
+            let fname = p.name.to_lowercase().replace([' ', '&', '-', '/', '·'], "_");
+            (fname, settings_from_preset(p), grid_from_preset(p).to_vec())
+        })
+        .collect();
+    // Default project state: Settings::default() + the Straight Rechop starter grid a
+    // fresh instance ships with (see CleaveParams::default → build_pattern(0, steps, 1)).
+    let d = Settings::default();
+    jobs.push((
+        "default".into(),
+        d,
+        crate::dsp::build_pattern(0, d.steps, 1).to_vec(),
+    ));
+
+    for (fname, s, grid) in &jobs {
+        let (l, _r) = render(s, grid, &input, bpm);
+        // Skip the first pattern cycle (capture buffer warm-up → silent), write the rest.
+        let warm = &l[cycle.min(l.len())..];
+        let path = render_path("_audition/CLEAVE", &format!("{subdir}/{fname}"));
+        write_wav(&path, warm, SR as u32).expect("write audition render");
+    }
+}
+
 // --------------------------------------------------------------------------
 // Regression (HARD CHECKPOINT 3, BLOCKER): the Transient slicer must never index past its
 // slice_starts array on a busy snapshot. A dense onset train (≥128 onsets at the 30 ms

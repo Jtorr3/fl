@@ -193,6 +193,7 @@ struct Grain {
     dur: u32,  // amp-envelope length (samples)
     fade: u32, // fade in/out length (samples)
     level: f32,
+    buf: usize, // which ping-pong playback buffer this grain reads (0/1)
 }
 
 /// A pending roll schedule (sub-onsets after the first, tiling the current step).
@@ -222,8 +223,15 @@ pub struct CleaveCore {
     wpos: usize,
 
     // --- latched playback snapshot (frozen at each pattern wrap) ---
-    play_l: Vec<f32>,
-    play_r: Vec<f32>,
+    // Double-buffered (ping-pong): a wrap latches the fresh snapshot into the *inactive*
+    // buffer and flips `cur_buf`, so grain voices spawned in the previous cycle keep reading
+    // the buffer they started on and finish cleanly. Overwriting the live buffer under an
+    // in-flight voice was a hard discontinuity — a CLICK at every 2-bar wrap. Grains are ≤ 1
+    // step long and a wrap resets the roll schedule, so no voice ever outlives one flip; two
+    // buffers suffice.
+    play_l: [Vec<f32>; 2],
+    play_r: [Vec<f32>; 2],
+    cur_buf: usize,
     pb_len: usize,
 
     // --- slices over the playback snapshot ---
@@ -288,8 +296,9 @@ impl CleaveCore {
             ring_r: vec![0.0; cap],
             ring_cap: cap,
             wpos: 0,
-            play_l: vec![0.0; cap],
-            play_r: vec![0.0; cap],
+            play_l: [vec![0.0; cap], vec![0.0; cap]],
+            play_r: [vec![0.0; cap], vec![0.0; cap]],
+            cur_buf: 0,
             pb_len: 0,
             slice_starts: [0; MAX_SLICES + 1],
             slice_count: 0,
@@ -326,12 +335,17 @@ impl CleaveCore {
         for v in self.ring_r.iter_mut() {
             *v = 0.0;
         }
-        for v in self.play_l.iter_mut() {
-            *v = 0.0;
+        for b in self.play_l.iter_mut() {
+            for v in b.iter_mut() {
+                *v = 0.0;
+            }
         }
-        for v in self.play_r.iter_mut() {
-            *v = 0.0;
+        for b in self.play_r.iter_mut() {
+            for v in b.iter_mut() {
+                *v = 0.0;
+            }
         }
+        self.cur_buf = 0;
         self.wpos = 0;
         self.pb_len = 0;
         self.slice_count = 0;
@@ -516,13 +530,30 @@ impl CleaveCore {
                 continue;
             }
             let env = grain_env(v.age, v.dur, v.fade) * v.level;
-            wl += interp(&self.play_l, self.pb_len, v.read_pos) * env;
-            wr += interp(&self.play_r, self.pb_len, v.read_pos) * env;
+            wl += interp(&self.play_l[v.buf], self.pb_len, v.read_pos) * env;
+            wr += interp(&self.play_r[v.buf], self.pb_len, v.read_pos) * env;
             v.read_pos += v.step;
+            let mut at_edge = false;
             if v.read_pos < v.lo {
                 v.read_pos = v.lo;
+                at_edge = true;
             } else if v.read_pos > v.hi {
                 v.read_pos = v.hi;
+                at_edge = true;
+            }
+            if at_edge {
+                // The read reached the slice boundary. Ring the voice down with its own
+                // raised-cosine fade-out from here rather than freezing `read_pos` on the edge
+                // sample under a full-level envelope — that freeze was a DC pedestal plus a
+                // discontinuity into the freeze (the slice-edge CLICK). `dur` is normally
+                // pre-capped to the slice length in `trigger_step`, but a fractional step can
+                // still overshoot the bound by up to one sample; forcing the fade-out here
+                // guarantees no voice ever freezes. Held edge sample × a raised-cosine ramp to
+                // zero (which starts at unity slope-free) is click-free.
+                let fade_start = v.dur.saturating_sub(v.fade);
+                if v.age < fade_start {
+                    v.age = fade_start;
+                }
             }
             v.age += 1;
             if v.age >= v.dur {
@@ -560,14 +591,17 @@ impl CleaveCore {
             0
         };
         self.pb_len = pb_len.min(self.ring_cap);
-        // Copy the most recent pb_len samples ending at the write head into play_*.
+        // Ping-pong: latch into the *inactive* buffer and flip, so voices still reading the
+        // previous snapshot are never yanked out from under (the per-wrap click).
+        let target = 1 - self.cur_buf;
         let n = self.pb_len;
         for i in 0..n {
             // sample i counts forward from (wpos - n) modulo cap.
             let idx = (self.wpos + self.ring_cap - n + i) % self.ring_cap;
-            self.play_l[i] = self.ring_l[idx];
-            self.play_r[i] = self.ring_r[idx];
+            self.play_l[target][i] = self.ring_l[idx];
+            self.play_r[target][i] = self.ring_r[idx];
         }
+        self.cur_buf = target;
         self.slice_buffer();
     }
 
@@ -609,6 +643,7 @@ impl CleaveCore {
         // spectrum of the frame that *ended* ~fft_size samples earlier.
         let prev_mag = &mut self.prev_mag;
         let flux = &mut self.flux;
+        let cur = self.cur_buf;
         let mut cb = |spec: &mut [Complex<f32>]| {
             if frame < max_frames {
                 let mut f = 0.0f32;
@@ -625,7 +660,7 @@ impl CleaveCore {
             frame += 1;
         };
         for i in 0..n {
-            let mono = 0.5 * (self.play_l[i] + self.play_r[i]);
+            let mono = 0.5 * (self.play_l[cur][i] + self.play_r[cur][i]);
             self.stft.process(mono, &mut cb);
         }
         self.flux_len = frame.min(max_frames);
@@ -701,7 +736,8 @@ impl CleaveCore {
     fn backtrack_zero_cross(&self, s: usize) -> usize {
         let win = (0.010 * self.sr) as usize;
         let lo = s.saturating_sub(win);
-        let mono = |i: usize| 0.5 * (self.play_l[i] + self.play_r[i]);
+        let cur = self.cur_buf;
+        let mono = |i: usize| 0.5 * (self.play_l[cur][i] + self.play_r[cur][i]);
         let mut i = s.min(self.pb_len.saturating_sub(1));
         while i > lo && i > 0 {
             let a = mono(i - 1);
@@ -761,10 +797,19 @@ impl CleaveCore {
         let roll = sd.roll.clamp(1, 4) as u32;
         let sub_samps = (step_samps / roll).max(1);
         let gate = sd.gate.clamp(0.02, 1.0);
-        let dur = ((sub_samps as f32) * gate).round().max(1.0) as u32;
-        let fade = ((FADE_MS * 0.001 * self.sr) as u32).clamp(1, dur / 2 + 1);
         let ratio = 2.0f32.powf(sd.pitch.clamp(-12, 12) as f32 / 12.0);
         let step_inc = if sd.reverse { -ratio } else { ratio };
+        // Grain length = gate·step, but capped to the number of samples the read actually
+        // spends inside the slice ((hi-lo)/ratio). Without the cap, a long gate or a pitched-up
+        // read exhausts the slice mid-grain; the old code then froze `read_pos` at the slice
+        // edge and held that last sample as a constant — a DC pedestal *and* a discontinuity
+        // into the freeze (the slice-edge CLICK, worst at gate=1.0 / high step counts). Capping
+        // `dur` to the slice makes the normal raised-cosine fade-out land on the slice boundary,
+        // so the grain fades to zero exactly as the slice ends: click-free, no DC hold.
+        let gate_dur = ((sub_samps as f32) * gate).round().max(1.0) as u32;
+        let slice_samps = ((hi - lo).max(1.0) / ratio).floor().max(1.0) as u32;
+        let dur = gate_dur.min(slice_samps);
+        let fade = ((FADE_MS * 0.001 * self.sr) as u32).clamp(1, dur / 2 + 1);
         let level = sd.level.clamp(0.0, 1.0);
 
         // First sub-onset now.
@@ -833,6 +878,10 @@ impl CleaveCore {
             dur,
             fade,
             level,
+            // Read the currently-latched snapshot. A wrap flips `cur_buf` and clears the roll
+            // schedule, so every grain (step-onset or roll sub-onset) is spawned against the
+            // live buffer and outlives at most that one buffer generation.
+            buf: self.cur_buf,
         };
     }
 }
@@ -850,9 +899,10 @@ impl CleaveCore {
     ) -> (usize, usize) {
         let n = mono.len().min(self.ring_cap);
         self.pb_len = n;
+        let cur = self.cur_buf;
         for i in 0..n {
-            self.play_l[i] = mono[i];
-            self.play_r[i] = mono[i];
+            self.play_l[cur][i] = mono[i];
+            self.play_r[cur][i] = mono[i];
         }
         self.s.slice_mode = mode;
         self.s.sensitivity = sensitivity;
