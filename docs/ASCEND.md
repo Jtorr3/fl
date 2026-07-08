@@ -1,5 +1,7 @@
 # ASCEND — tension generator
 
+## What It Is
+
 A MIDI / **transport instrument** that builds risers, downlifters and swells locked to the song
 grid. ASCEND reads the host transport, counts down to the next N-bar boundary, and runs **one
 master tension envelope** across that countdown. The envelope simultaneously drives four things —
@@ -8,6 +10,8 @@ a filter sweep, a pitch rise, a stereo width bloom and a volume swell — over t
 impact and auto-cuts to silence, then re-arms for the next boundary. It works standalone too: with
 the transport stopped a manual **TRIGGER** (or a MIDI note) runs the same envelope over a
 time-based length.
+
+## Signal Flow
 
 ```
 host transport (tempo, bar position)
@@ -92,31 +96,46 @@ the impact hits at the start of the fall. With **Key Track** on, the played note
 
 ## Controls
 
-| Control | Range | What it does |
-|---|---|---|
-| **Key** | C … B | Root pitch class of the tonal stack |
-| **Octave** | 0 – 6 | Root octave (C2 ≈ 65 Hz by default) |
-| **Sync Target** | 8 / 16 / 32 / Custom | Countdown window length |
-| **Custom Bars** | 1 – 64 bar | Window length when Sync = Custom |
-| **Curve** | 0 – 1 (exp / lin / log) | Tension envelope shape morph |
-| **Noise/Tone** | 0 – 100 % | Balance: 0 = all noise, 1 = all tonal |
-| **Noise Color** | 0 – 100 % | White ↔ pink noise |
-| **Saw/Sine** | 0 – 100 % | Tonal oscillator waveshape blend |
-| **Filter Start** | 20 – 18 k Hz | SVF cutoff at the start of the countdown |
-| **Filter End** | 20 – 18 k Hz | SVF cutoff at the boundary |
-| **Pitch Rise** | 0 – 24 st | Semitone rise applied to the tonal stack at full tension |
-| **Width Bloom** | 0 – 100 % | Maximum stereo width at full tension |
-| **Impact** | on / off | Fire the embedded boom at the boundary |
-| **Impact Level** | 0 – 100 % | Impact loudness |
-| **Auto-Cut** | on / off | Gate the sources to silence at the boundary |
-| **Downlifter** | on / off | Reverse the envelope (fall away after the boundary) |
-| **Free Length** | 0.1 – 30 s | Envelope length when triggered with the transport stopped |
-| **Level** | −24 … +6 dB | Output trim |
-| **Key Track** | on / off | Root follows the last MIDI note |
-| **Trigger** | momentary | Manually run the envelope (free-run) |
+- **Key** — root pitch class of the tonal stack, C … B.
+- **Octave** — root octave, 0–6 (C2 ≈ 65 Hz by default).
+- **Sync Target** — countdown window length: 8 / 16 / 32 bars or Custom.
+- **Custom Bars** — window length when Sync Target = Custom, 1–64 bar.
+- **Curve** — tension-envelope shape morph, 0–1 (0 = exponential slow-start, 0.5 = linear,
+  1 = logarithmic fast-start plateau).
+- **Noise/Tone** — balance between the two sources, 0–100 % (0 = all noise, 100 % = all tonal).
+- **Noise Color** — white ↔ pink noise blend, 0–100 %.
+- **Saw/Sine** — tonal oscillator waveshape blend, 0–100 %.
+- **Filter Start** — SVF cutoff at the start of the countdown, 20 Hz – 18 kHz (dark end).
+- **Filter End** — SVF cutoff at the boundary, 20 Hz – 18 kHz (open end).
+- **Pitch Rise** — semitone rise applied to the tonal stack at full tension, 0–24 st.
+- **Width Bloom** — maximum stereo width reached at full tension, 0–100 %.
+- **Impact** — on/off. Fire the embedded low boom at the boundary.
+- **Impact Level** — loudness of that impact, 0–100 %.
+- **Auto-Cut** — on/off. Gate the sources to silence at the boundary (the drop-out moment).
+- **Downlifter** — on/off. Reverse the envelope so it falls away *after* the boundary.
+- **Free Length** — envelope length when triggered with the transport stopped, 0.1–30 s.
+- **Level** — output trim, −24 … +6 dB.
+- **Key Track** — on/off. Root follows the last played MIDI note.
+- **Trigger** — momentary button to manually run the envelope in free-run (also automatable).
 
 Stereo instrument, **zero latency**. A live **countdown** readout on the GUI shows the bars
 remaining until the next boundary.
+
+## Recipes
+
+1. **8-Bar Warehouse Riser** — load *Riser 8 Dark*: Key C, Octave 2, Sync Target 8 bars,
+   Curve 0.35 (exp), Noise/Tone ~40 %, Filter Start 200 Hz, Filter End 12 kHz, Pitch Rise 12 st,
+   Width Bloom 70 %, Impact on, Auto-Cut on. An explosive-finish build into the drop of a
+   dark-techno track — the filter and pitch climb together, then everything cuts for the boom.
+2. **16-Bar Cathedral Build** — from *Riser 16 Wide* / *16-Bar Cathedral*: Sync Target 16 bars,
+   Curve 0.65–0.7 (log), Key G, Noise/Tone 55 %, Width Bloom 90 %, Pitch Rise 10 st. A long,
+   patient atmospheric-DnB swell that opens wide before the switch-up.
+3. **Downlifter Release** — from *Downlifter 8*: Downlifter on, Sync Target 8 bars, Impact on,
+   Impact Level 70 %, Filter Start 12 kHz, Filter End 300 Hz. Fires the impact on the drop, then
+   the tension *falls away* (bright→dark, wide→narrow) as the section breathes out after it.
+4. **Free-Run Noise Swell** — from *Noise Swell Short*: transport stopped, Noise/Tone 0 % (all
+   noise), Free Length ~4 s, Curve 0.5, then hit **Trigger** (or send a MIDI note) to fire a
+   one-shot white-wind riser into a fill — no host transport required.
 
 ## Presets
 

@@ -1,5 +1,7 @@
 # VOXFIT — vocal character conformer
 
+## What It Is
+
 The final plugin of the VOX suite. Where VOXKEY fixes a vocal's *pitch* and W9-VOXRIP conforms its
 *key/tempo*, VOXFIT conforms its **character** — it makes a ripped or foreign acapella *sit* in a
 completely different production. A pitch-independent formant shift reshapes the timbre, then a
@@ -9,6 +11,8 @@ de-esser, a dynamic harshness tamer, a tilt EQ, and proximity + air shelves fini
 VOXFIT reuses the suite's formant-preserving phase-vocoder shifter
 (`suite_core::shift::ShiftEngine`, built by SEANCE) in **formant-only** mode — pitch stays exactly
 put while the formants move.
+
+## Signal Flow
 
 ```
 in ─┬─ formant shift (±5 st, pitch-INDEPENDENT: pitch_ratio = 1,
@@ -75,6 +79,37 @@ minimum-phase (biquad / SVF), so nothing else adds reported latency.
 | Sit | 0–100 % | Curated conform macro (formant + de-ess + presence dip + dark tilt + proximity). |
 | Mix | 0–100 % | Dry/wet (dry is latency-matched; 0 nulls exactly). |
 | Out | −24…+12 dB | Output trim. |
+
+## Controls
+
+- **Formant** — pitch-independent formant move, −5 … +5 st. Negative = bigger/deeper head,
+  positive = smaller/brighter.
+- **De-Ess Thresh** — sibilant-band envelope level above which de-essing engages, −60 … 0 dB.
+- **De-Ess** — de-ess amount, 0–100 % (0 = off, 100 % pulls the sibilant band to threshold on
+  esses).
+- **De-Ess Listen** — on/off. Monitor only the removed sibilant content for tuning.
+- **Harsh Thresh** — 2–5 kHz band level above which the dynamic bell cuts, −60 … 0 dB.
+- **Harsh** — depth of the dynamic harshness cut, 0–100 % (up to ~18 dB dip).
+- **Tilt** — complementary shelves pivoting at 1 kHz, −6 … +6 dB. **< 0 = dark**, > 0 = bright.
+- **Proximity** — low-mid shelf ~300 Hz, −6 … +6 dB (body/warmth or thinning).
+- **Air** — high shelf at 12 kHz, −6 … +6 dB (open silky top or a duller bed).
+- **Sit** — curated conform macro (formant drop + de-ess + presence dip + dark tilt + proximity),
+  0–100 % (0 = leaves every value as set).
+- **Mix** — dry/wet blend, 0–100 % (dry is latency-matched; 0 nulls exactly).
+- **Out** — output trim, −24 … +12 dB.
+
+## Recipes
+
+1. **Sit A Rip In A Dark Mix** — load *Sit In Dark Mix*, then turn **Sit** up to ~60–70 % until
+   the bright pop vocal tucks under a dark-techno bed: Formant 0, De-Ess ~10 %, Tilt toward dark.
+   The one-knob move that makes a foreign acapella belong.
+2. **De-Harsh A Sibilant Acapella** — from *De-Harsh Rip*: De-Ess Thresh −32 dB, De-Ess 80 %,
+   Harsh Thresh −30 dB, Harsh 60 %. Flip **De-Ess Listen** on to tune the threshold onto only the
+   esses, then off. Tames a crunchy ripped vocal for atmospheric DnB.
+3. **Deeper Voice Character** — from *Deeper Voice*: Formant −4 st, Proximity +2 dB, Air −1 dB,
+   Tilt −1 dB. Drops a thin acapella into a weighty chest voice for a menacing lead.
+4. **Airy Feature Up-Front** — from *Airy Feature*: Formant +1.5 st, Air +3 dB, Proximity +1 dB,
+   De-Ess 40 %, Sit 0 %. Opens the top end so a feature vocal sits above the mix.
 
 ## Presets
 

@@ -1,5 +1,7 @@
 # VOXKEY — vocal retuner
 
+## What It Is
+
 Autotune-style pitch correction for the VOX suite. Drop it on a monophonic vocal (or lead) and
 it snaps the sung pitch to the nearest tone of a **Root + Scale**, or to a **held MIDI note**.
 Retune Speed goes from hard-snap (the classic autotune artifact) to a natural glide; Amount sets
@@ -9,6 +11,8 @@ Confidence Gate leaves breaths and silence untouched.
 VOXKEY reuses the suite's formant-preserving phase-vocoder shifter
 (`suite_core::shift::ShiftEngine`, built by SEANCE) so the vocal keeps its natural timbre while
 the pitch moves.
+
+## Signal Flow
 
 ```
 in ─┬─ mono sum → pitch detect (suite_core::pitch::Mpm) ── detected f0 + confidence
@@ -68,6 +72,39 @@ so `Mix = 0` nulls exactly against the latency-matched dry.
 
 The GUI shows a live **IN → TGT** read-out (detected note/Hz → target note/Hz) plus the current
 detection confidence.
+
+## Controls
+
+- **Root** — tonic of the target scale, C … B (ignored while a MIDI note is held in MIDI Mode).
+- **Scale** — the allowed tones the pitch snaps to: Chromatic / Major / Natural Minor /
+  Harmonic Minor / Phrygian / Dorian / Minor Pentatonic.
+- **Retune Speed** — glide time of the correction, 0–400 ms. **0 = hard snap** (the autotune
+  stair-step), higher = a natural slide between notes.
+- **Amount** — how much of the pitch deviation is corrected, 0–100 % (100 % = pinned to the tone,
+  lower keeps some of the original expression).
+- **Humanize** — slow random ±cents drift on the target, 0–50 ct, so sustained notes are not
+  robotically static.
+- **Formant Offset** — moves the formants independently of pitch, ±12 st (darker/bigger or
+  brighter/smaller character).
+- **Confidence Gate** — 0–1. Below this detector clarity (breaths, consonants, silence) the
+  correction holds at unity so nothing unpitched gets retuned.
+- **MIDI Mode** — on/off. A held MIDI note becomes the target directly (scale ignored while held).
+- **Mix** — dry/wet blend, 0–100 % (dry is latency-matched; 0 nulls exactly).
+- **Out** — output trim, −24 … +12 dB.
+
+## Recipes
+
+1. **Classic Hard Snap** — load *Hard Snap Am*: Root A, Scale Natural Minor, Retune Speed 0 ms,
+   Amount 100 %, Confidence Gate ~0.3, Mix 100 %. The instant robotic autotune stair-step for a
+   dark-pop or trap hook. Push **Formant Offset** to +3 st for the *Doll Formant* doll-voice.
+2. **Transparent Correction** — from *Gentle Glide*: Root C, Scale Major, Retune Speed 120 ms,
+   Amount 80 %, Humanize 8 ct, Mix 100 %. Tightens intonation on a live vocal without the artifact
+   — the ear hears in-tune, not tuned.
+3. **Phrygian Dark Rip** — from *Phrygian Dark*: Root E, Scale Phrygian, Retune Speed 60 ms,
+   Amount 100 %, Formant Offset −2 st. Locks a ripped acapella into a menacing Phrygian mode for
+   dark techno; pair after into VOXFIT to make the rip sit.
+4. **MIDI Puppet Lead** — MIDI Mode on, Retune Speed 0–20 ms, Amount 100 %, and route a MIDI clip
+   to drive the target note-by-note — melodic re-composition of a monophonic vocal.
 
 ## Presets
 

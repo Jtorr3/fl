@@ -26,6 +26,9 @@ use suite_core::bus::PluginKind;
 use suite_core::presets::{load_all, Preset};
 use suite_core::spectrum::SpectrumPublisher;
 
+/// Usage manual embedded from docs, rendered in-GUI by the '?' button (BUILT-IN-MANUALS).
+pub const MANUAL_DOC: &str = include_str!("../../../docs/VOXFIT.md");
+
 // ---------------------------------------------------------------------------
 // Plugin + params
 // ---------------------------------------------------------------------------
@@ -217,6 +220,7 @@ impl Plugin for VoxFit {
                         use suite_core::ui::labeled_slider as row;
                         ui.add_space(4.0);
                         ui.heading(egui::RichText::new("QEYNOS · VOXFIT").color(suite_core::ui::ACCENT));
+                        suite_core::ui::manual_button(ui, "voxfit", "VOXFIT", MANUAL_DOC);
                         ui.label(
                             egui::RichText::new("vocal character conformer — make a foreign acapella sit")
                                 .color(suite_core::ui::TEXT_DIM)
@@ -369,3 +373,14 @@ impl Vst3Plugin for VoxFit {
 
 nih_export_clap!(VoxFit);
 nih_export_vst3!(VoxFit);
+
+#[cfg(test)]
+mod manual_tests {
+    #[test]
+    fn manual_covers_all_params_and_has_recipes() {
+        suite_core::manual::assert_manual_covers_params(
+            crate::MANUAL_DOC,
+            &crate::VoxFitParams::default(),
+        );
+    }
+}

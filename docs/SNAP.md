@@ -1,11 +1,15 @@
 # SNAP — snare / clap generator
 
+## What It Is
+
 A MIDI **instrument** that synthesizes snares and claps from scratch. Built on IMPACT's voice
 architecture (mono-ish, last-note priority, phase-continuous declicked retrigger, a length
 macro that scales every envelope). A continuous **MODE** knob crossfades three engines — a
 tonal snare **body**, a noise-formant **rattle** (snare wires), and a humanized **clap** engine —
 from *Snare* through *Hybrid* to *Clap*, so it covers acoustic-ish snares, drum-machine claps,
 and everything between.
+
+## Signal Flow
 
 ```
 note-on ─┬ BODY   : sine/tri @ Tune (140–260 Hz) + fast pitch env (shell knock)  ─┐  (snare
@@ -78,6 +82,42 @@ no audio in, `MidiConfig::Basic`. Key-track (off by default) transposes `Tune` f
 | Width | 0–100 % | Decorrelated-noise stereo width (mono-compatible, > 0.5 correlation) |
 | Level | −24…+6 dB | Output trim |
 | Key Track | on/off | Transpose Tune from the MIDI note (default off) |
+
+## Controls
+
+- **Mode** — continuous crossfade of the two engines, from Snare (0 %) through Hybrid (50 %) to
+  Clap (100 %); the single macro that turns the box from a snare into a clap.
+- **Tune** — body/shell fundamental pitch, 100–400 Hz. Low = deep sub-snare knock, high = tight
+  metallic shell.
+- **Body/Noise** — balance of tonal body vs noise rattle inside the snare engine, 0–100 %.
+- **Snap** — transient click level plus rattle-envelope speed, 0–100 %. Higher = sharper attack.
+- **Decay** — master length macro that scales every envelope, 40–1200 ms. Sets the tail.
+- **Taps** — number of clap slaps (a longer tail burst is always added on top), 3–5.
+- **Spread** — total clap spread window the slaps are laid across, 8–30 ms.
+- **Humanize** — per-slap pre-delay jitter, 0–100 % (0 = perfectly even, deterministic).
+- **Tone** — clap/noise band-pass centre (~500 Hz … 5 kHz, log), 0–100 %.
+- **Drive** — saturation into the 2× oversampled waveshaper, 0–100 %.
+- **Width** — decorrelated-noise stereo width, 0–100 % (mono-compatible; body stays mono).
+- **Level** — output trim, −24 … +6 dB.
+- **Key Track** — transpose Tune from the incoming MIDI note (on/off, default off).
+
+## Recipes
+
+1. **Concrete Techno Backbeat** — start from *Concrete Snap*: Mode 20 %, Tune 200 Hz,
+   Body/Noise 40 %, Snap 70 %, Decay 130 ms, Drive 30 %, Width 25 %, Level −1 dB. A tight, dry,
+   dark-techno snare that sits on the 2 and 4 without washing the mix. Nudge Drive to 45 % for a
+   *Blown Rimshot*-style mean edge.
+2. **DnB Break Crack** — from *DnB Crack* / *Break Rattle*: Mode 45 %, Tune 220 Hz,
+   Body/Noise 60 %, Snap 80 %, Decay 180 ms, Taps 4, Spread 16 ms, Humanize 35 %, Tone 75 %,
+   Drive 45 %, Width 45 %. An aggressive breakbeat snare with rattle bite; raise Humanize to
+   45 % and Spread to 18 ms for the looser *Break Rattle* atmosphere.
+3. **Warehouse Clap Layer** — from *Warehouse Clap*: Mode 90 %, Tune 150 Hz, Body/Noise 90 %,
+   Snap 55 %, Decay 420 ms, Taps 5, Spread 30 ms, Humanize 60 %, Width 75 %, Level −2 dB. A huge
+   reverberant techno clap to stack over a four-on-the-floor; drop Tone to 40 % for *Clap Layer
+   Dark*.
+4. **Snap Weld Click** — from *Snap Click Layer*: Mode 35 %, Snap 100 %, Decay 100 ms,
+   Spread 10 ms, Width 25 %, Level −3 dB. A max-snap transient click to weld under any acoustic
+   snare or kick for attack without adding body.
 
 ## Presets
 

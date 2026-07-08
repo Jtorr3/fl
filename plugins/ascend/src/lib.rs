@@ -31,6 +31,9 @@ pub mod presets;
 use dsp::{AscendEngine, Settings, SyncTarget, TransportFrame};
 use suite_core::presets::{load_all, Preset};
 
+/// Usage manual embedded from docs, rendered in-GUI by the '?' button (BUILT-IN-MANUALS).
+pub const MANUAL_DOC: &str = include_str!("../../../docs/ASCEND.md");
+
 const NOTE_NAMES: [&str; 12] = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 
 /// Audio-thread → GUI shared state (lock-free). Only the countdown readout for now.
@@ -337,6 +340,7 @@ impl Plugin for Ascend {
                         use suite_core::ui::labeled_slider as row;
                         ui.add_space(4.0);
                         ui.heading(egui::RichText::new("QEYNOS · ASCEND").color(suite_core::ui::ACCENT));
+                        suite_core::ui::manual_button(ui, "ascend", "ASCEND", MANUAL_DOC);
                         ui.label(
                             egui::RichText::new("tension generator")
                                 .color(suite_core::ui::TEXT_DIM)
@@ -574,3 +578,14 @@ nih_export_vst3!(Ascend);
 
 #[cfg(test)]
 mod render_tests;
+
+#[cfg(test)]
+mod manual_tests {
+    #[test]
+    fn manual_covers_all_params_and_has_recipes() {
+        suite_core::manual::assert_manual_covers_params(
+            crate::MANUAL_DOC,
+            &crate::AscendParams::default(),
+        );
+    }
+}
