@@ -364,7 +364,7 @@ forward to after HARD CHECKPOINT 2 — see above)
   decision list for the user, and PEDAL-UI deprioritizes them (retrofit last).
   Fable use here is user-mandated (explicit "have fable check" instruction),
   logged in STATUS.md per §8.)
-- [ ] PEDAL-UI (LOCKED: CONSOLE v2 — pedal + amber CRT terminal; usability guardrails in SPECS override aesthetics)
+- [x] PEDAL-UI (LOCKED: CONSOLE v2 — pedal + amber CRT terminal; usability guardrails in SPECS override aesthetics. Shipped 2026-07-08: all 28 editors, paint-only, per-plugin THEME/CRT-motion prefs + THEME-OFF fallback; build.ps1 -All 30/30 GREEN)
 **FINAL CHECKPOINT**
 
 ## 8. Model & token policy (user directive 2026-07-07)
