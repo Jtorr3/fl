@@ -409,50 +409,95 @@ mod tests {
         }
     }
 
+    /// Every EQ field, compared with a loose epsilon.
+    fn eq_diffs(a: &EqSettings, b: &EqSettings) -> usize {
+        let fs = [
+            (a.low_freq, b.low_freq), (a.low_gain, b.low_gain),
+            (a.b1_freq, b.b1_freq), (a.b1_gain, b.b1_gain), (a.b1_q, b.b1_q),
+            (a.b2_freq, b.b2_freq), (a.b2_gain, b.b2_gain), (a.b2_q, b.b2_q),
+            (a.high_freq, b.high_freq), (a.high_gain, b.high_gain),
+        ];
+        fs.iter().filter(|(x, y)| (x - y).abs() > 1e-3).count()
+    }
+
+    /// Count differing `NodeSettings` fields (all float), for the default-diff and
+    /// pairwise-distinctness quality gates.
+    fn node_diffs(a: &NodeSettings, b: &NodeSettings) -> usize {
+        let fs = [
+            (a.comp_threshold, b.comp_threshold), (a.comp_ratio, b.comp_ratio),
+            (a.comp_knee, b.comp_knee), (a.comp_attack, b.comp_attack),
+            (a.comp_release, b.comp_release), (a.comp_makeup, b.comp_makeup),
+            (a.drive_db, b.drive_db), (a.width, b.width),
+            (a.trim_db, b.trim_db), (a.mix, b.mix),
+        ];
+        eq_diffs(&a.eq, &b.eq) + fs.iter().filter(|(x, y)| (x - y).abs() > 1e-3).count()
+    }
+
+    /// Count differing `MasterSettings` fields (all float).
+    fn master_diffs(a: &MasterSettings, b: &MasterSettings) -> usize {
+        let mut n = eq_diffs(&a.eq, &b.eq);
+        let fs = [
+            (a.xo_low, b.xo_low), (a.xo_high, b.xo_high),
+            (a.comp_knee, b.comp_knee), (a.comp_attack, b.comp_attack),
+            (a.comp_release, b.comp_release), (a.ceiling_db, b.ceiling_db),
+            (a.limiter_release, b.limiter_release), (a.mix, b.mix),
+        ];
+        n += fs.iter().filter(|(x, y)| (x - y).abs() > 1e-3).count();
+        for k in 0..3 {
+            if (a.bands[k].threshold - b.bands[k].threshold).abs() > 1e-3 { n += 1; }
+            if (a.bands[k].ratio - b.bands[k].ratio).abs() > 1e-3 { n += 1; }
+            if (a.bands[k].makeup - b.bands[k].makeup).abs() > 1e-3 { n += 1; }
+        }
+        n
+    }
+
+    /// Full PRESET-EXPANSION quality gate over the Node bank: every preset differs from
+    /// the default in >=4 params, differs from EVERY other in >=2 (no near-duplicates),
+    /// and names are unique. (Universal render assertions ride in lib.rs render_tests.)
     #[test]
-    fn node_presets_differ_from_default() {
+    fn node_bank_meets_expansion_quality_gate() {
+        let presets = load_all(NODE_PRESET_JSON);
         let d = NodeSettings::default();
-        for p in load_all(NODE_PRESET_JSON).iter() {
-            let s = node_settings_from_preset(p);
-            let mut diffs = 0;
-            if (s.comp_threshold - d.comp_threshold).abs() > 1e-3 {
-                diffs += 1;
+        let settings: Vec<NodeSettings> =
+            presets.iter().map(node_settings_from_preset).collect();
+        for (p, s) in presets.iter().zip(&settings) {
+            let diffs = node_diffs(s, &d);
+            assert!(diffs >= 4, "node preset '{}' differs from default in only {diffs}", p.name);
+        }
+        for i in 0..settings.len() {
+            for j in (i + 1)..settings.len() {
+                let diffs = node_diffs(&settings[i], &settings[j]);
+                assert!(
+                    diffs >= 2,
+                    "node presets '{}' and '{}' differ in only {diffs} (near-duplicate)",
+                    presets[i].name, presets[j].name
+                );
+                assert_ne!(presets[i].name, presets[j].name, "duplicate node preset name");
             }
-            if (s.comp_ratio - d.comp_ratio).abs() > 1e-3 {
-                diffs += 1;
-            }
-            if (s.drive_db - d.drive_db).abs() > 1e-3 {
-                diffs += 1;
-            }
-            if (s.width - d.width).abs() > 1e-3 {
-                diffs += 1;
-            }
-            if (s.eq.low_gain - d.eq.low_gain).abs() > 1e-3 {
-                diffs += 1;
-            }
-            assert!(diffs >= 3, "node preset '{}' differs in only {diffs}", p.name);
         }
     }
 
+    /// Full PRESET-EXPANSION quality gate over the Master bank.
     #[test]
-    fn master_presets_differ_from_default() {
+    fn master_bank_meets_expansion_quality_gate() {
+        let presets = load_all(MASTER_PRESET_JSON);
         let d = MasterSettings::default();
-        for p in load_all(MASTER_PRESET_JSON).iter() {
-            let s = master_settings_from_preset(p);
-            let mut diffs = 0;
-            if (s.xo_low - d.xo_low).abs() > 1e-3 {
-                diffs += 1;
+        let settings: Vec<MasterSettings> =
+            presets.iter().map(master_settings_from_preset).collect();
+        for (p, s) in presets.iter().zip(&settings) {
+            let diffs = master_diffs(s, &d);
+            assert!(diffs >= 4, "master preset '{}' differs from default in only {diffs}", p.name);
+        }
+        for i in 0..settings.len() {
+            for j in (i + 1)..settings.len() {
+                let diffs = master_diffs(&settings[i], &settings[j]);
+                assert!(
+                    diffs >= 2,
+                    "master presets '{}' and '{}' differ in only {diffs} (near-duplicate)",
+                    presets[i].name, presets[j].name
+                );
+                assert_ne!(presets[i].name, presets[j].name, "duplicate master preset name");
             }
-            if (s.bands[0].ratio - d.bands[0].ratio).abs() > 1e-3 {
-                diffs += 1;
-            }
-            if (s.ceiling_db - d.ceiling_db).abs() > 1e-3 {
-                diffs += 1;
-            }
-            if (s.eq.high_gain - d.eq.high_gain).abs() > 1e-3 {
-                diffs += 1;
-            }
-            assert!(diffs >= 3, "master preset '{}' differs in only {diffs}", p.name);
         }
     }
 }
