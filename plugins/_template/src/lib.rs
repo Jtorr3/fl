@@ -9,7 +9,6 @@ use nih_plug::prelude::*;
 use nih_plug_egui::{
     create_egui_editor,
     egui::{self, Vec2},
-    resizable_window::ResizableWindow,
     EguiState,
 };
 use std::sync::Arc;
@@ -130,7 +129,7 @@ impl Plugin for Template {
             },
             move |egui_ctx, setter, _state| {
                 suite_core::ui::apply_theme(egui_ctx);
-                ResizableWindow::new("qeynos-template-window")
+                suite_core::ui::ScaledWindow::new("qeynos-template-window", Vec2::new(320.0, 220.0))
                     .min_size(Vec2::new(240.0, 160.0))
                     .show(egui_ctx, egui_state.as_ref(), |ui| {
                         ui.add_space(6.0);
