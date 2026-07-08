@@ -398,7 +398,26 @@ POST-COMPLETION verification (user directive 2026-07-08 PM)
   SHRINK (15 usable beats 25 filler). Every other plugin's bank gets the same
   usefulness scrutiny: prune or replace filler, don't just retune it.
   Reference bar: KAS:ST / Cynthoni / Akiaura / agonyOST (+ refs/ tracks when
-  present — gitignored drop folder). (3) DELIVERABLE:
+  present — gitignored drop folder).
+  OVERSEER DEEP-DIVE (user directive 2026-07-08 PM: "be extra scrutinizing about
+  overseer, judge every imperfection like you paid for it"): OVERSEER runs as its
+  own dedicated maximum-scrutiny batch, judged as if it were a PAID Ozone
+  competitor — one Fable agent sanctioned for the audit portion (same user-mandate
+  basis as SUITE-TRIAGE; log in STATUS). Checklist: limiter transparency at
+  -1 dBTP + GR character on kicks (transient flattening, pumping, ISP accuracy);
+  EQ honesty (does the curve match the display; cramping near Nyquist); dynamics
+  attack/release musicality + GR meter accuracy; sat character at musical drives
+  (drive-0 transparency was fixed in TRIAGE — verify it held); LUFS/true-peak
+  meter accuracy re-verified; ENRICH/LEARN must MEASURABLY improve a
+  deliberately-flawed mix (render synthetic multitrack with known defects — muddy
+  bass, harsh vocal, weak sub — run Learn, apply assist, require the output to
+  move toward the reference curve on every flagged axis); instrument
+  classification accuracy on synthesized per-type sources; END-TO-END SCENARIO:
+  master a synthetic 4-stem track (kick/bass/pad/vocal) through Nodes + Master
+  and grade the result vs the raw sum against the reference bar (balance, LUFS,
+  width, punch retention); full-chain PDC verification; GUI papercut sweep.
+  Every imperfection found gets fixed or an honest LIMITATION entry — no
+  "good enough for a freebie" verdicts. (3) DELIVERABLE:
   renders/_audition/<PLUGIN>/ before+after WAV pairs for the user's ears +
   docs/SOUND-PASS.md verdict table (GOOD-AS-IS / IMPROVED (what changed) /
   LIMITATION (why + what it'd take)). Gates: per-crate tests per fix,
