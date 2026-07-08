@@ -12,7 +12,6 @@ use nih_plug::prelude::*;
 use nih_plug_egui::{
     create_egui_editor,
     egui::{self, Vec2},
-    resizable_window::ResizableWindow,
     EguiState,
 };
 use std::sync::Arc;
@@ -347,7 +346,7 @@ impl Plugin for Grit {
             |ctx, _| suite_core::ui::apply_theme(ctx),
             move |egui_ctx, setter, _state| {
                 suite_core::ui::apply_theme(egui_ctx);
-                ResizableWindow::new("qeynos-grit-window")
+                suite_core::ui::ScaledWindow::new("qeynos-grit-window", Vec2::new(560.0, 460.0))
                     .min_size(Vec2::new(460.0, 380.0))
                     .show(egui_ctx, egui_state.as_ref(), |ui| {
                         ui.add_space(4.0);
