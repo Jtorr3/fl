@@ -353,6 +353,17 @@ POLISH phase (user feedback 2026-07-07; PRESET-SYSTEM + OVERSEER-ENRICH pulled
 forward to after HARD CHECKPOINT 2 — see above)
 - [x] PRESET-EXPANSION (deep factory banks, 15-30 purpose-named presets per plugin)
 - [ ] BUILT-IN-MANUALS (in-GUI usage manual panel per plugin, embedded from docs/)
+- [ ] SUITE-TRIAGE (user directive 2026-07-08, BEFORE PEDAL-UI: Fable audit of ALL
+  plugins for (a) feasibility/correctness bugs — "some seem a little broken" — and
+  (b) real-world necessity/usefulness — "some seem almost useless". Calibration from
+  the user: "the first ones were the best" — the first wave (GRIT/EMBER/IMPACT/
+  TRACER/OVERSEER) sets the quality bar; scrutiny weights toward the later Phase 2/3
+  catalog clones. Output: per-plugin verdict KEEP / FIX (with the concrete defect) /
+  CUT-CANDIDATE. Bugs found get fixed in this item. CUT-CANDIDATEs are NOT deleted —
+  uninstalling shipped plugins is a human call — they go to CHECKPOINTS.md as a
+  decision list for the user, and PEDAL-UI deprioritizes them (retrofit last).
+  Fable use here is user-mandated (explicit "have fable check" instruction),
+  logged in STATUS.md per §8.)
 - [ ] PEDAL-UI (LOCKED: CONSOLE v2 — pedal + amber CRT terminal; usability guardrails in SPECS override aesthetics)
 **FINAL CHECKPOINT**
 
@@ -370,6 +381,9 @@ forward to after HARD CHECKPOINT 2 — see above)
   Opus. Also Fable-eligible without waiting for failures: the four hardest specced
   problems — EMBER's phase-vocoder tail, TRACER's time-varying LR4 stability,
   the Bus seqlock layout, OVERSEER's limiter. Nothing else.
+  AMENDMENT 2026-07-08: SUITE-TRIAGE (§7) is Fable-eligible by direct user
+  instruction ("have fable check all these plugins for feasibility bugs and
+  necessity").
 - **Ultracode (multi-agent workflows): most important administrative tasks ONLY.**
   Whitelist — exactly these, nothing else qualifies:
   1. Phase 0 GO/NO-GO verdict (adversarial verification that the toolchain gate
