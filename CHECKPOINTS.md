@@ -70,6 +70,19 @@
       Routing ops for channels that don't exist in the rack yet will report as
       warnings — that's expected. Preview any time without FL via `apply TECHNO
       --dry-run`. (`tempo` is intentionally not applied — no MCP command exists.)
+- [ ] **HARD CHECKPOINT (after ASCEND, 2026-07-07): audition the transport-synced riser in FL.**
+      ASCEND is the suite's first transport-reading instrument, so the one thing offline tests
+      cannot prove is that FL actually feeds it tempo + bar position. In FL: "Find more plugins",
+      then add **Qeynos ASCEND** as an instrument. Load **Riser 8 Dark**, PLAY the transport, and
+      confirm: (a) the GUI's COUNTDOWN readout counts down the bars-remaining in sync with the
+      playhead, (b) the sound sweeps up over 8 bars and drops an **impact** on the downbeat of the
+      target bar with a clean **auto-cut**, re-arming each 8 bars. Try **Riser 16 Wide** (longer,
+      wider), **Sub Boom Drop** (big low drop), **Downlifter 8** (reversed fall after the drop),
+      **Noise Swell Short** (no impact). Then STOP the transport and click **TRIGGER** (or play a
+      note; tick **Key Track** to pitch it) to confirm free-run works standalone over **Free
+      Length** seconds. If FL swallows the momentary Trigger via keyboard, use automation or the
+      knob. (build.ps1 ascend is GREEN — clap-validator + pluginval s8 pass; this listen is the
+      human confirmation that the host transport wiring behaves.) Renders in renders/ASCEND/.
 - [ ] **HARD CHECKPOINT 1 (2026-07-07): re-test GRIT/TRACER parallel (dry/wet) mix in FL.**
       The comb-filtering + wrong-PDC defects were fixed: GRIT (4x OS, 22-sample latency)
       and TRACER (per-band 2x OS, 14-sample latency) now delay-compensate their dry paths
