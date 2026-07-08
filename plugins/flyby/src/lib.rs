@@ -787,9 +787,47 @@ nih_export_vst3!(Flyby);
 mod render_tests {
     use crate::dsp::FlybyCore;
     use crate::presets::{settings_from_preset, PRESET_JSON};
-    use suite_core::harness::{assert_universal, render_path, write_wav};
+    use suite_core::harness::{assert_universal, render_path, write_wav, write_wav_stereo};
     use suite_core::presets::load_all;
     use suite_core::testsig;
+
+    /// SOUND-PASS audition render (permanent infra, `#[ignore]`d in normal runs).
+    /// Renders every factory preset AND `Settings::default()` over a genre-right musical
+    /// source — a 4 s sustained minor synth pad (the kind of drone/pad FLYBY is meant to
+    /// fly past) — through the true stereo spatialiser path, into
+    /// renders/_audition/FLYBY/<QVS_AUDITION_DIR or "before">/<preset>.wav as an interleaved
+    /// stereo WAV so tools/audition.py can read the pan/width/correlation motion. Analyzed
+    /// offline by tools/audition.py.
+    #[test]
+    #[ignore]
+    fn audition_render_musical_sources() {
+        use crate::dsp::Settings;
+
+        let sr = 48_000.0f32;
+        let subdir = std::env::var("QVS_AUDITION_DIR").unwrap_or_else(|_| "before".into());
+
+        // A sustained minor synth pad — a slow, harmonically rich drone, the musical source
+        // FLYBY is designed to fly around the listener.
+        let pad = testsig::synth_pad(110.0, 4.0, sr);
+
+        // Every factory preset plus the default state (labelled "default").
+        let presets = load_all(PRESET_JSON);
+        let mut jobs: Vec<(String, Settings)> = presets
+            .iter()
+            .map(|p| {
+                let fname = p.name.to_lowercase().replace([' ', '·', '-', '/'], "_");
+                (fname, settings_from_preset(p))
+            })
+            .collect();
+        jobs.push(("default".into(), Settings::default()));
+
+        for (fname, s) in &jobs {
+            let mut core = FlybyCore::new(sr);
+            let (l, r) = core.process_stereo(&pad, s);
+            let path = render_path("_audition/FLYBY", &format!("{subdir}/{fname}"));
+            write_wav_stereo(&path, &l, &r, sr as u32).expect("write audition render");
+        }
+    }
 
     #[test]
     fn manual_covers_all_params_and_has_recipes() {
