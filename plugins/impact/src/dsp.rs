@@ -169,6 +169,14 @@ pub struct KickVoice {
     trans_pos: usize,
     trans_playing: bool,
 
+    // Output DC blocker (~5 Hz one-pole). A decaying very-low-frequency body/sub leaves a
+    // small net DC offset (the envelope-weighted first half-cycle is not cancelled — worst on
+    // the deep-sub presets: the SOUND-PASS audition flagged DC_OFFSET at ~0.003-0.005 on the
+    // 25-31 Hz sub kicks). This removes it without touching the 25 Hz sub (−0.1 dB at 25 Hz).
+    dc_r: f32,
+    dc_x1: f32,
+    dc_y1: f32,
+
     active: bool,
 }
 
@@ -209,8 +217,13 @@ impl KickVoice {
             rng: Rng::new(0x51AC_2E17),
             trans_pos: 0,
             trans_playing: false,
+            dc_r: 0.0,
+            dc_x1: 0.0,
+            dc_y1: 0.0,
             active: false,
         };
+        // ~5 Hz DC blocker pole: R = exp(-2π·fc/sr).
+        v.dc_r = (-std::f32::consts::TAU * 5.0 / v.sr).exp();
         v.attack_len = ((DECLICK_MS * 0.001) * v.sr).round().max(1.0) as u32;
         v.click_svf.set(3500.0, 2.0, v.sr);
         v
@@ -229,6 +242,8 @@ impl KickVoice {
         self.click_svf.reset();
         self.trans_playing = false;
         self.trans_pos = 0;
+        self.dc_x1 = 0.0;
+        self.dc_y1 = 0.0;
         self.active = false;
     }
 
@@ -400,8 +415,14 @@ impl KickVoice {
             y.clamp(-1.0, 1.0)
         };
         y *= self.out_gain;
+        // DC blocker (~5 Hz one-pole): y[n] = x[n] − x[n−1] + R·y[n−1]. Removes the small DC
+        // offset a decaying sub leaves, without attenuating the 25 Hz sub. Linear ⇒ cannot add
+        // a step (declick contract) or shift the measured f0 (pitch contract).
+        let dc = y - self.dc_x1 + self.dc_r * self.dc_y1;
+        self.dc_x1 = y;
+        self.dc_y1 = dc;
         // Safety ceiling so a hot preset can never break the peak ≤ 0 dBFS universal assertion.
-        y.clamp(-0.999, 0.999)
+        dc.clamp(-0.999, 0.999)
     }
 }
 
@@ -458,6 +479,41 @@ mod tests {
             }
         }
         crossings as f32 * sr / out.len() as f32
+    }
+
+    /// SOUND-PASS regression: the output DC blocker keeps a deep-sub kick's net offset well
+    /// below the audition's DC_OFFSET threshold (1e-3). Without it the envelope-weighted first
+    /// half-cycle of a 25-30 Hz sub leaves ~0.003-0.005 DC (measured on the shipped 808 presets).
+    #[test]
+    fn deep_sub_kick_has_no_dc_offset() {
+        let sr = 48_000.0;
+        let s = Settings {
+            f_start: 170.0,
+            f_end: 55.0,
+            pitch_decay_ms: 50.0,
+            amp_decay_ms: 1200.0,
+            length: 2.4,
+            drive: 0.5,
+            tone: 0.05,
+            sub_level: 0.4,
+            sub_ratio: 0.5, // 27.5 Hz sub — the worst case for DC
+            clip_soft: true,
+            ..Settings::default()
+        };
+        let mut v = KickVoice::new(sr);
+        v.configure(&s);
+        v.note_on(1.0, None);
+        let n = (sr * 1.5) as usize;
+        let mut sum = 0.0f64;
+        let mut peak = 0.0f32;
+        for _ in 0..n {
+            let y = v.process_sample();
+            sum += y as f64;
+            peak = peak.max(y.abs());
+        }
+        let dc = (sum / n as f64).abs();
+        assert!(peak > 0.1, "voice produced no level");
+        assert!(dc < 1.0e-4, "deep-sub kick DC offset {dc:.6} exceeds 1e-4 (blocker ineffective)");
     }
 
     /// Design (b) regression: a key-track note_on override survives a same-settings
