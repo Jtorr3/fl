@@ -16,6 +16,7 @@ use nih_plug_egui::{
 };
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, RwLock};
+use suite_core::modlisten::ModRoutes;
 
 pub mod dsp;
 pub mod presets;
@@ -112,6 +113,10 @@ pub struct CleaveParams {
     pub mix: FloatParam,
     #[id = "out"]
     pub out: FloatParam,
+
+    /// NERVE listen layer: persisted per-param modulation routes (edited in the MOD section).
+    #[persist = "mod"]
+    pub mod_routes: Arc<RwLock<ModRoutes>>,
 }
 
 impl Default for CleaveParams {
@@ -157,6 +162,7 @@ impl Default for CleaveParams {
             out: FloatParam::new("Out", d.out_db, FloatRange::Linear { min: -24.0, max: 24.0 })
                 .with_unit(" dB")
                 .with_value_to_string(formatters::v2s_f32_rounded(2)),
+            mod_routes: Arc::new(RwLock::new(ModRoutes::new())),
         }
     }
 }
@@ -307,6 +313,11 @@ impl Plugin for Cleave {
                             setter,
                             |setter, p| apply_preset(&params, setter, p),
                         );
+                        suite_core::ui::mod_section(
+                            ui,
+                            &params.mod_routes,
+                            &[("mix", "MIX"), ("swing", "SWING"), ("sens", "SENS"), ("out", "OUT")],
+                        );
                         ui.separator();
 
                         // Pattern actions: Randomize (density) + Clear.
@@ -389,7 +400,16 @@ impl Plugin for Cleave {
     ) -> ProcessStatus {
         let _ftz = suite_core::dsp::ScopedFtz::enable();
 
-        let s = self.params.snapshot();
+        let mut s = self.params.snapshot();
+        if let Ok(routes) = self.params.mod_routes.try_read() {
+            if !routes.routes.is_empty() {
+                let bus = suite_core::bus::bus();
+                s.mix = routes.modulated_float("mix", &self.params.mix, bus);
+                s.swing = routes.modulated_float("swing", &self.params.swing, bus);
+                s.sensitivity = routes.modulated_float("sens", &self.params.sensitivity, bus);
+                s.out_db = routes.modulated_float("out", &self.params.out, bus);
+            }
+        }
         self.core.configure(&s);
 
         // Snapshot the per-step grid without locking in the audio callback: try_read, else keep

@@ -126,3 +126,28 @@ Each entry: item | feature | why | how to pick it back up.
   `EguiState::request_resize` (or `ctx.send_viewport_cmd(InnerSize)` starts working under
   baseview), make the menu buttons call it so a snap grows the window to `base × snap`, and
   drop this note. All logic lives in `suite_core::ui::ScaledWindow` / `size_menu`.
+
+## NERVE listen-layer retrofit — stragglers deferred to a follow-up sweep
+- **Decided 2026-07-08 (PRD §1.5 explicit "retrofit the tractable majority and DEFER the
+  stragglers" clause; NERVE shipped with a listening MAJORITY).**
+- **What:** the per-param "listen" layer (`suite_core::modlisten` + `ui::mod_section`) was wired
+  into every plugin that funnels its params through a clean `snapshot() -> Settings` +
+  `core.configure(&settings)` block-rate hook (the mechanical 5-line retrofit proven on GRIT).
+  A handful of plugins do NOT have that single clean hook and are deferred:
+  - **OVERSEER** — one bundle / TWO plugins (Node + Master) with 11 configure sites and its own
+    tier-1 override bus already writing effective params; wiring a second modulation source in
+    needs per-plugin care (which of Node vs Master, interaction with the override/steal-back
+    timestamp logic). Deferred to avoid regressing the tier-1 remote-control contract.
+  - **EMBER** — 3 configure calls (multi-stage STFT state machine); no single settings choke point.
+  - **SEANCE / VOXFIT / VOXKEY** — no `fn snapshot`; params are read inline across a multi-stage
+    voice chain (ShiftEngine etc.), so there is no one place to inject a modulated value cleanly.
+  - (any additional per-plugin defers recorded by the retrofit sweep are listed in STATUS.md LOG.)
+- **Why acceptable:** the listen layer, the bus, NERVE, and the round-trip done-bar all ship
+  green, and a clear majority of plugins listen. The deferred ones are exactly the crates whose
+  param→DSP path isn't the uniform `snapshot/configure` shape, so a mechanical retrofit would risk
+  correctness there. NERVE's value (one mod source driving the suite) is delivered.
+- **How to resume / revisit:** give each deferred plugin a single block-rate settings struct (or,
+  for OVERSEER, decide the modulation-vs-override precedence and modulate the Node's effective
+  values), then apply the same 5-part GRIT recipe: persisted `mod_routes` field, `modulated_float`
+  over the block settings before `configure`, and a `ui::mod_section` call in the editor. Nothing
+  in `suite_core` needs to change — the API is complete and tested.

@@ -15,7 +15,8 @@ use nih_plug_egui::{
     EguiState,
 };
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
+use suite_core::modlisten::ModRoutes;
 
 pub mod dsp;
 pub mod presets;
@@ -154,6 +155,10 @@ pub struct PluckParams {
     pub mix: FloatParam,
     #[id = "out"]
     pub out: FloatParam,
+
+    /// NERVE listen layer: persisted per-param modulation routes (edited in the MOD section).
+    #[persist = "mod"]
+    pub mod_routes: Arc<RwLock<ModRoutes>>,
 }
 
 impl Default for PluckParams {
@@ -251,6 +256,7 @@ impl Default for PluckParams {
             .with_smoother(SmoothingStyle::Linear(20.0))
             .with_unit(" dB")
             .with_value_to_string(formatters::v2s_f32_rounded(1)),
+            mod_routes: Arc::new(RwLock::new(ModRoutes::new())),
         }
     }
 }
@@ -487,6 +493,11 @@ impl Plugin for Pluck {
                             setter,
                             |setter, p| apply_preset(&params, setter, p),
                         );
+                        suite_core::ui::mod_section(
+                            ui,
+                            &params.mod_routes,
+                            &[("decay", "DECAY"), ("damp", "DAMP"), ("mix", "MIX"), ("out", "OUT")],
+                        );
                         ui.separator();
 
                         // String-activity display: six bars.
@@ -558,7 +569,16 @@ impl Plugin for Pluck {
             }
         }
 
-        let s = self.params.snapshot(&self.held);
+        let mut s = self.params.snapshot(&self.held);
+        if let Ok(routes) = self.params.mod_routes.try_read() {
+            if !routes.routes.is_empty() {
+                let bus = suite_core::bus::bus();
+                s.decay = routes.modulated_float("decay", &self.params.decay, bus);
+                s.damp = routes.modulated_float("damp", &self.params.damp, bus);
+                s.mix = routes.modulated_float("mix", &self.params.mix, bus);
+                s.out_db = routes.modulated_float("out", &self.params.out, bus);
+            }
+        }
         self.core.configure(&s);
 
         let num_samples = buffer.samples();

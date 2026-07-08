@@ -17,7 +17,8 @@ use nih_plug_egui::{
     EguiState,
 };
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
+use suite_core::modlisten::ModRoutes;
 
 pub mod dsp;
 pub mod presets;
@@ -207,6 +208,10 @@ pub struct ShapeshiftParams {
     pub mix: FloatParam,
     #[id = "out"]
     pub out: FloatParam,
+
+    /// NERVE listen layer: persisted per-param modulation routes (edited in the MOD section).
+    #[persist = "mod"]
+    pub mod_routes: Arc<RwLock<ModRoutes>>,
 }
 
 fn gain_db(name: &str, default: f32) -> FloatParam {
@@ -291,6 +296,7 @@ impl Default for ShapeshiftParams {
                 .with_unit(" dB")
                 .with_smoother(SmoothingStyle::Linear(20.0))
                 .with_value_to_string(formatters::v2s_f32_rounded(2)),
+            mod_routes: Arc::new(RwLock::new(ModRoutes::new())),
         }
     }
 }
@@ -458,6 +464,11 @@ impl Plugin for Shapeshift {
                             setter,
                             |setter, p| apply_preset(&params, setter, p),
                         );
+                        suite_core::ui::mod_section(
+                            ui,
+                            &params.mod_routes,
+                            &[("x", "X"), ("y", "Y"), ("postlp", "POST LP"), ("oradius", "ORBIT RADIUS")],
+                        );
                         ui.separator();
 
                         // The XY morph pad: drag the user point, watch the orbit dot.
@@ -537,7 +548,16 @@ impl Plugin for Shapeshift {
         let _ftz = suite_core::dsp::ScopedFtz::enable();
 
         let tempo = context.transport().tempo.unwrap_or(120.0) as f32;
-        let base = self.params.snapshot(tempo);
+        let mut base = self.params.snapshot(tempo);
+        if let Ok(routes) = self.params.mod_routes.try_read() {
+            if !routes.routes.is_empty() {
+                let bus = suite_core::bus::bus();
+                base.x = routes.modulated_float("x", &self.params.x, bus);
+                base.y = routes.modulated_float("y", &self.params.y, bus);
+                base.post_lp_hz = routes.modulated_float("postlp", &self.params.post_lp, bus);
+                base.orbit_radius = routes.modulated_float("oradius", &self.params.orbit_radius, bus);
+            }
+        }
         self.core.configure(&base);
 
         let num_samples = buffer.samples();

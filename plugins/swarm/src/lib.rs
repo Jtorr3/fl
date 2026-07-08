@@ -18,7 +18,8 @@ use nih_plug_egui::{
     egui::{self, Vec2},
     EguiState,
 };
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
+use suite_core::modlisten::ModRoutes;
 
 pub mod dsp;
 pub mod presets;
@@ -123,6 +124,10 @@ pub struct SwarmParams {
     pub mix: FloatParam,
     #[id = "out"]
     pub out: FloatParam,
+
+    /// NERVE listen layer: persisted per-param modulation routes (edited in the MOD section).
+    #[persist = "mod"]
+    pub mod_routes: Arc<RwLock<ModRoutes>>,
 }
 
 impl Default for SwarmParams {
@@ -200,6 +205,7 @@ impl Default for SwarmParams {
             out: FloatParam::new("Out", d.out_db, FloatRange::Linear { min: -24.0, max: 24.0 })
                 .with_unit(" dB")
                 .with_value_to_string(formatters::v2s_f32_rounded(2)),
+            mod_routes: Arc::new(RwLock::new(ModRoutes::new())),
         }
     }
 }
@@ -338,6 +344,11 @@ impl Plugin for Swarm {
                             setter,
                             |setter, p| apply_preset(&params, setter, p),
                         );
+                        suite_core::ui::mod_section(
+                            ui,
+                            &params.mod_routes,
+                            &[("density", "DENSITY"), ("size", "SIZE"), ("mix", "MIX"), ("out", "OUT")],
+                        );
                         ui.separator();
 
                         egui::ScrollArea::vertical().show(ui, |ui| {
@@ -434,7 +445,16 @@ impl Plugin for Swarm {
         let _ftz = suite_core::dsp::ScopedFtz::enable();
 
         let tempo = context.transport().tempo.unwrap_or(120.0) as f32;
-        let s = self.params.snapshot(tempo);
+        let mut s = self.params.snapshot(tempo);
+        if let Ok(routes) = self.params.mod_routes.try_read() {
+            if !routes.routes.is_empty() {
+                let bus = suite_core::bus::bus();
+                s.density = routes.modulated_float("density", &self.params.density, bus);
+                s.size_ms = routes.modulated_float("size", &self.params.size, bus);
+                s.mix = routes.modulated_float("mix", &self.params.mix, bus);
+                s.out_db = routes.modulated_float("out", &self.params.out, bus);
+            }
+        }
         self.core.configure(&s);
 
         let num_samples = buffer.samples();

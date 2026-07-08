@@ -20,7 +20,8 @@ use nih_plug_egui::{
     EguiState,
 };
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
+use suite_core::modlisten::ModRoutes;
 
 pub mod dsp;
 pub mod presets;
@@ -95,6 +96,10 @@ pub struct AscendParams {
     #[id = "level"] pub level: FloatParam,
     #[id = "keytrack"] pub keytrack: BoolParam,
     #[id = "trigger"] pub trigger: BoolParam,
+
+    /// NERVE listen layer: persisted per-param modulation routes (edited in the MOD section).
+    #[persist = "mod"]
+    pub mod_routes: Arc<RwLock<ModRoutes>>,
 }
 
 fn pct(name: &'static str, default: f32) -> FloatParam {
@@ -193,6 +198,7 @@ impl Default for AscendParams {
                 .with_value_to_string(formatters::v2s_f32_rounded(1)),
             keytrack: BoolParam::new("Key Track", false),
             trigger: BoolParam::new("Trigger", false),
+            mod_routes: Arc::new(RwLock::new(ModRoutes::new())),
         }
     }
 }
@@ -352,6 +358,11 @@ impl Plugin for Ascend {
                             setter,
                             |setter, p| apply_preset(&params, setter, p),
                         );
+                        suite_core::ui::mod_section(
+                            ui,
+                            &params.mod_routes,
+                            &[("level", "LEVEL"), ("width", "WIDTH"), ("rise", "RISE"), ("balance", "BALANCE")],
+                        );
                         ui.separator();
 
                         egui::ScrollArea::vertical().show(ui, |ui| {
@@ -456,7 +467,16 @@ impl Plugin for Ascend {
         };
         self.engine.set_root_override(root_override);
 
-        let s = self.params.snapshot();
+        let mut s = self.params.snapshot();
+        if let Ok(routes) = self.params.mod_routes.try_read() {
+            if !routes.routes.is_empty() {
+                let bus = suite_core::bus::bus();
+                s.level_db = routes.modulated_float("level", &self.params.level, bus);
+                s.width = routes.modulated_float("width", &self.params.width, bus);
+                s.rise_st = routes.modulated_float("rise", &self.params.rise, bus);
+                s.balance = routes.modulated_float("balance", &self.params.balance, bus);
+            }
+        }
         self.engine.configure(&s);
         self.engine.set_transport(TransportFrame { playing, bar_pos, bars_per_sample });
 

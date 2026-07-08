@@ -17,7 +17,8 @@ use nih_plug_egui::{
     egui::{self, Vec2},
     EguiState,
 };
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
+use suite_core::modlisten::ModRoutes;
 
 pub mod dsp;
 pub mod presets;
@@ -57,6 +58,10 @@ pub struct UndertowParams {
     #[id = "width"] pub width: FloatParam,
     #[id = "dry"] pub dry_level: FloatParam,
     #[id = "trim"] pub out_trim: FloatParam,
+
+    /// NERVE listen layer: persisted per-param modulation routes (edited in the MOD section).
+    #[persist = "mod"]
+    pub mod_routes: Arc<RwLock<ModRoutes>>,
 }
 
 fn pct(name: &'static str, default: f32) -> FloatParam {
@@ -140,6 +145,7 @@ impl Default for UndertowParams {
             width: pct("Width", d.width),
             dry_level: db("Dry", 0.0, -60.0, 6.0),
             out_trim: db("Out Trim", 0.0, -24.0, 24.0),
+            mod_routes: Arc::new(RwLock::new(ModRoutes::new())),
         }
     }
 }
@@ -268,6 +274,11 @@ impl Plugin for Undertow {
                             setter,
                             |setter, p| apply_preset(&params, setter, p),
                         );
+                        suite_core::ui::mod_section(
+                            ui,
+                            &params.mod_routes,
+                            &[("drive", "DRIVE"), ("size", "SIZE"), ("decay", "DECAY"), ("duckdepth", "DEPTH")],
+                        );
                         ui.separator();
 
                         egui::ScrollArea::vertical().show(ui, |ui| {
@@ -364,7 +375,16 @@ impl Plugin for Undertow {
         // Denormal mitigation for the whole process scope (FTZ/DAZ), restored on drop.
         let _ftz = suite_core::dsp::ScopedFtz::enable();
 
-        let s = self.params.snapshot();
+        let mut s = self.params.snapshot();
+        if let Ok(routes) = self.params.mod_routes.try_read() {
+            if !routes.routes.is_empty() {
+                let bus = suite_core::bus::bus();
+                s.drive = routes.modulated_float("drive", &self.params.drive, bus);
+                s.size = routes.modulated_float("size", &self.params.size, bus);
+                s.decay = routes.modulated_float("decay", &self.params.decay, bus);
+                s.duck_depth = routes.modulated_float("duckdepth", &self.params.duck_depth, bus);
+            }
+        }
         self.core.configure(&s);
 
         let num_samples = buffer.samples();

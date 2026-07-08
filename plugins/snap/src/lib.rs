@@ -18,7 +18,8 @@ use nih_plug_egui::{
     egui::{self, Vec2},
     EguiState,
 };
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
+use suite_core::modlisten::ModRoutes;
 
 pub mod dsp;
 pub mod presets;
@@ -54,6 +55,10 @@ pub struct SnapParams {
     #[id = "width"] pub width: FloatParam,
     #[id = "level"] pub level: FloatParam,
     #[id = "keytrack"] pub keytrack: BoolParam,
+
+    /// NERVE listen layer: persisted per-param modulation routes (edited in the MOD section).
+    #[persist = "mod"]
+    pub mod_routes: Arc<RwLock<ModRoutes>>,
 }
 
 fn pct(name: &'static str, default: f32) -> FloatParam {
@@ -123,6 +128,7 @@ impl Default for SnapParams {
                 .with_unit(" dB")
                 .with_value_to_string(formatters::v2s_f32_rounded(1)),
             keytrack: BoolParam::new("Key Track", false),
+            mod_routes: Arc::new(RwLock::new(ModRoutes::new())),
         }
     }
 }
@@ -255,6 +261,11 @@ impl Plugin for Snap {
                             setter,
                             |setter, p| apply_preset(&params, setter, p),
                         );
+                        suite_core::ui::mod_section(
+                            ui,
+                            &params.mod_routes,
+                            &[("drive", "DRIVE"), ("tone", "TONE"), ("decay", "DECAY"), ("level", "LEVEL")],
+                        );
                         ui.separator();
 
                         egui::ScrollArea::vertical().show(ui, |ui| {
@@ -327,7 +338,16 @@ impl Plugin for Snap {
         // Denormal mitigation for the whole process scope (FTZ/DAZ), restored on drop.
         let _ftz = suite_core::dsp::ScopedFtz::enable();
 
-        let s = self.params.snapshot();
+        let mut s = self.params.snapshot();
+        if let Ok(routes) = self.params.mod_routes.try_read() {
+            if !routes.routes.is_empty() {
+                let bus = suite_core::bus::bus();
+                s.drive = routes.modulated_float("drive", &self.params.drive, bus);
+                s.tone = routes.modulated_float("tone", &self.params.tone, bus);
+                s.decay_ms = routes.modulated_float("decay", &self.params.decay, bus);
+                s.level_db = routes.modulated_float("level", &self.params.level, bus);
+            }
+        }
         self.voice.configure(&s);
         let keytrack = self.params.keytrack.value();
         let macro_len = s.decay_ms.max(1.0) / DECAY_REF_MS;

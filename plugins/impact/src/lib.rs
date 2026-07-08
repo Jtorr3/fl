@@ -16,7 +16,8 @@ use nih_plug_egui::{
     egui::{self, Vec2},
     EguiState,
 };
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
+use suite_core::modlisten::ModRoutes;
 
 pub mod dsp;
 pub mod presets;
@@ -59,6 +60,10 @@ pub struct ImpactParams {
     #[id = "subratio"] pub subratio: FloatParam,
     #[id = "keytrack"] pub keytrack: BoolParam,
     #[id = "outgain"] pub outgain: FloatParam,
+
+    /// NERVE listen layer: persisted per-param modulation routes (edited in the MOD section).
+    #[persist = "mod"]
+    pub mod_routes: Arc<RwLock<ModRoutes>>,
 }
 
 fn hz(name: &'static str, default: f32, min: f32, max: f32) -> FloatParam {
@@ -164,6 +169,7 @@ impl Default for ImpactParams {
             outgain: FloatParam::new("Out", d.out_gain_db, FloatRange::Linear { min: -24.0, max: 6.0 })
                 .with_unit(" dB")
                 .with_value_to_string(formatters::v2s_f32_rounded(1)),
+            mod_routes: Arc::new(RwLock::new(ModRoutes::new())),
         }
     }
 }
@@ -310,6 +316,11 @@ impl Plugin for Impact {
                             setter,
                             |setter, p| apply_preset(&params, setter, p),
                         );
+                        suite_core::ui::mod_section(
+                            ui,
+                            &params.mod_routes,
+                            &[("drive", "DRIVE"), ("tone", "TONE"), ("length", "LENGTH"), ("outgain", "OUT")],
+                        );
                         ui.separator();
 
                         egui::ScrollArea::vertical().show(ui, |ui| {
@@ -404,7 +415,16 @@ impl Plugin for Impact {
         // Denormal mitigation for the whole process scope (FTZ/DAZ), restored on drop.
         let _ftz = suite_core::dsp::ScopedFtz::enable();
 
-        let s = self.params.snapshot();
+        let mut s = self.params.snapshot();
+        if let Ok(routes) = self.params.mod_routes.try_read() {
+            if !routes.routes.is_empty() {
+                let bus = suite_core::bus::bus();
+                s.drive = routes.modulated_float("drive", &self.params.drive, bus);
+                s.tone = routes.modulated_float("tone", &self.params.tone, bus);
+                s.length = routes.modulated_float("length", &self.params.length, bus);
+                s.out_gain_db = routes.modulated_float("outgain", &self.params.outgain, bus);
+            }
+        }
         self.voice.configure(&s);
         let keytrack = self.params.keytrack.value();
 

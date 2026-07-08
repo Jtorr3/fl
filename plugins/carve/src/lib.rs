@@ -24,7 +24,8 @@ use nih_plug_egui::{
     EguiState,
 };
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
+use suite_core::modlisten::ModRoutes;
 
 pub mod dsp;
 pub mod presets;
@@ -90,6 +91,10 @@ pub struct CarveParams {
     #[id = "listen"] pub listen: EnumParam<ListenParam>,
     #[id = "mix"] pub mix: FloatParam,
     #[id = "out"] pub out: FloatParam,
+
+    /// NERVE listen layer: persisted per-param modulation routes (edited in the MOD section).
+    #[persist = "mod"]
+    pub mod_routes: Arc<RwLock<ModRoutes>>,
 }
 
 /// Parse the leading (optionally signed / decimal) number out of a display string like
@@ -177,6 +182,7 @@ impl Default for CarveParams {
             .with_unit(" dB")
             .with_value_to_string(formatters::v2s_f32_gain_to_db(1))
             .with_string_to_value(formatters::s2v_f32_gain_to_db()),
+            mod_routes: Arc::new(RwLock::new(ModRoutes::new())),
         }
     }
 }
@@ -302,6 +308,11 @@ impl Plugin for Carve {
                             setter,
                             |setter, p| apply_preset(&params, setter, p),
                         );
+                        suite_core::ui::mod_section(
+                            ui,
+                            &params.mod_routes,
+                            &[("amount", "AMOUNT"), ("maxdepth", "MAX DEPTH"), ("sens", "SENS"), ("mix", "MIX")],
+                        );
                         ui.separator();
 
                         // Live per-band reduction meter.
@@ -369,7 +380,16 @@ impl Plugin for Carve {
         // Denormal mitigation for the whole process scope (FTZ/DAZ), restored on drop.
         let _ftz = suite_core::dsp::ScopedFtz::enable();
 
-        let s = self.params.snapshot();
+        let mut s = self.params.snapshot();
+        if let Ok(routes) = self.params.mod_routes.try_read() {
+            if !routes.routes.is_empty() {
+                let bus = suite_core::bus::bus();
+                s.amount = routes.modulated_float("amount", &self.params.amount, bus);
+                s.max_depth_db = routes.modulated_float("maxdepth", &self.params.maxdepth, bus);
+                s.sens = routes.modulated_float("sens", &self.params.sens, bus);
+                s.mix = routes.modulated_float("mix", &self.params.mix, bus);
+            }
+        }
         self.core.configure(&s);
 
         let num_samples = buffer.samples();

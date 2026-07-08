@@ -17,7 +17,8 @@ use nih_plug_egui::{
     egui::{self, Vec2},
     EguiState,
 };
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
+use suite_core::modlisten::ModRoutes;
 
 pub mod dsp;
 pub mod presets;
@@ -212,6 +213,10 @@ pub struct TracerParams {
     pub mix: FloatParam,
     #[id = "out"]
     pub out: FloatParam,
+
+    /// NERVE listen layer: persisted per-param modulation routes (edited in the MOD section).
+    #[persist = "mod"]
+    pub mod_routes: Arc<RwLock<ModRoutes>>,
 }
 
 fn hz(name: &str, default: f32, min: f32, max: f32) -> FloatParam {
@@ -303,6 +308,7 @@ impl Default for TracerParams {
                 .with_unit(" dB")
                 .with_smoother(SmoothingStyle::Linear(20.0))
                 .with_value_to_string(formatters::v2s_f32_rounded(2)),
+            mod_routes: Arc::new(RwLock::new(ModRoutes::new())),
         }
     }
 }
@@ -500,6 +506,11 @@ impl Plugin for Tracer {
                             setter,
                             |setter, p| apply_preset(&params, setter, p),
                         );
+                        suite_core::ui::mod_section(
+                            ui,
+                            &params.mod_routes,
+                            &[("trim", "TRIM"), ("mix", "MIX"), ("out", "OUT")],
+                        );
                         ui.separator();
 
                         egui::ScrollArea::vertical().show(ui, |ui| {
@@ -631,6 +642,14 @@ impl Plugin for Tracer {
 
         let mut base = self.params.snapshot();
         base.midi_note_hz = self.last_note_hz;
+        if let Ok(routes) = self.params.mod_routes.try_read() {
+            if !routes.routes.is_empty() {
+                let bus = suite_core::bus::bus();
+                base.trim_db = routes.modulated_float("trim", &self.params.trim, bus);
+                base.mix = routes.modulated_float("mix", &self.params.mix, bus);
+                base.out_db = routes.modulated_float("out", &self.params.out, bus);
+            }
+        }
         self.core.configure(&base);
 
         let num_samples = buffer.samples();
