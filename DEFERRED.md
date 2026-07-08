@@ -89,3 +89,21 @@ Each entry: item | feature | why | how to pick it back up.
   the pre-LP; (b) with a codec exposing `decode_fec`/PLC (libopus does), feed the decoder
   the loss flag so FEC/PLC actually reconstruct dropped frames. WIRE's `Settings` already
   carry `bandwidth`/`fec`/`loss_pct`, so only `dsp::ChannelCodec` changes.
+
+## VOXKEY — detector: `Mpm` directly instead of `PitchTracker` (design decision, not a descope)
+- **Decided 2026-07-07 (PRD §0 in-commit decision; VOXKEY shipped full, [x]).** The build
+  brief specifies `suite_core::pitch::PitchTracker` for detection. VOXKEY instead reads
+  `suite_core::pitch::Mpm` directly on the same anti-aliased ~12 kHz decimated front end
+  (1024 window, light median-3), with **no ±35-cent re-lock hysteresis**.
+- **Why:** `PitchTracker`'s hysteresis + median are tuned for TRACER's crossover *stability*
+  (it deliberately refuses updates < 35 cents). On a retuner that is a defect: right after a
+  note change the detector reads up to ~35 cents below the true pitch and then STICKS there,
+  and since the corrected output is `input × target/detected`, that bias lands the retuned
+  note up to 35 cents off the scale tone. Measured empirically: with `PitchTracker` only
+  ~60 % of pitched frames fell within the ±15-cent done-bar; with the hysteresis-free `Mpm`
+  read it is ≥ 80 % (the tone-accuracy the SPECS done-bar requires). Same module, same MPM
+  core — only the smoothing that is wrong for pitch correction is dropped.
+- **How to resume / revisit:** if `suite_core::pitch::PitchTracker` later gains a
+  configurable/zero hysteresis mode (e.g. `set_hysteresis_cents(0.0)`) or a "retune" preset,
+  VOXKEY can switch back to it and delete its private `RetunePitch` wrapper (in
+  `plugins/voxkey/src/dsp.rs`); confidence-gating and the retune math are unchanged.

@@ -319,7 +319,7 @@ Taste-tailored (deps satisfied: IMPACT, MURMUR-FDN, EMBER/SMUDGE engines)
 VOX suite (user request 2026-07-07: rip lyrics from other songs, make them fit
 anything — key/tempo/character conforming; SEANCE's formant-preserving shift engine
 is the shared core, built immediately before)
-- [x] W9-VOXRIP - [ ] VOXKEY - [ ] VOXFIT
+- [x] W9-VOXRIP - [x] VOXKEY - [ ] VOXFIT
 - [ ] UI-CORE-FIX (knobs not sliders, uniform window scaling, working click-to-type — suite-wide retrofit; user-reported defects 2026-07-07)
 - [ ] W1-RUMBLE-BASSLINE - [ ] W2-BREAK-CHOP - [ ] W3-DARK-PROGRESSION
 **HARD CHECKPOINT**
