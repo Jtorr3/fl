@@ -1,0 +1,17 @@
+[package]
+name = "flyby"
+version = "0.1.0"
+edition = "2021"
+license = "ISC"
+description = "Qeynos FLYBY — doppler spatializer (Transfer clone)"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+nih_plug = { workspace = true }
+nih_plug_egui = { workspace = true }
+suite-core = { path = "../../suite-core" }
+
+[dev-dependencies]
+suite-core = { path = "../../suite-core" }

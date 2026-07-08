@@ -333,7 +333,7 @@ Pulled forward from POLISH (user priority 2026-07-07):
 - [x] OVERSEER-ENRICH (v2: auto-classification + theme inference + LEARN + assist + thematic type/theme-filtered banks)
 
 Phase 2b — remaining clones
-- [ ] FLYBY - [ ] CLEAVE - [ ] PLUCK - [ ] SHAPESHIFT - [ ] CHAMBER
+- [x] FLYBY - [ ] CLEAVE - [ ] PLUCK - [ ] SHAPESHIFT - [ ] CHAMBER
 **HARD CHECKPOINT**
 
 Phase 3 — remainder
