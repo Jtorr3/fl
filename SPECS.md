@@ -355,7 +355,51 @@ will make these plugins feel real")
 - Process: one pass over every shipped plugin after PRESET-SYSTEM lands (factory
   presets ride the same disk format). Batchable: one commit per plugin.
 
-### OVERSEER-ENRICH — instrument context + thematic banks
+### OVERSEER-ENRICH — v2 (user upgrade 2026-07-07): OVERSEER should KNOW, not be told
+**Auto-classification (per Node, from the audio itself):**
+- Instrument Type param gains an AUTO setting and it is the DEFAULT. In Auto, a
+  lightweight feature classifier runs on the Node's own input: rolling stats over
+  ~4 s of { low-band (<120 Hz) energy ratio, spectral centroid + tilt, onset rate &
+  transient crest factor, pitch confidence (suite_core::pitch) + pitched-frame ratio,
+  sibilance band (5-9 kHz) ratio, sustain profile (env decay slope), stereo width }.
+- Rule/score classifier maps features -> type scores: KICK (low-band dominant +
+  sparse strong onsets + fast decay), BASS (low-band + pitched + sustained), RUMBLE
+  (low-band + no discrete onsets), PERC/HATS (centroid high + dense onsets +
+  unpitched), SNARE/CLAP (mid burst + noise + moderate rate), VOCAL (pitched +
+  formant-band energy + sibilance present), PAD/ATMOS (sustained + wide + slow
+  onsets), LEAD (pitched + mid-high + rhythmic), FX/BUS fallback.
+- Confidence gating: classification applies only when the top score clears a margin;
+  below margin the Node stays at its last confident type (or GENERIC defaults).
+  Manual selection always overrides Auto (param order: AUTO first, then types).
+  The GUI shows the guessed type + a confidence indicator; one click pins it.
+- Nodes publish their type + confidence + feature summary to the Bus (slot fields
+  already exist for metadata — extend the slot struct).
+
+**Theme inference (Master, from the total of all tracks):**
+- Master aggregates all live Nodes' types/features + its own mix analysis (tempo via
+  transport, overall spectral tilt, onset density across nodes, dynamic range) into
+  a THEME guess from profiles: DARK-TECHNO (4-floor kick+rumble+sparse tops, slow),
+  DNB/BREAKS (fast tempo, break density, sub+reese), AMBIENT/ATMOS (few onsets, wide,
+  sustained), HOUSE/GROOVE, GENERIC. Shown on the Master GUI with confidence.
+- Theme drives SUPPORT, not takeover: an ASSIST strength knob (0 = display only,
+  default 30%) scales how far theme-derived targets nudge processing: master EQ
+  tilt target, multiband comp character (slow/glue vs fast/punch), limiter drive,
+  and per-Node suggested strip settings (shown as ghost values on Node GUIs; a
+  SUGGEST-ONLY toggle keeps them advisory). User params always win: any manual
+  touch excludes that param from assist (same steal-back pattern as overrides).
+- All inference block-rate/GUI-thread; no allocations in process(); classification
+  features computed from existing meter taps where possible.
+
+**Done bar (mechanical):** classifier fixtures via testsig — synth_kick stream ->
+KICK, sliding_saw/sustained saw -> BASS, synth_vocal -> VOCAL, noise-burst train ->
+PERC, slow wide chord pad -> PAD; >= 4/5 correct with confidence above margin, and
+a white-noise/silence stream stays below margin (no false confidence). Theme: a
+synthetic techno session (kick+rumble+pad node streams at 130 BPM) -> DARK-TECHNO
+profile wins; assist at 0 changes NOTHING in the audio path (null test).
+
+**Also retains from v1:** context-tuned defaults per type, type-aware metering,
+Master grid badges/colors, thematic preset banks filtered by (now auto-known) type.
+
 - Node gains an Instrument Type param (enum: KICK, BASS, RUMBLE, PERC, HATS, SNARE,
   BREAKS, VOCAL, PAD, LEAD, ATMOS, FX, BUS, MASTER-ish). Type drives:
   (a) context-tuned defaults (EQ band starting freqs, comp time constants, sat amount,
