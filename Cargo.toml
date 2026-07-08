@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["suite-core", "plugins/_template", "plugins/grit", "plugins/ember", "plugins/impact", "plugins/tracer", "plugins/overseer", "plugins/drift", "plugins/wire", "plugins/ouroboros", "plugins/swarm", "plugins/smudge", "plugins/murmur", "plugins/undertow", "plugins/snap", "plugins/seance", "plugins/voxkey", "plugins/voxfit", "plugins/ascend", "plugins/flyby", "plugins/cleave", "plugins/pluck", "plugins/shapeshift", "plugins/chamber", "plugins/carve", "plugins/nerve", "xtask"]
+members = ["suite-core", "plugins/_template", "plugins/grit", "plugins/ember", "plugins/impact", "plugins/tracer", "plugins/overseer", "plugins/drift", "plugins/wire", "plugins/ouroboros", "plugins/swarm", "plugins/smudge", "plugins/murmur", "plugins/undertow", "plugins/snap", "plugins/seance", "plugins/voxkey", "plugins/voxfit", "plugins/ascend", "plugins/flyby", "plugins/cleave", "plugins/pluck", "plugins/shapeshift", "plugins/chamber", "plugins/carve", "plugins/nerve", "plugins/halt", "xtask"]
 
 [workspace.package]
 version = "0.1.0"
