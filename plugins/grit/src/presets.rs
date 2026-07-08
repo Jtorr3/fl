@@ -30,7 +30,7 @@ pub const PRESET_JSON: &[&str] = &[
          "trim": 0.0, "drive": 5.0, "depth": 0.7, "curve": 1.4, "attack": 0.5,
          "release": 35.0, "sc_focus": 90.0, "sc_width": 0.8, "sc_listen": 0,
          "pre_hp": 30.0, "pre_lp": 9000.0, "post_hp": 45.0, "post_lp": 13000.0,
-         "auto_gain": 1, "mix": 0.9, "out": -2.0 }"#,
+         "auto_gain": 1, "mix": 0.9, "out": -4.0 }"#,
     r#"{ "name": "Sub Punch Driver", "category": "Kick-Driven", "mode": 0, "shape": 1,
          "trim": 0.0, "drive": 4.0, "depth": 1.0, "curve": 0.9, "attack": 3.0,
          "release": 80.0, "sc_focus": 45.0, "sc_width": 1.3, "sc_listen": 0,
@@ -100,11 +100,14 @@ pub const PRESET_JSON: &[&str] = &[
          "release": 30.0, "sc_focus": 70.0, "sc_width": 0.6, "sc_listen": 0,
          "pre_hp": 20.0, "pre_lp": 4000.0, "post_hp": 30.0, "post_lp": 7000.0,
          "auto_gain": 1, "mix": 1.0, "out": -9.2 }"#,
-    r#"{ "name": "Nyquist Screech", "category": "Extreme", "mode": 1, "shape": 2,
-         "trim": 4.0, "drive": 16.0, "depth": 0.95, "curve": 0.8, "attack": 1.0,
-         "release": 45.0, "sc_focus": 5000.0, "sc_width": 1.0, "sc_listen": 0,
-         "pre_hp": 200.0, "pre_lp": 16000.0, "post_hp": 150.0, "post_lp": 18000.0,
-         "auto_gain": 1, "mix": 0.85, "out": -4.7 }"#,
+    // Distorted-808 destroyer (Akiaura / agonyOST reference): keeps the sub, stays
+    // glossy-dark. Waveshape mode so the kick pumps the bias; Tape shape for a
+    // compressed, non-fizzy edge; dark pre/post filtering tames the high harmonics.
+    r#"{ "name": "Sub Detonator", "category": "Extreme", "mode": 1, "shape": 1,
+         "trim": 2.0, "drive": 15.0, "depth": 0.9, "curve": 0.9, "attack": 1.0,
+         "release": 60.0, "sc_focus": 55.0, "sc_width": 0.8, "sc_listen": 0,
+         "pre_hp": 25.0, "pre_lp": 5500.0, "post_hp": 30.0, "post_lp": 7000.0,
+         "auto_gain": 1, "mix": 1.0, "out": -5.5 }"#,
     r#"{ "name": "Fold Abyss", "category": "Extreme", "mode": 1, "shape": 2,
          "trim": 3.0, "drive": 14.0, "depth": 1.0, "curve": 1.3, "attack": 2.0,
          "release": 90.0, "sc_focus": 55.0, "sc_width": 0.7, "sc_listen": 0,

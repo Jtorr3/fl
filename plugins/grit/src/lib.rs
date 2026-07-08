@@ -636,6 +636,61 @@ mod render_tests {
         );
     }
 
+    /// SOUND-PASS audition render (permanent infra, `#[ignore]`d in normal runs).
+    /// Renders every factory preset AND `Settings::default()` over genre-right musical
+    /// sources — main = detuned reese bass, sidechain = 4-on-the-floor kick loop — into
+    /// renders/_audition/GRIT/<QVS_AUDITION_DIR or "before">/<preset>.wav, plus a 1 kHz
+    /// sine aliasing probe through the hottest preset. Analyzed offline by tools/audition.py.
+    #[test]
+    #[ignore]
+    fn audition_render_musical_sources() {
+        use crate::dsp::Settings;
+        use suite_core::testsig;
+
+        let sr = 48_000.0f32;
+        let subdir = std::env::var("QVS_AUDITION_DIR").unwrap_or_else(|_| "before".into());
+
+        // Main: 4 s of detuned reese bass at 50 Hz (dark, low, thick).
+        let main_src = testsig::synth_reese(50.0, 4.0, sr);
+        // Sidechain: 4-on-the-floor kick loop at 140 BPM, sized to cover the main length.
+        // One bar at 140 BPM ≈ 1.714 s, so ceil(4 / 1.714) + 1 = 4 bars comfortably covers it.
+        let bar_samples = (60.0 / 140.0 * sr).round() as usize * 4;
+        let n_bars = (main_src.len() / bar_samples) + 2;
+        let sc = testsig::synth_kick_loop(140.0, n_bars, sr);
+
+        // Render every factory preset plus the default state (labelled "default").
+        let presets = load_all(PRESET_JSON);
+        let mut jobs: Vec<(String, Settings)> = presets
+            .iter()
+            .map(|p| {
+                let fname = p.name.to_lowercase().replace([' ', '·', '-'], "_");
+                (fname, settings_from_preset(p))
+            })
+            .collect();
+        jobs.push(("default".into(), Settings::default()));
+
+        for (fname, s) in &jobs {
+            let mut core = GritCore::new(sr);
+            let mut out = main_src.clone();
+            core.process_mono(&mut out, &sc, s);
+            let path = render_path("_audition/GRIT", &format!("{subdir}/{fname}"));
+            write_wav(&path, &out, sr as u32).expect("write audition render");
+        }
+
+        // Aliasing probe: a hot 1 kHz sine at 96 kHz-length buffer through the hottest
+        // preset ("Total Annihilation"). Read inharmonic residual with --sine-probe 1000.
+        if let Some(p) = presets.iter().find(|p| p.name == "Total Annihilation") {
+            let s = settings_from_preset(p);
+            let probe = testsig::sine(1000.0, 0.5, 96_000, sr);
+            let mut out = probe.clone();
+            let scz = vec![0.0f32; probe.len()];
+            let mut core = GritCore::new(sr);
+            core.process_mono(&mut out, &scz, &s);
+            let path = render_path("_audition/GRIT", &format!("{subdir}/_alias_probe_1k"));
+            write_wav(&path, &out, sr as u32).expect("write alias probe");
+        }
+    }
+
     /// Render each factory preset with a 1 kHz main sine and a pulsed sidechain,
     /// write the WAV into renders/GRIT/, and assert the universal properties.
     #[test]
