@@ -101,3 +101,23 @@
   without it. `build.ps1` prepends `tools\bin\mingw64\bin` to PATH automatically.
   If you re-provision the machine, re-download winlibs into `tools/bin/mingw64`
   (or any full MinGW-w64 providing as.exe/dlltool.exe/ld.exe on PATH).
+
+## UI-CORE-FIX — GUI interaction (verify in FL; headless gate skips GUI tests)
+- [ ] **Knobs + typing (every plugin).** Open any Qeynos plugin editor in FL. Confirm the
+      new **rotary knobs**: drag up/down to change, **Ctrl-drag** for fine (~10×),
+      **double-click** to reset to default, **scroll** to step. Then **click a value
+      readout** and type an exact value (e.g. a dB/Hz/note), press **Enter** — it should
+      commit; **Esc** cancels; clicking away commits. (Parse/commit + scale math are
+      unit-tested in `suite_core::ui`; pluginval runs `--skip-gui-tests`, so the live
+      window/keyboard behavior is only verifiable by hand in FL.)
+- [ ] **FL keyboard focus toggle (if typing does nothing).** FL's wrapper can swallow
+      computer-keyboard keys for *Typing keyboard to piano*. If typed digits don't reach a
+      Qeynos knob's text field, on the plugin wrapper title bar enable **"Allow the plugin
+      to steal keyboard focus"** (turn off *Typing keyboard to piano* while the editor is
+      focused). Once flipped, Enter-to-commit should work. (docs/UI.md documents this.)
+- [ ] **Uniform scaling.** Drag a plugin window's bottom-right corner — the whole editor
+      should **zoom as one unit** (no layout reflow), snapping near **75/100/125/150 %**.
+      The corner **size menu** (top-right, shows current %) lists the snap points. Close and
+      reopen the project — the chosen size should be restored. NOTE: the menu snaps the
+      current window's zoom; to enlarge the OS window use the corner drag (DEFERRED.md
+      documents the missing host-resize API).

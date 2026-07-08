@@ -107,3 +107,22 @@ Each entry: item | feature | why | how to pick it back up.
   configurable/zero hysteresis mode (e.g. `set_hysteresis_cents(0.0)`) or a "retune" preset,
   VOXKEY can switch back to it and delete its private `RetunePitch` wrapper (in
   `plugins/voxkey/src/dsp.rs`); confidence-gating and the retune math are unchanged.
+
+## UI-CORE-FIX — window scaling: no host-resize API from shared code (accepted limitation)
+- **Decided 2026-07-07 (PRD §0 in-commit decision; UI-CORE-FIX shipped full, [x]).**
+- **What:** `nih_plug_egui` exposes no public way for shared code (suite-core) to *request*
+  a host window resize — `EguiState::set_requested_size` is `pub(crate)` and only
+  `ResizableWindow`'s corner-drag calls it. So `suite_core::ui::ScaledWindow`'s size menu
+  snaps the **zoom of the current window** (75/100/125/150 %); it cannot grow the OS window
+  programmatically. To reach a larger physical window at a snapped zoom, the user drags the
+  corner (the drag snaps onto the stops). Content is authored at a fixed base logical size
+  and `min_size` = base, so nothing clips at 100 %.
+- **Why acceptable:** the user complaint was "rescaling is clunky" (layout reflow on
+  resize). Uniform egui zoom fixes that — the editor scales as one unit and the effective
+  size/zoom persists via `EguiState`. The only lost nicety is a menu that also resizes the
+  OS window; the corner-drag path covers it. The exact snap **lock** is session state; the
+  effective window size (hence scale) is what persists.
+- **How to resume / revisit:** if a future nih-plug rev adds a public
+  `EguiState::request_resize` (or `ctx.send_viewport_cmd(InnerSize)` starts working under
+  baseview), make the menu buttons call it so a snap grows the window to `base × snap`, and
+  drop this note. All logic lives in `suite_core::ui::ScaledWindow` / `size_menu`.

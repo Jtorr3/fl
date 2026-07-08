@@ -31,6 +31,16 @@ admin junction exists (see `CHECKPOINTS.md`).
 | VOXKEY | Vocal FX | Vocal retuner (autotune) — pitch-tracks a mono vocal (`suite_core::pitch::Mpm`) and snaps it to the nearest tone of a **Root + Scale** (Chromatic/Major/Natural+Harmonic Minor/Phrygian/Dorian/Minor Pentatonic) or a **held MIDI note**, retuning through two formant-preserving **`ShiftEngine`s** (envelope-preserve on, so no chipmunking). **Retune Speed** 0–400 ms (0 = hard-snap autotune artifact), **Amount** 0–100 %, **Humanize** cents drift, **Formant Offset** ±12 st (independent), **Confidence Gate** leaves breaths/silence untouched. Live IN→TGT note read-out. Mix/Out; +2048-sample latency (auto delay-comp) | [docs/VOXKEY.md](docs/VOXKEY.md) |
 | VOXFIT | Vocal FX | Vocal character conformer — makes a ripped/foreign acapella **sit** in a different production. Pitch-**independent** formant shift (**`ShiftEngine`** formant-only, ±5 st) → **de-esser** (complementary 5 kHz split, EnvFollower-keyed, threshold/amount/**listen**) → dynamic **harshness tamer** (2–5 kHz bell cut that follows band energy) → **tilt EQ** (complementary shelves @1 kHz, ±6 dB, dark↔bright) → **proximity** low-mid shelf → **air** high shelf → out. The **SIT** macro sweeps a curated dark-mix conform (formant + mild de-ess + presence dip + dark tilt + proximity). Mix/Out; +2048-sample latency (auto delay-comp) | [docs/VOXFIT.md](docs/VOXFIT.md) |
 
+## Controls (shared UI)
+
+Every editor uses the same widgets from `suite_core::ui`, so controls behave identically
+across the suite: **rotary knobs** (drag up/down; Ctrl-drag = fine ~10×; double-click =
+reset; scroll = step), **click-the-value to type** an exact value (Enter commits via the
+param's own parser, Esc cancels), and **uniform window scaling** (the whole editor zooms
+as one unit with 75/100/125/150 % snap points in a corner size menu, persisted with the
+project). Boolean params render as toggles. Full reference: [docs/UI.md](docs/UI.md).
+The endgame CONSOLE v2 theme only re-skins these widgets; the interactions stay as-is.
+
 ## Tools (Phase 4)
 
 | Tool | Type | Summary | Docs |
