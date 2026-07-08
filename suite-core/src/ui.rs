@@ -662,9 +662,52 @@ impl<'a> PresetBar<'a> {
                             }
                         }
                         None => {
-                            ui.label(egui::RichText::new("FACTORY").color(ACCENT).small());
-                            for p in self.factory.iter() {
-                                choose(ui, &mut st, p);
+                            // PRESET-EXPANSION: when the bank tags presets with
+                            // categories, render one headed section per category (in
+                            // first-appearance order) so the deep banks read as
+                            // sections. Untagged presets fall under a plain FACTORY
+                            // heading. A bank with no categories at all (e.g. _template)
+                            // is still one flat FACTORY list — fully back-compatible.
+                            let has_categories =
+                                self.factory.iter().any(|p| p.category.is_some());
+                            if !has_categories {
+                                ui.label(egui::RichText::new("FACTORY").color(ACCENT).small());
+                                for p in self.factory.iter() {
+                                    choose(ui, &mut st, p);
+                                }
+                            } else {
+                                // Distinct categories in first-appearance order.
+                                let mut cats: Vec<&str> = Vec::new();
+                                for p in self.factory.iter() {
+                                    if let Some(c) = p.category.as_deref() {
+                                        if !cats.contains(&c) {
+                                            cats.push(c);
+                                        }
+                                    }
+                                }
+                                let mut first = true;
+                                for cat in cats {
+                                    if !first {
+                                        ui.separator();
+                                    }
+                                    first = false;
+                                    ui.label(egui::RichText::new(cat).color(ACCENT).small());
+                                    for p in self.factory.iter() {
+                                        if p.category.as_deref() == Some(cat) {
+                                            choose(ui, &mut st, p);
+                                        }
+                                    }
+                                }
+                                // Any untagged stragglers under a plain FACTORY heading.
+                                if self.factory.iter().any(|p| p.category.is_none()) {
+                                    ui.separator();
+                                    ui.label(egui::RichText::new("FACTORY").color(ACCENT).small());
+                                    for p in self.factory.iter() {
+                                        if p.category.is_none() {
+                                            choose(ui, &mut st, p);
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
