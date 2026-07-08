@@ -22,7 +22,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use suite_core::classify::{classify, FeatureSummary, InstrumentType, NodeReport};
 
 /// Number of published feature scalars ([`FeatureSummary::NFIELDS`]).
-pub const NUM_FEAT: usize = 12;
+pub const NUM_FEAT: usize = FeatureSummary::NFIELDS;
 /// Sentinel published in `override_type` when the Node is on AUTO (no manual/learned pin).
 const TYPE_AUTO: u32 = u32::MAX;
 

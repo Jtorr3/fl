@@ -21,7 +21,7 @@ use crate::eq::{EqSettings, FourBandEq};
 use crate::node::load_f32;
 
 /// Published-feature array width ([`FeatureSummary::NFIELDS`]).
-const NFEAT: usize = 12;
+const NFEAT: usize = FeatureSummary::NFIELDS;
 
 /// Cross-thread state shared between the Master's audio core and its editor (OVERSEER-ENRICH
 /// theme inference + assist + LEARN). Audio publishes the master mix features + transport

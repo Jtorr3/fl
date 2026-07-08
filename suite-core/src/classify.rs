@@ -210,14 +210,20 @@ pub struct FeatureSummary {
     pub width: f32,
     /// Rough loudness (RMS) in dBFS — used only for the silence gate.
     pub level_db: f32,
+    /// Energy in the mud region (bands centred 180/360 Hz ≈ 150–500 Hz) as a fraction of
+    /// total band energy, `0..1`. Feeds the LEARN mud-cut suggestion (SOUND-PASS).
+    pub mud_ratio: f32,
+    /// Energy in the harshness region (bands centred 2.88/5 kHz ≈ 2–5 kHz) as a fraction
+    /// of total band energy, `0..1`. Feeds the LEARN presence-cut suggestion (SOUND-PASS).
+    pub harsh_ratio: f32,
 }
 
 impl FeatureSummary {
     /// Number of scalar fields (bus-publishing array width).
-    pub const NFIELDS: usize = 12;
+    pub const NFIELDS: usize = 14;
 
     /// Flatten to a fixed array for lock-free publishing over the bus.
-    pub fn to_array(&self) -> [f32; 12] {
+    pub fn to_array(&self) -> [f32; Self::NFIELDS] {
         [
             self.low_ratio,
             self.centroid_hz,
@@ -231,11 +237,13 @@ impl FeatureSummary {
             self.sustain,
             self.width,
             self.level_db,
+            self.mud_ratio,
+            self.harsh_ratio,
         ]
     }
 
     /// Inverse of [`FeatureSummary::to_array`].
-    pub fn from_array(a: &[f32; 12]) -> Self {
+    pub fn from_array(a: &[f32; Self::NFIELDS]) -> Self {
         Self {
             low_ratio: a[0],
             centroid_hz: a[1],
@@ -249,6 +257,8 @@ impl FeatureSummary {
             sustain: a[9],
             width: a[10],
             level_db: a[11],
+            mud_ratio: a[12],
+            harsh_ratio: a[13],
         }
     }
 }
@@ -268,6 +278,8 @@ impl Default for FeatureSummary {
             sustain: 0.0,
             width: 0.0,
             level_db: f32::NEG_INFINITY,
+            mud_ratio: 0.0,
+            harsh_ratio: 0.0,
         }
     }
 }
@@ -702,6 +714,11 @@ fn summarize(
         f32::NEG_INFINITY
     };
 
+    // Mud (bands centred 180/360 Hz) and harshness (bands centred 2.88/5 kHz) ratios —
+    // the LEARN suggestion axes added by the SOUND-PASS OVERSEER deep-dive.
+    let mud_ratio = ((band[2] + band[3]) / total).clamp(0.0, 1.0);
+    let harsh_ratio = ((band[6] + band[7]) / total).clamp(0.0, 1.0);
+
     FeatureSummary {
         low_ratio,
         centroid_hz,
@@ -715,6 +732,8 @@ fn summarize(
         sustain,
         width,
         level_db,
+        mud_ratio,
+        harsh_ratio,
     }
 }
 

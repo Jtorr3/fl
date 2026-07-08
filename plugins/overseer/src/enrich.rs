@@ -264,9 +264,16 @@ pub fn context_defaults(t: InstrumentType) -> NodeSettings {
 // LEARN ghost suggestions (Node)
 // ===========================================================================
 
+/// Fixed center of the LEARN mud-cut suggestion bell (Bell 1).
+pub const SUGGEST_MUD_HZ: f32 = 300.0;
+/// Fixed center of the LEARN presence/harshness-cut suggestion bell (Bell 2).
+pub const SUGGEST_HARSH_HZ: f32 = 3_500.0;
+
 /// A LEARN's suggested strip moves, computed from the captured stats. Shown as ghost values
 /// with an APPLY button. Deterministic function of the features (SPECS: "measured low-band
-/// excess -> EQ suggestion; crest factor -> comp threshold/ratio suggestion").
+/// excess -> EQ suggestion; crest factor -> comp threshold/ratio suggestion"; SOUND-PASS
+/// added the mud/harsh bell moves so assist can actually fix 200-500 Hz mud and 2-5 kHz
+/// harshness, not just sub excess).
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
 pub struct NodeSuggestion {
     /// Suggested low-shelf gain (dB): tame an excessive sub, or lift a thin low end.
@@ -275,17 +282,46 @@ pub struct NodeSuggestion {
     pub threshold: f32,
     /// Suggested compressor ratio, derived from crest factor.
     pub ratio: f32,
+    /// Suggested Bell 1 move (dB) at [`SUGGEST_MUD_HZ`] — a mud cut when the captured
+    /// 150-500 Hz energy share is excessive. 0 = no move (APPLY leaves Bell 1 alone).
+    #[serde(default)]
+    pub b1_gain: f32,
+    /// Suggested Bell 2 move (dB) at [`SUGGEST_HARSH_HZ`] — a presence cut when the
+    /// captured 2-5 kHz energy share is excessive. 0 = no move.
+    #[serde(default)]
+    pub b2_gain: f32,
 }
 
 /// Compute ghost suggestions from a captured feature summary.
 pub fn suggest_from_features(f: &FeatureSummary) -> NodeSuggestion {
-    // Low-band excess → low-shelf EQ suggestion.
+    // Low-band excess → low-shelf EQ suggestion; a starved sub gets a lift.
     let low_gain = if f.low_ratio > 0.6 {
         -3.0
     } else if f.low_ratio > 0.45 {
         -1.5
+    } else if f.low_ratio < 0.04 {
+        3.0
     } else if f.low_ratio < 0.08 {
         1.5
+    } else {
+        0.0
+    };
+
+    // Mud excess (150-500 Hz share) → Bell 1 cut at 300 Hz. Thresholds calibrated on the
+    // testsig sources: a clean reese reads ~0.35, +6 dB @ 300 Hz pushes it past 0.5.
+    let b1_gain = if f.mud_ratio > 0.55 {
+        -4.0
+    } else if f.mud_ratio > 0.42 {
+        -2.5
+    } else {
+        0.0
+    };
+    // Harshness excess (2-5 kHz share) → Bell 2 cut at 3.5 kHz. A clean vocal reads
+    // ~0.1; +6 dB @ 3.5 kHz pushes it past 0.25.
+    let b2_gain = if f.harsh_ratio > 0.4 {
+        -4.0
+    } else if f.harsh_ratio > 0.22 {
+        -2.5
     } else {
         0.0
     };
@@ -305,6 +341,8 @@ pub fn suggest_from_features(f: &FeatureSummary) -> NodeSuggestion {
         low_gain,
         threshold,
         ratio,
+        b1_gain,
+        b2_gain,
     }
 }
 

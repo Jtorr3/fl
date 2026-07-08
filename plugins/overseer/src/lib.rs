@@ -433,14 +433,17 @@ fn node_enrich_ui(
     if let Some(s) = sug {
         ui.horizontal(|ui| {
             ui.label(egui::RichText::new("SUGGEST").color(TEXT_DIM).small());
-            ui.label(
-                egui::RichText::new(format!(
-                    "Low {:+.1} dB · Thresh {:.1} dB · Ratio {:.1}:1",
-                    s.low_gain, s.threshold, s.ratio
-                ))
-                .color(ACCENT)
-                .small(),
+            let mut txt = format!(
+                "Low {:+.1} dB · Thresh {:.1} dB · Ratio {:.1}:1",
+                s.low_gain, s.threshold, s.ratio
             );
+            if s.b1_gain != 0.0 {
+                txt.push_str(&format!(" · Mud {:+.1} dB @300", s.b1_gain));
+            }
+            if s.b2_gain != 0.0 {
+                txt.push_str(&format!(" · Harsh {:+.1} dB @3.5k", s.b2_gain));
+            }
+            ui.label(egui::RichText::new(txt).color(ACCENT).small());
             if ui
                 .button("APPLY")
                 .on_hover_text("Apply the ghost suggestions to the strip")
@@ -449,6 +452,14 @@ fn node_enrich_ui(
                 set_f(setter, &params.low_gain, s.low_gain);
                 set_f(setter, &params.threshold, s.threshold);
                 set_f(setter, &params.ratio, s.ratio);
+                if s.b1_gain != 0.0 {
+                    set_f(setter, &params.b1_freq, enrich::SUGGEST_MUD_HZ);
+                    set_f(setter, &params.b1_gain, s.b1_gain);
+                }
+                if s.b2_gain != 0.0 {
+                    set_f(setter, &params.b2_freq, enrich::SUGGEST_HARSH_HZ);
+                    set_f(setter, &params.b2_gain, s.b2_gain);
+                }
             }
         });
     }
