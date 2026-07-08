@@ -231,3 +231,16 @@
       NERVE's (`%TEMP%\qeynos-bus`), so even bridged instances publish into it — but keep the
       suite un-bridged (FL default) as the supported configuration. OVERSEER / NERVE / _template
       do not publish spectra (DEFERRED.md).
+
+## W5 — PROJECT-JANITOR (2026-07-08)
+- [ ] **Live scan/apply (FL was NOT live when W5 shipped).** `fl_get_channel_count`
+      returned -1 and `fl_get_all_channels` timed out this session (the MCP
+      `fl_connection_status` can report connected when it is not — verify with a real
+      read command, as the loop did). W5 shipped fixture-verified only (52 offline
+      checks green). When FL is running with the FLStudioMCP controller (loopMIDI
+      enabled in BOTH MIDI Input and Output at the same port): open a messy project,
+      run `uv run --python 3.12 tools\project_janitor.py` to preview the rename/recolor
+      plan, sanity-check the classifications, then `--apply`. Confirm channels + mixer
+      tracks get canonical names (KICK/SNARE/HAT/PERC/BASS/VOX/PAD/LEAD/FX/CLAP) and
+      category colors, Master is untouched, and a second `--apply` reports 0 ops
+      (idempotent).
