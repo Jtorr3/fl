@@ -14,6 +14,10 @@ use nih_plug_egui::{
 use std::sync::Arc;
 use suite_core::presets::{load_all, Preset};
 
+/// The plugin's usage manual, embedded from the docs file and rendered in-GUI by the '?'
+/// button (BUILT-IN-MANUALS). Same source of truth as the GitHub-readable docs.
+pub const MANUAL_DOC: &str = include_str!("../../../docs/_TEMPLATE.md");
+
 /// Factory presets — the template keeps a couple so it also demonstrates the suite
 /// preset bar (factory + user save/load) that every plugin adopts. Values are plain
 /// (linear gain).
@@ -160,6 +164,7 @@ impl Plugin for Template {
                             egui::RichText::new("QEYNOS · TEMPLATE")
                                 .color(suite_core::ui::ACCENT),
                         );
+                        suite_core::ui::manual_button(ui, "_template", "TEMPLATE", MANUAL_DOC);
                         ui.add_space(8.0);
 
                         // Preset bar: factory + user presets, save/save-as/delete, dirty dot.
@@ -276,6 +281,14 @@ mod tests {
     use super::GainDsp;
     use suite_core::harness::{null_residual_db, render_offline, rms_dbfs};
     use suite_core::testsig;
+
+    #[test]
+    fn manual_covers_all_params_and_has_recipes() {
+        suite_core::manual::assert_manual_covers_params(
+            super::MANUAL_DOC,
+            &super::TemplateParams::default(),
+        );
+    }
 
     #[test]
     fn unity_gain_nulls_against_input() {

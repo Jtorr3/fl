@@ -46,6 +46,23 @@ Click the value text under any knob to edit it:
 > plugin wrapper. See `CHECKPOINTS.md`. Correctness of the parse/commit path itself is
 > covered by unit tests in `suite_core::ui`; the FL wrapper toggle is host-side.
 
+## Manual (the built-in '?' panel)
+
+Every plugin editor carries a small **`?` button** in the top-right of the header area
+(just left of the size menu). It toggles a closable, scrollable **manual panel** rendered
+from the plugin's own `docs/<PLUGIN>.md` — one source of truth, readable both on GitHub
+and in-GUI.
+
+- The doc is embedded at compile time (`include_str!`) and parsed by
+  `suite_core::manual` into `## ` sections; `suite_core::ui::manual_button` renders them.
+- Four canonical sections are surfaced in reading order (missing ones are skipped, never a
+  panic): **What It Is** (2-3 sentences), **Signal Flow** (the ASCII diagram, monospace),
+  **Controls** (every param — what it does *musically*), **Recipes** (concrete workflow
+  recipes with real settings, tuned to dark-techno / atmospheric-dnb / vocal-rip work).
+- A per-plugin test (`manual::assert_manual_covers_params`) cross-checks that every param's
+  display name appears in the Controls section (catches drift) and that Recipes is
+  non-empty.
+
 ## Uniform window scaling
 
 The whole editor scales as **one unit** (egui zoom / pixels-per-point) rather than

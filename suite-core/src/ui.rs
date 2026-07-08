@@ -953,6 +953,203 @@ pub fn mod_section(
         });
 }
 
+// ===========================================================================
+// Built-in manual — the '?' button + scrollable, closable panel (BUILT-IN-MANUALS)
+// ===========================================================================
+
+/// The suite-standard **manual button**: a small `?` anchored to the window's top-right
+/// (just left of the size menu), and — while toggled open — a closable, scrollable panel
+/// rendering the plugin's embedded `docs/<PLUGIN>.md` via [`crate::manual`].
+///
+/// Retrofit is one mechanical call in a plugin's editor closure — position-independent,
+/// since it draws into its own top-anchored [`egui::Area`]:
+///
+/// ```ignore
+/// const MANUAL_DOC: &str = include_str!("../../../docs/GRIT.md");
+/// // ...inside the editor, anywhere in the ScaledWindow content:
+/// suite_core::ui::manual_button(ui, "grit", "GRIT", MANUAL_DOC);
+/// ```
+///
+/// `plugin_id` namespaces the open/close state (and must be unique per editor — OVERSEER
+/// passes distinct ids for its Node and Master windows); `display_name` titles the panel.
+pub fn manual_button(ui: &egui::Ui, plugin_id: &str, display_name: &str, doc: &str) {
+    let ctx = ui.ctx().clone();
+    let open_id = egui::Id::new(("qeynos-manual-open", plugin_id));
+
+    // '?' button — its own foreground Area anchored top-right, sitting to the left of the
+    // size menu's "NN%" button (which is at offset -6). Position-independent so the retrofit
+    // call can go anywhere in the editor body.
+    egui::Area::new(egui::Id::new(("qeynos-manual-btn", plugin_id)))
+        .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-46.0, 5.0))
+        .order(egui::Order::Foreground)
+        .show(&ctx, |ui| {
+            let mut open: bool = ui.ctx().memory(|m| m.data.get_temp(open_id).unwrap_or(false));
+            let btn = egui::Button::new(egui::RichText::new("?").color(ACCENT).strong())
+                .min_size(Vec2::splat(18.0));
+            if ui.add(btn).on_hover_text("Manual").clicked() {
+                open = !open;
+                ui.ctx().memory_mut(|m| m.data.insert_temp(open_id, open));
+            }
+        });
+
+    let open: bool = ctx.memory(|m| m.data.get_temp(open_id).unwrap_or(false));
+    if !open {
+        return;
+    }
+
+    let manual = crate::manual::Manual::parse(doc);
+    let mut still_open = true;
+    egui::Window::new(egui::RichText::new(format!("{display_name} · MANUAL")).color(ACCENT))
+        .id(egui::Id::new(("qeynos-manual-win", plugin_id)))
+        .open(&mut still_open)
+        .collapsible(false)
+        .resizable(true)
+        .default_width(470.0)
+        .default_height(540.0)
+        .show(&ctx, |ui| {
+            egui::ScrollArea::vertical()
+                .auto_shrink([false, false])
+                .show(ui, |ui| render_manual(ui, &manual));
+        });
+    if !still_open {
+        ctx.memory_mut(|m| m.data.insert_temp(open_id, false));
+    }
+}
+
+/// Render the four canonical sections (in reading order) that are present. Signal Flow is
+/// verbatim monospace (the ASCII diagram); the rest go through a light markdown-ish line
+/// renderer. Missing sections are simply skipped.
+fn render_manual(ui: &mut egui::Ui, manual: &crate::manual::Manual) {
+    const ORDER: [&str; 4] = ["What It Is", "Signal Flow", "Controls", "Recipes"];
+    let mut drew_any = false;
+    for (i, title) in ORDER.iter().enumerate() {
+        let Some(body) = manual.section(title) else {
+            continue;
+        };
+        if body.trim().is_empty() {
+            continue;
+        }
+        if i != 0 && drew_any {
+            ui.add_space(10.0);
+        }
+        drew_any = true;
+        ui.label(egui::RichText::new(*title).color(ACCENT).strong().size(15.0));
+        ui.add_space(2.0);
+        if title.eq_ignore_ascii_case("Signal Flow") {
+            render_monospace_block(ui, body);
+        } else {
+            render_lines(ui, body);
+        }
+    }
+    if !drew_any {
+        ui.label(
+            egui::RichText::new("(no manual content)")
+                .color(TEXT_DIM)
+                .italics(),
+        );
+    }
+}
+
+/// Signal-flow diagram: verbatim, non-wrapping monospace inside a faint panel so ASCII art
+/// keeps its alignment. Horizontally scrollable if wider than the window.
+fn render_monospace_block(ui: &mut egui::Ui, body: &str) {
+    // Strip a leading/trailing ``` fence line if the docs wrapped the diagram in a code block.
+    let inner: String = body
+        .lines()
+        .filter(|l| !l.trim_start().starts_with("```"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    egui::Frame::new()
+        .fill(egui::Color32::from_rgb(10, 11, 13))
+        .inner_margin(egui::Margin::same(8))
+        .show(ui, |ui| {
+            egui::ScrollArea::horizontal()
+                .id_salt("manual-flow")
+                .show(ui, |ui| {
+                    ui.add(
+                        egui::Label::new(egui::RichText::new(inner).monospace().color(TEXT))
+                            .wrap_mode(egui::TextWrapMode::Extend),
+                    );
+                });
+        });
+}
+
+/// Light line renderer for Controls/Recipes/What-It-Is: handles `### ` subheadings, `- `/
+/// `* ` bullets, numbered steps, markdown `|` tables (kept monospace so columns align),
+/// blank-line spacing, and inline `**bold**`/backtick stripping. Deliberately tiny — not a
+/// full markdown engine.
+fn render_lines(ui: &mut egui::Ui, body: &str) {
+    let mut prev_was_table = false;
+    for raw in body.lines() {
+        let line = raw.trim_end();
+        let trimmed = line.trim_start();
+
+        if trimmed.is_empty() {
+            ui.add_space(4.0);
+            prev_was_table = false;
+            continue;
+        }
+
+        // Markdown table row → monospace verbatim so pipes line up. Skip the |---|---| rule.
+        if trimmed.starts_with('|') {
+            if trimmed.chars().all(|c| matches!(c, '|' | '-' | ':' | ' ')) {
+                prev_was_table = true;
+                continue;
+            }
+            if !prev_was_table {
+                ui.add_space(2.0);
+            }
+            prev_was_table = true;
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new(clean_inline(trimmed)).monospace().color(TEXT),
+                )
+                .wrap_mode(egui::TextWrapMode::Extend),
+            );
+            continue;
+        }
+        prev_was_table = false;
+
+        if let Some(h) = trimmed.strip_prefix("### ") {
+            ui.add_space(3.0);
+            ui.label(egui::RichText::new(clean_inline(h)).color(TEXT).strong());
+            continue;
+        }
+        if let Some(b) = trimmed
+            .strip_prefix("- ")
+            .or_else(|| trimmed.strip_prefix("* "))
+        {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(egui::RichText::new("•").color(ACCENT));
+                ui.label(egui::RichText::new(clean_inline(b)).color(TEXT));
+            });
+            continue;
+        }
+        // Numbered list item ("1. ", "2. ", ...).
+        if let Some((n, rest)) = split_numbered(trimmed) {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(egui::RichText::new(format!("{n}.")).color(ACCENT));
+                ui.label(egui::RichText::new(clean_inline(rest)).color(TEXT));
+            });
+            continue;
+        }
+        ui.label(egui::RichText::new(clean_inline(trimmed)).color(TEXT));
+    }
+}
+
+/// Split `"3. some text"` → `(3, "some text")`, else `None`.
+fn split_numbered(s: &str) -> Option<(u32, &str)> {
+    let dot = s.find(". ")?;
+    let n: u32 = s[..dot].parse().ok()?;
+    Some((n, &s[dot + 2..]))
+}
+
+/// Strip the markdown emphasis markers we don't render richly (`**`, `` ` ``) so the text
+/// reads cleanly without a full inline parser.
+fn clean_inline(s: &str) -> String {
+    s.replace("**", "").replace('`', "")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

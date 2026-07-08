@@ -8,6 +8,7 @@ pub mod dsp;
 pub mod fdn;
 pub mod harness;
 pub mod loudness;
+pub mod manual;
 pub mod modlisten;
 pub mod pitch;
 pub mod presets;
