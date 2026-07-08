@@ -14,7 +14,8 @@ use nih_plug_egui::{
     egui::{self, Vec2},
     EguiState,
 };
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
+use suite_core::modlisten::ModRoutes;
 
 pub mod dsp;
 pub mod presets;
@@ -133,6 +134,10 @@ pub struct GritParams {
     pub mix: FloatParam,
     #[id = "out"]
     pub out: FloatParam,
+
+    /// NERVE listen layer: persisted per-param modulation routes (edited in the MOD section).
+    #[persist = "mod"]
+    pub mod_routes: Arc<RwLock<ModRoutes>>,
 }
 
 fn hz(name: &str, default: f32, min: f32, max: f32) -> FloatParam {
@@ -216,6 +221,7 @@ impl Default for GritParams {
                 .with_unit(" dB")
                 .with_smoother(SmoothingStyle::Linear(20.0))
                 .with_value_to_string(formatters::v2s_f32_rounded(2)),
+            mod_routes: Arc::new(RwLock::new(ModRoutes::new())),
         }
     }
 }
@@ -367,6 +373,11 @@ impl Plugin for Grit {
                             setter,
                             |setter, p| apply_preset(&params, setter, p),
                         );
+                        suite_core::ui::mod_section(
+                            ui,
+                            &params.mod_routes,
+                            &[("drive", "DRIVE"), ("depth", "DEPTH"), ("mix", "MIX"), ("out", "OUT")],
+                        );
                         ui.separator();
 
                         egui::ScrollArea::vertical().show(ui, |ui| {
@@ -457,8 +468,19 @@ impl Plugin for Grit {
         // Denormal mitigation for the whole process scope (FTZ/DAZ), restored on drop.
         let _ftz = suite_core::dsp::ScopedFtz::enable();
 
-        // Block-rate filter configuration from the current param snapshot.
-        let base = self.params.snapshot();
+        // Block-rate filter configuration from the current param snapshot, with any NERVE
+        // listen-layer modulation applied as an additive normalized offset (host state
+        // untouched — see suite_core::modlisten).
+        let mut base = self.params.snapshot();
+        if let Ok(routes) = self.params.mod_routes.try_read() {
+            if !routes.routes.is_empty() {
+                let bus = suite_core::bus::bus();
+                base.drive_db = routes.modulated_float("drive", &self.params.drive, bus);
+                base.depth = routes.modulated_float("depth", &self.params.depth, bus);
+                base.mix = routes.modulated_float("mix", &self.params.mix, bus);
+                base.out_db = routes.modulated_float("out", &self.params.out, bus);
+            }
+        }
         self.core.configure(&base);
 
         let num_samples = buffer.samples();
