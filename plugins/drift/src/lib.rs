@@ -588,6 +588,56 @@ mod render_tests {
         suite_core::manual::assert_manual_covers_params(crate::MANUAL_DOC, &crate::DriftParams::default());
     }
 
+    /// SOUND-PASS audition render (permanent infra, `#[ignore]`d in normal runs).
+    /// Renders every factory preset AND `Settings::default()` over a genre-right musical
+    /// source (a sustained minor pad — DRIFT's home turf) into
+    /// renders/_audition/DRIFT/<QVS_AUDITION_DIR or "before">/<preset>.wav, plus a hot
+    /// 1 kHz sine aliasing probe through the most resonant preset. Analyzed offline by
+    /// tools/audition.py (click/seam, aliasing, true-peak, tonal balance).
+    #[test]
+    #[ignore]
+    fn audition_render_musical_sources() {
+        use crate::dsp::Settings;
+
+        let sr = 48_000.0f32;
+        let subdir = std::env::var("QVS_AUDITION_DIR").unwrap_or_else(|_| "before".into());
+
+        // Main: 4 s sustained minor pad at 110 Hz — the broadband, sustained source DRIFT
+        // is designed for, so the Shepard motion (and any wrap seam) is fully exposed.
+        let pad = testsig::synth_pad(110.0, 4.0, sr);
+
+        // Render every factory preset plus the default state (labelled "default").
+        let presets = load_all(PRESET_JSON);
+        let mut jobs: Vec<(String, crate::dsp::Settings)> = presets
+            .iter()
+            .map(|p| {
+                let fname = p.name.to_lowercase().replace([' ', '·', '-', '/'], "_");
+                (fname, settings_from_preset(p))
+            })
+            .collect();
+        jobs.push(("default".into(), Settings::default()));
+
+        for (fname, s) in &jobs {
+            let mut core = DriftCore::new(sr);
+            let mut out = pad.clone();
+            core.process_mono(&mut out, s);
+            let path = render_path("_audition/DRIFT", &format!("{subdir}/{fname}"));
+            write_wav(&path, &out, sr as u32).expect("write audition render");
+        }
+
+        // Aliasing probe: a hot 1 kHz sine (96k samples = 2 s) through the most resonant
+        // preset ("Resonant Screamer", Q 12 / depth 20 dB). Read inharmonic residual with
+        // --sine-probe 1000.
+        if let Some(p) = presets.iter().find(|p| p.name == "Resonant Screamer") {
+            let s = settings_from_preset(p);
+            let mut out = testsig::sine(1000.0, 0.5, 96_000, sr);
+            let mut core = DriftCore::new(sr);
+            core.process_mono(&mut out, &s);
+            let path = render_path("_audition/DRIFT", &format!("{subdir}/_alias_probe_1k"));
+            write_wav(&path, &out, sr as u32).expect("write alias probe");
+        }
+    }
+
     /// Render each factory preset over pink noise and a full-band chirp, write the WAVs into
     /// renders/DRIFT/, and assert the universal properties.
     #[test]

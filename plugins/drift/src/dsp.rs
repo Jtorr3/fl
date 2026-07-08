@@ -141,7 +141,13 @@ impl Default for Settings {
             stereo_offset: 0.25,
             depth_db: 12.0,
             mix: 1.0,
-            out_db: 0.0,
+            // SOUND-PASS (2026-07-08): the default N=6, depth-12, res-3 bell cascade at
+            // mix=1 adds ~+2 dB of resonant passband gain, pushing the first-insert default
+            // state to +1.96 dBTP over a normal pad — over the suite's ≤0 dBFS render bar.
+            // A small default output headroom (matching the presets' conservative negative
+            // Out trims) keeps the flagship default state below 0 dBFS on musical material
+            // without touching the effect's character (depth/resonance untouched).
+            out_db: -3.0,
         }
     }
 }
@@ -730,6 +736,30 @@ mod tests {
         // Clamp policy (TRIAGE 2026-07-08): final clamp is a ±8.0 runaway/NaN guard
         // (≈ +18 dBFS), not a 0 dBFS ceiling — extreme fuzz asserts finite && ≤ the guard.
         assert!(peak <= 8.001, "peak {peak} exceeded the +18 dBFS safety guard");
+    }
+
+    /// SOUND-PASS regression: the flagship DEFAULT state (first insert, mix=1) must not
+    /// overshoot 0 dBFS on a normal musical source. Before the default Out headroom fix the
+    /// N=6 resonant cascade pushed a sustained pad to +1.96 dBTP (over the suite's ≤0 dBFS
+    /// render bar); the default Out trim keeps it comfortably below full scale.
+    #[test]
+    fn default_state_stays_below_0dbfs_on_pad() {
+        let sr = 48_000.0f32;
+        let pad = testsig::synth_pad(110.0, 4.0, sr);
+        let s = Settings::default();
+        let mut core = DriftCore::new(sr);
+        let mut out = pad.clone();
+        core.process_mono(&mut out, &s);
+        assert!(out.iter().all(|v| v.is_finite()));
+        let peak = out.iter().fold(0.0f32, |m, &v| m.max(v.abs()));
+        let peak_db = 20.0 * peak.max(1.0e-12).log10();
+        assert!(
+            peak_db <= 0.0,
+            "default state peaks {peak_db:.2} dBFS on a pad — over the ≤0 dBFS render bar"
+        );
+        // Still a real effect, not gained into silence.
+        let rms = (out.iter().map(|v| v * v).sum::<f32>() / out.len() as f32).sqrt();
+        assert!(20.0 * rms.max(1e-12).log10() > -40.0, "default gained into near-silence");
     }
 
     #[test]
