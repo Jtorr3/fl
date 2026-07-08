@@ -318,6 +318,35 @@ impl Plugin for Ember {
                         );
                         ui.separator();
 
+                        // CONSOLE v2 CRT telemetry bay — honest live state (the same values
+                        // shown on the controls below; GUI-thread reads only, process() untouched).
+                        // In THEME-OFF this degrades to a plain readout panel.
+                        suite_core::ui::crt_lines(
+                            ui,
+                            "ember-crt",
+                            "EMBER · SPECTRAL FADER",
+                            &[
+                                (
+                                    "BANDS",
+                                    format!(
+                                        "atk {}…{} · dec {}…{}",
+                                        params.atk0, params.atk7, params.dec0, params.dec7
+                                    ),
+                                ),
+                                ("SHAPE", format!("fit {} · gate {}", params.fitting, params.gate)),
+                                (
+                                    "FREEZE",
+                                    format!(
+                                        "{} · f-mix {}",
+                                        if params.freeze.value() { "HOLD" } else { "off" },
+                                        params.freeze_mix,
+                                    ),
+                                ),
+                                ("OUT", format!("tail {} · mix {}", params.tailgain, params.mix)),
+                            ],
+                        );
+                        ui.add_space(4.0);
+
                         egui::ScrollArea::vertical().show(ui, |ui| {
                             ui.label(
                                 egui::RichText::new("FACTOR BANDS  (time constant per frequency)")

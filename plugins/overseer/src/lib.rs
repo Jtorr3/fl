@@ -600,6 +600,54 @@ impl Plugin for OverseerNode {
                         });
                         ui.separator();
 
+                        // CONSOLE v2 CRT telemetry bay — honest live state (existing meter
+                        // atomics + the same values shown above; GUI-thread reads only,
+                        // process() untouched). In THEME-OFF this degrades to a plain panel.
+                        suite_core::ui::crt_lines(
+                            ui,
+                            "overseer-node-crt",
+                            "OVERSEER · NODE STRIP",
+                            &[
+                                (
+                                    "TYPE",
+                                    format!(
+                                        "{} · bank {}",
+                                        eff_ty.label(),
+                                        type_bank_category(eff_ty)
+                                    ),
+                                ),
+                                (
+                                    "LEVELS",
+                                    format!(
+                                        "in {} · out {} dBFS",
+                                        fmt_db(load_f32(&meters.in_peak)),
+                                        fmt_db(load_f32(&meters.out_peak)),
+                                    ),
+                                ),
+                                (
+                                    "LOUD",
+                                    format!(
+                                        "LUFS-M {} · GR {} dB",
+                                        fmt_db(load_f32(&meters.lufs_m)),
+                                        fmt_db(load_f32(&meters.gr_db)),
+                                    ),
+                                ),
+                                (
+                                    "CTRL",
+                                    format!(
+                                        "{} · label \"{}\"",
+                                        if slot.override_held() {
+                                            "MASTER OVERRIDE"
+                                        } else {
+                                            "local"
+                                        },
+                                        params.label.read().map(|s| s.clone()).unwrap_or_default(),
+                                    ),
+                                ),
+                            ],
+                        );
+                        ui.add_space(4.0);
+
                         egui::ScrollArea::vertical().show(ui, |ui| {
                             let held = |i: usize| slot.is_override_active(i) && slot.override_held();
                             let badge = |ui: &mut egui::Ui, on: bool| {
@@ -1283,6 +1331,56 @@ impl Plugin for OverseerMaster {
                             );
                         });
                         ui.separator();
+
+                        // CONSOLE v2 CRT telemetry bay — honest live state (existing meter
+                        // atomics, the inferred session theme and the live-node census the
+                        // editor already reads; GUI-thread only, process() untouched).
+                        suite_core::ui::crt_lines(
+                            ui,
+                            "overseer-master-crt",
+                            "OVERSEER · MASTER BUS",
+                            &[
+                                (
+                                    "SESSION",
+                                    format!(
+                                        "{} · {} node(s) live",
+                                        theme.label(),
+                                        bus::bus().live_slots().len(),
+                                    ),
+                                ),
+                                (
+                                    "PEAK",
+                                    format!(
+                                        "TP≈ {} dB · lim GR {} dB",
+                                        fmt_db(load_f32(&meters.true_peak)),
+                                        fmt_db(load_f32(&meters.limiter_gr)),
+                                    ),
+                                ),
+                                (
+                                    "LUFS",
+                                    format!(
+                                        "M {} · S {} · I {}",
+                                        fmt_db(load_f32(&meters.lufs_m)),
+                                        fmt_db(load_f32(&meters.lufs_s)),
+                                        fmt_db(load_f32(&meters.lufs_i)),
+                                    ),
+                                ),
+                                (
+                                    "MB GR",
+                                    format!(
+                                        "lo {} · mid {} · hi {} dB",
+                                        fmt_db(load_f32(&meters.band_gr[0])),
+                                        fmt_db(load_f32(&meters.band_gr[1])),
+                                        fmt_db(load_f32(&meters.band_gr[2])),
+                                    ),
+                                ),
+                                (
+                                    "OUT",
+                                    format!("ceiling {} · mix {}", params.ceiling, params.mix),
+                                ),
+                            ],
+                        );
+                        ui.add_space(4.0);
 
                         egui::ScrollArea::vertical().show(ui, |ui| {
                             ui.label(

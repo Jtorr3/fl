@@ -521,6 +521,48 @@ impl Plugin for Tracer {
                         );
                         ui.separator();
 
+                        // CONSOLE v2 CRT telemetry bay — honest live state (the same values
+                        // shown on the knobs below; GUI-thread reads only, process() untouched).
+                        // In THEME-OFF this degrades to a plain readout panel.
+                        suite_core::ui::crt_lines(
+                            ui,
+                            "tracer-crt",
+                            "TRACER · PITCH-TRACKED SAT",
+                            &[
+                                (
+                                    "PITCH",
+                                    format!(
+                                        "{} · smart {} · slew {}",
+                                        params.pitch_mode, params.smart_freq, params.slew
+                                    ),
+                                ),
+                                (
+                                    "BANDS",
+                                    format!(
+                                        "{} · color {}",
+                                        params.bands,
+                                        if params.const_color.value() { "on" } else { "off" },
+                                    ),
+                                ),
+                                (
+                                    "DRIVE",
+                                    format!(
+                                        "{} · {} · {} · {}",
+                                        params.b1_drive, params.b2_drive, params.b3_drive,
+                                        params.b4_drive
+                                    ),
+                                ),
+                                (
+                                    "OUT",
+                                    format!(
+                                        "trim {} · mix {} · {}",
+                                        params.trim, params.mix, params.out
+                                    ),
+                                ),
+                            ],
+                        );
+                        ui.add_space(4.0);
+
                         egui::ScrollArea::vertical().show(ui, |ui| {
                             ui.label(
                                 egui::RichText::new("PITCH / TRACKING")

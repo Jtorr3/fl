@@ -331,6 +331,46 @@ impl Plugin for Impact {
                         );
                         ui.separator();
 
+                        // CONSOLE v2 CRT telemetry bay — honest live state (the same values
+                        // shown on the knobs below; GUI-thread reads only, process() untouched).
+                        // In THEME-OFF this degrades to a plain readout panel.
+                        suite_core::ui::crt_lines(
+                            ui,
+                            "impact-crt",
+                            "IMPACT · KICK SYNTH",
+                            &[
+                                (
+                                    "PITCH",
+                                    format!(
+                                        "{} → {} · dec {}",
+                                        params.fstart, params.fend, params.pdecay
+                                    ),
+                                ),
+                                (
+                                    "AMP",
+                                    format!("len {} · decay {}", params.length, params.adecay),
+                                ),
+                                (
+                                    "LAYERS",
+                                    format!(
+                                        "click {} · trans {} {} · sub {}",
+                                        params.clicklvl, params.trans, params.translvl, params.sublvl
+                                    ),
+                                ),
+                                (
+                                    "DRIVE",
+                                    format!(
+                                        "{} {} · {} · out {}",
+                                        params.shape,
+                                        params.drive,
+                                        if params.clip_soft.value() { "soft clip" } else { "hard clip" },
+                                        params.outgain,
+                                    ),
+                                ),
+                            ],
+                        );
+                        ui.add_space(4.0);
+
                         egui::ScrollArea::vertical().show(ui, |ui| {
                             ui.label(egui::RichText::new("PITCH").color(suite_core::ui::TEXT_DIM).small());
                             egui::Grid::new("impact-pitch").num_columns(2).spacing([16.0, 6.0]).show(ui, |ui| {
