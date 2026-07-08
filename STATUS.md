@@ -1,6 +1,6 @@
 # STATUS
 
-CURRENT: (none) | STEP: - | ATTEMPTS: 0 | LAST-ACTION: PLUCK SHIPPED (full, [x]) — Karplus-Strong strummer, effect WITH MIDI in + audio-exciter. 7 pluck tests GREEN (4 done-bars + 6-preset universal + mix=0 null); build.ps1 pluck GREEN (clap-validator 16/0/4/1w, pluginval strictness 8 SUCCESS incl Fuzz + all buses). First attempt, no descope, no Fable. Next §7 item: SHAPESHIFT (XY-morphing distortion).
+CURRENT: SHAPESHIFT | STEP: 1 (scaffold crate + DSP core) | ATTEMPTS: 0 | LAST-ACTION: start(SHAPESHIFT) — XY-morphing distortion (Teuri clone, Phase 2b). Fresh crate from _template; GRIT oversampled-shaper+PDC recipe + FLYBY xy_pad widget are references. Start commit from 0da8ab3.
 PUSH-PENDING: no
 DONE: BOOTSTRAP, GRIT, EMBER, IMPACT, TRACER, OVERSEER, W8-VITALGEN, W4-SESSION-BOOTSTRAP, HARD-CHECKPOINT-1, DRIFT, WIRE, OUROBOROS, SWARM, SMUDGE, MURMUR, UNDERTOW, SNAP, SEANCE, W9-VOXRIP, VOXKEY, VOXFIT, UI-CORE-FIX, ASCEND, W1-RUMBLE-BASSLINE, W2-BREAK-CHOP, W3-DARK-PROGRESSION, HARD-CHECKPOINT-2, PRESET-SYSTEM, OVERSEER-ENRICH, FLYBY, CLEAVE, PLUCK
 DESCOPED: GRIT Mode C (spectral STFT) → DEFERRED.md; OVERSEER Ozone hosting + tier-2 bus (by spec/design) → DEFERRED.md; W4 tempo application (no MCP command exists) → DEFERRED.md; WIRE true-per-bandwidth Opus internal-rate + real FEC/PLC (opus-rs 12k/24k paths buggy; PRD §5-sanctioned pre-LP approximation) → DEFERRED.md (NOT an attempt-budget descope; WIRE shipped full)
