@@ -1,6 +1,6 @@
 # STATUS
 
-CURRENT: (none) | STEP: - | ATTEMPTS: 0 | LAST-ACTION: HALT SHIPPED (full, [x]) — 4-bar circular-buffer performance FX (tape-stop/stutter/reverse/half-speed momentary modes, MIDI+button last-pressed-wins, 5 ms eq-power crossfades) off testsig::FakeTransport; 9/9 done-bars GREEN, build.ps1 halt GREEN (clap-validator + pluginval s8). NEXT §7: BANDAID (multiband transient designer).
+CURRENT: BANDAID | STEP: 1 | ATTEMPTS: 0 | LAST-ACTION: start(BANDAID) — multiband transient designer (Phase 3): fresh crate from _template; LR4 3-band split, per-band transient=fast(1ms)−slow(50ms) env, attack/sustain gains ±12 dB applied as parallel deltas (out = x + Σ(g_b−1)·band_b ⇒ neutral nulls to input exactly), per-band solo, output trim.
 PUSH-PENDING: no
 DONE: BOOTSTRAP, GRIT, EMBER, IMPACT, TRACER, OVERSEER, W8-VITALGEN, W4-SESSION-BOOTSTRAP, HARD-CHECKPOINT-1, DRIFT, WIRE, OUROBOROS, SWARM, SMUDGE, MURMUR, UNDERTOW, SNAP, SEANCE, W9-VOXRIP, VOXKEY, VOXFIT, UI-CORE-FIX, ASCEND, W1-RUMBLE-BASSLINE, W2-BREAK-CHOP, W3-DARK-PROGRESSION, HARD-CHECKPOINT-2, PRESET-SYSTEM, OVERSEER-ENRICH, FLYBY, CLEAVE, PLUCK, SHAPESHIFT, CHAMBER, HARD-CHECKPOINT-3, CARVE, NERVE, HALT
 DESCOPED: GRIT Mode C (spectral STFT) → DEFERRED.md; OVERSEER Ozone hosting + tier-2 bus (by spec/design) → DEFERRED.md; W4 tempo application (no MCP command exists) → DEFERRED.md; WIRE true-per-bandwidth Opus internal-rate + real FEC/PLC (opus-rs 12k/24k paths buggy; PRD §5-sanctioned pre-LP approximation) → DEFERRED.md (NOT an attempt-budget descope; WIRE shipped full)
