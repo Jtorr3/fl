@@ -554,3 +554,33 @@ fn midi_block_is_alloc_free() {
 
 /// Warm past at least one weight-update boundary before arming the alloc guard.
 const WEIGHT_UPDATE_WARM: usize = 4096;
+
+/// SOUND-PASS audition (permanent infra, `#[ignore]`d). Every preset + default excited by
+/// a four-on-floor kick loop and an amen-ish break (sympathetic resonators ring on the
+/// transients) as STEREO WAVs → renders/_audition/CHORALE/<QVS_AUDITION_DIR|before>/.
+/// The #1 hunt: do the resonators sing in tune, or clang metallically?
+#[test]
+#[ignore]
+fn audition_render_musical_sources() {
+    use suite_core::harness::write_wav_stereo;
+    let sr = SR;
+    let subdir = std::env::var("QVS_AUDITION_DIR").unwrap_or_else(|_| "before".into());
+    let kick = testsig::synth_kick_loop(140.0, 4, sr);
+    let brk = testsig::synth_break(140.0, 2, sr);
+    let all = load_all(presets::PRESET_JSON);
+    let mut jobs: Vec<(String, Settings)> = all
+        .iter()
+        .map(|p| {
+            (p.name.to_lowercase().replace([' ', '·', '-', '/'], "_"), presets::settings_from_preset(p))
+        })
+        .collect();
+    jobs.push(("default".into(), Settings::default()));
+    for (fname, s) in &jobs {
+        for (tag, src) in [("kick", &kick), ("break", &brk)] {
+            let mut core = ChoraleCore::new(sr);
+            let (l, r) = core.process_stereo(src, s);
+            let path = render_path("_audition/CHORALE", &format!("{subdir}/{fname}__{tag}"));
+            write_wav_stereo(&path, &l, &r, sr as u32).expect("write audition");
+        }
+    }
+}
