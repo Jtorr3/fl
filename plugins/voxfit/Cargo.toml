@@ -1,0 +1,22 @@
+[package]
+name = "voxfit"
+version = "0.1.0"
+edition = "2021"
+license = "ISC"
+description = "Qeynos VOXFIT — vocal character conformer: pitch-independent formant shift, de-esser, dynamic harshness tamer, tilt EQ, proximity + air shelves and a SIT macro to drop a foreign acapella into any production"
+
+[lib]
+# `cdylib` for the CLAP/VST3 bundle; `lib` so `cargo test` and the harness can link the DSP.
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+nih_plug = { workspace = true }
+nih_plug_egui = { workspace = true }
+suite-core = { path = "../../suite-core" }
+
+[dev-dependencies]
+suite-core = { path = "../../suite-core" }
+hound = { workspace = true }
+# Pure-Rust real FFT — used only by the formant-shift done-bar test to compute a cepstral
+# spectral envelope (mirrors the VOXKEY / suite_core::shift test technique). windows-gnu clean.
+realfft = { workspace = true }
