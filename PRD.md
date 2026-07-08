@@ -330,7 +330,7 @@ is the shared core, built immediately before)
 
 Pulled forward from POLISH (user priority 2026-07-07):
 - [x] PRESET-SYSTEM (suite-wide user preset save/load + retrofit all plugins)
-- [ ] OVERSEER-ENRICH (per-Node instrument type context + thematic preset banks)
+- [x] OVERSEER-ENRICH (v2: auto-classification + theme inference + LEARN + assist + thematic type/theme-filtered banks)
 
 Phase 2b — remaining clones
 - [ ] FLYBY - [ ] CLEAVE - [ ] PLUCK - [ ] SHAPESHIFT - [ ] CHAMBER
