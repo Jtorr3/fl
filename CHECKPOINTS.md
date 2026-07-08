@@ -265,3 +265,21 @@
       `uv run --python 3.12 tools\reference_gap.py "<reference>.wav" "renders\<mix>.wav" --key <root>`
       and open the generated `*_refgap.html`. First run downloads pyloudnorm/numpy/scipy/soundfile
       into a uv env.
+
+## SUITE-TRIAGE (2026-07-08) — CUT DECISIONS NEEDED (nothing was uninstalled)
+The Fable audit (docs/TRIAGE-2026-07-08.md + docs/triage/) flagged 5 plugins as
+CUT-CANDIDATES for YOUR call. All stay installed until you decide; PEDAL-UI skins
+them last. Reply in-session or delete their dist/ + VST3 entries yourself:
+- [ ] MURMUR - third reverb in the suite (CHAMBER + SEANCE + FL stock); its per-onset
+      re-randomized room is subtle at default mix. Cut or keep as texture-verb?
+- [ ] ASCEND - auto-fires a riser every 8/16/32 bars from bar 0 while playing and
+      cannot be triggered mid-playback; samples/Vital patches beat it. Cut, or
+      redesign as a MIDI-triggered one-shot?
+- [ ] PLUCK - superseded by CHORALE (same KS core, sympathetic + wet solo); its only
+      unique trick is the staggered strum. Cut?
+- [ ] SHAPESHIFT - 4th+ distortion (GRIT/TRACER/PATINA/WIRE + FL Distructor); XY
+      orbit is the only novelty. Cut? (Its mirrored-XY bug gets fixed regardless.)
+- [ ] NERVE - FL Peak/Envelope Controller do cross-plugin modulation natively AND
+      persist with the project; NERVE routes die on reload by design. The id-collision
+      bug gets fixed regardless (X-RAY shares the bus). Cut NERVE the plugin, or keep
+      as the suite's LFO brain and accept re-picking routes per session?
