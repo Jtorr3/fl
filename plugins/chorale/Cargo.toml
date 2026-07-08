@@ -1,0 +1,17 @@
+[package]
+name = "chorale"
+version = "0.1.0"
+edition = "2021"
+license = "ISC"
+description = "Qeynos CHORALE — resonator bank (12–24 waveguide resonators, scale/MIDI/key-detect tuning, continuous sympathetic excitation)"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+nih_plug = { workspace = true }
+nih_plug_egui = { workspace = true }
+suite-core = { path = "../../suite-core" }
+
+[dev-dependencies]
+suite-core = { path = "../../suite-core" }
