@@ -183,7 +183,10 @@ Each entry: item | feature | why | how to pick it back up.
 From docs/TRIAGE-2026-07-08.md (P2 tier of the fix program; per-plugin detail in
 docs/triage/cluster*.md). None of these block daily use; they are quality-polish items:
 
-- **WIRE**: PLC re-entry click; `reset()` allocs on the audio thread; latency-rescale on
+- **WIRE**: ~~PLC re-entry click~~ **RESOLVED (SOUND-PASS 2026-07-08)** — the post-concealment
+  frame is now ramped up from zero over ~2.7 ms in `dsp::run_frame`, drop-free path byte-identical,
+  regression-tested by `dropout_reentry_is_click_free` (worst vocal click ratio 24–40 → 10–15).
+  Still open: `reset()` allocs on the audio thread; latency-rescale on
   bandwidth change. (FEC approximation / true per-bandwidth Opus internal rate is tracked ONCE
   in the top-level "WIRE — true per-bandwidth Opus internal rate + real FEC/PLC recovery" entry
   above — not duplicated here.)
