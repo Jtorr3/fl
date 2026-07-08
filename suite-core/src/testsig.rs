@@ -266,6 +266,132 @@ pub fn sliding_saw_f0(f_start: f32, f_end: f32, n: usize, len: usize) -> f32 {
     f_start * (f_end / f_start).powf(frac)
 }
 
+// ---------------------------------------------------------------------------
+// Fake transport (PRD §4: "fake-transport struct (tempo, playhead, bar pos) for
+// ASCEND/CLEAVE/HALT"). Promoted from ASCEND's crate-local pattern into the shared
+// harness so any transport-locked plugin (CLEAVE now, HALT later) can be driven
+// against a synthetic, sample-accurate 4/4 playhead offline. ASCEND keeps its own
+// crate-local copy (it could migrate at PEDAL-UI time; do not touch its crate here).
+// ---------------------------------------------------------------------------
+
+/// A synthetic per-block transport snapshot — the shared analogue of `nih_plug`'s
+/// `Transport`, kept as a plain data struct so pure-DSP cores stay free of any host
+/// type. The plugin fills one from `nih_plug` each block; the offline harness fills
+/// one from a [`FakeTransport`]. All positions are 0-based and fractional.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TransportFrame {
+    /// Whether the host transport is rolling.
+    pub playing: bool,
+    /// Tempo in beats per minute.
+    pub tempo: f64,
+    /// Song position in quarter-note beats (== nih_plug `pos_beats`).
+    pub ppq_pos: f64,
+    /// Song position in bars (fractional). For 4/4 this is `ppq_pos / 4`.
+    pub bar_pos: f64,
+    /// Bars advanced per output sample (tempo · time-signature derived). Multiply by a
+    /// sample count to advance the playhead within a block.
+    pub bars_per_sample: f64,
+    /// Beats (quarter notes) per bar — 4.0 for 4/4.
+    pub beats_per_bar: f64,
+}
+
+impl TransportFrame {
+    /// Beats (quarter notes) advanced per output sample.
+    #[inline]
+    pub fn beats_per_sample(&self) -> f64 {
+        self.bars_per_sample * self.beats_per_bar
+    }
+    /// A stopped transport at bar 0 (useful as a default / free-run marker).
+    pub fn stopped(tempo: f64, sample_rate: f64) -> Self {
+        FakeTransport::new(sample_rate, tempo).frame_stopped()
+    }
+}
+
+/// A sample-accurate synthetic transport driver for offline tests. Models a steady
+/// 4/4 (configurable time signature) playhead at a fixed BPM; advance it by whole
+/// sample counts and snapshot a [`TransportFrame`] at each block boundary, exactly as
+/// a real host would present one to `process`.
+#[derive(Clone, Copy, Debug)]
+pub struct FakeTransport {
+    sample_rate: f64,
+    tempo: f64,
+    beats_per_bar: f64,
+    /// Samples elapsed since the transport started (the playhead).
+    pos_samples: f64,
+    playing: bool,
+}
+
+impl FakeTransport {
+    /// A rolling 4/4 transport at `tempo` BPM from bar 0.
+    pub fn new(sample_rate: f64, tempo: f64) -> Self {
+        Self {
+            sample_rate: sample_rate.max(1.0),
+            tempo: tempo.max(1.0),
+            beats_per_bar: 4.0,
+            pos_samples: 0.0,
+            playing: true,
+        }
+    }
+
+    /// Set a non-4/4 time signature (`num`/`den`, e.g. 3/4, 6/8). Beats-per-bar is
+    /// `num · 4 / den` quarter notes. Returns `self` for chaining.
+    pub fn with_time_sig(mut self, num: u32, den: u32) -> Self {
+        let n = num.max(1) as f64;
+        let d = den.max(1) as f64;
+        self.beats_per_bar = (n * 4.0 / d).max(1.0e-3);
+        self
+    }
+
+    /// Set the playing flag (default rolling). Returns `self` for chaining.
+    pub fn playing(mut self, playing: bool) -> Self {
+        self.playing = playing;
+        self
+    }
+
+    /// Bars advanced per sample at the current tempo/time-signature.
+    #[inline]
+    pub fn bars_per_sample(&self) -> f64 {
+        (self.tempo / 60.0 / self.sample_rate) / self.beats_per_bar
+    }
+
+    /// Advance the playhead by `n` samples.
+    #[inline]
+    pub fn advance(&mut self, n: usize) {
+        self.pos_samples += n as f64;
+    }
+
+    /// Seek the playhead to an absolute sample position.
+    pub fn seek_samples(&mut self, pos: f64) {
+        self.pos_samples = pos.max(0.0);
+    }
+
+    /// Current playhead in samples.
+    #[inline]
+    pub fn pos_samples(&self) -> f64 {
+        self.pos_samples
+    }
+
+    /// Snapshot a [`TransportFrame`] at the current playhead (playing per the flag).
+    pub fn frame(&self) -> TransportFrame {
+        let beats = self.pos_samples / self.sample_rate * (self.tempo / 60.0);
+        TransportFrame {
+            playing: self.playing,
+            tempo: self.tempo,
+            ppq_pos: beats,
+            bar_pos: beats / self.beats_per_bar,
+            bars_per_sample: self.bars_per_sample(),
+            beats_per_bar: self.beats_per_bar,
+        }
+    }
+
+    /// Snapshot a frame with `playing = false` (free-run marker), position unchanged.
+    pub fn frame_stopped(&self) -> TransportFrame {
+        let mut f = self.frame();
+        f.playing = false;
+        f
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -282,5 +408,44 @@ mod tests {
         let e: f32 = x[..2000].iter().map(|v| v * v).sum();
         let l: f32 = x[x.len() - 2000..].iter().map(|v| v * v).sum();
         assert!(e > l, "kick did not decay (early {e} late {l})");
+    }
+
+    #[test]
+    fn fake_transport_advances_sample_accurately_in_4_4() {
+        let sr = 48_000.0;
+        let bpm = 120.0;
+        let mut t = FakeTransport::new(sr, bpm);
+        // At 120 BPM a beat is 0.5 s = 24000 samples; a 4/4 bar = 4 beats = 96000 samples.
+        let bar_samples = 96_000usize;
+        // Drive block-by-block; a frame taken at the block boundary must report the exact
+        // playhead the sample count implies.
+        let block = 512usize;
+        let mut n = 0usize;
+        while n < bar_samples {
+            let f = t.frame();
+            let expect_bar = n as f64 / bar_samples as f64;
+            assert!((f.bar_pos - expect_bar).abs() < 1e-9, "bar_pos {} vs {}", f.bar_pos, expect_bar);
+            assert!((f.ppq_pos - expect_bar * 4.0).abs() < 1e-9);
+            assert!(f.playing);
+            let step = block.min(bar_samples - n);
+            t.advance(step);
+            n += step;
+        }
+        // After exactly one bar the playhead is at bar 1.0.
+        assert!((t.frame().bar_pos - 1.0).abs() < 1e-9);
+        // bars_per_sample × bar_samples == 1 bar.
+        assert!((t.bars_per_sample() * bar_samples as f64 - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn fake_transport_beats_per_sample_and_stopped() {
+        let sr = 44_100.0;
+        let t = FakeTransport::new(sr, 90.0).playing(false);
+        // beats/sample = tempo/60/sr.
+        assert!((t.frame().beats_per_sample() - 90.0 / 60.0 / sr).abs() < 1e-12);
+        assert!(!t.frame().playing);
+        // 3/4 time-signature: 3 beats per bar.
+        let t34 = FakeTransport::new(sr, 120.0).with_time_sig(3, 4);
+        assert!((t34.frame().beats_per_bar - 3.0).abs() < 1e-9);
     }
 }

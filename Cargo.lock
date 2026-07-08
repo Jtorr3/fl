@@ -318,6 +318,16 @@ version = "0.5.0"
 source = "git+https://github.com/micahrj/clap-sys.git?rev=25d7f53fdb6363ad63fbd80049cb7a42a97ac156#25d7f53fdb6363ad63fbd80049cb7a42a97ac156"
 
 [[package]]
+name = "cleave"
+version = "0.1.0"
+dependencies = [
+ "nih_plug",
+ "nih_plug_egui",
+ "serde",
+ "suite-core",
+]
+
+[[package]]
 name = "clipboard-win"
 version = "5.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

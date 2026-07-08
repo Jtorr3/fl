@@ -1,0 +1,20 @@
+[package]
+name = "cleave"
+version = "0.1.0"
+edition = "2021"
+license = "ISC"
+description = "Qeynos CLEAVE — multi-slicer with transport-locked step sequencer (Slice clone)"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+nih_plug = { workspace = true }
+nih_plug_egui = { workspace = true }
+suite-core = { path = "../../suite-core" }
+# Per-step lanes are persisted host state (nih-plug `#[persist]` needs Serialize/Deserialize),
+# NOT automatable params — 16..64 steps × 8 lanes is far too many for the param tree / fuzzer.
+serde = { workspace = true }
+
+[dev-dependencies]
+suite-core = { path = "../../suite-core" }
