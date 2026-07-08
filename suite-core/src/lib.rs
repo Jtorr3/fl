@@ -2,6 +2,7 @@
 //! for the Qeynos audio suite. Everything here is API-agnostic pure Rust except the
 //! `ui` module, which is gated behind the `gui` feature and depends on nih_plug_egui.
 
+pub mod bus;
 pub mod classify;
 pub mod dsp;
 pub mod fdn;

@@ -19,5 +19,6 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 realfft = { workspace = true }
 dirs = { workspace = true }
+memmap2 = { workspace = true }
 nih_plug = { workspace = true, optional = true }
 nih_plug_egui = { workspace = true, optional = true }

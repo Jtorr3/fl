@@ -24,6 +24,10 @@ realfft = "3"
 # (SHGetKnownFolderPath / FOLDERID_Documents) — NEVER a literal %USERPROFILE%\Documents.
 # Pure Rust (dirs-sys → windows-sys, already in the tree); backs the user-preset disk tier.
 dirs = "5"
+# File-backed shared memory for the PRD §3 tier-2 cross-DLL/cross-process bus
+# (NERVE publishes, X-RAY consumes). Pure Rust over Win32 file mapping (no C, no
+# named kernel object); MmapRaw over a fixed-size file in %TEMP%\qeynos-bus.
+memmap2 = "0.9"
 
 # Release profile tuned for real plugin bundles. thin LTO keeps cold-build time sane
 # while still inlining across crates.
