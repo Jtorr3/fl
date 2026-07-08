@@ -323,6 +323,10 @@ is the shared core, built immediately before)
 - [ ] W1-RUMBLE-BASSLINE - [ ] W2-BREAK-CHOP - [ ] W3-DARK-PROGRESSION
 **HARD CHECKPOINT**
 
+Pulled forward from POLISH (user priority 2026-07-07):
+- [ ] PRESET-SYSTEM (suite-wide user preset save/load + retrofit all plugins)
+- [ ] OVERSEER-ENRICH (per-Node instrument type context + thematic preset banks)
+
 Phase 2b — remaining clones
 - [ ] FLYBY - [ ] CLEAVE - [ ] PLUCK - [ ] SHAPESHIFT - [ ] CHAMBER
 **HARD CHECKPOINT**
@@ -333,11 +337,9 @@ Phase 3 — remainder
 Phase 4 — remaining automations
 - [ ] W5-PROJECT-JANITOR - [ ] W6-SAMPLE-LIBRARIAN - [ ] W7-REFERENCE-GAP
 
-POLISH phase (user feedback 2026-07-07: loves OVERSEER; wants instrument context,
-user preset saving everywhere, cooler UI — "modern pedal style" as endgame cleanup)
-- [ ] PRESET-SYSTEM (suite-wide user preset save/load + retrofit all plugins)
+POLISH phase (user feedback 2026-07-07; PRESET-SYSTEM + OVERSEER-ENRICH pulled
+forward to after HARD CHECKPOINT 2 — see above)
 - [ ] PRESET-EXPANSION (deep factory banks, 15-30 purpose-named presets per plugin)
-- [ ] OVERSEER-ENRICH (per-Node instrument type context + thematic preset banks)
 - [ ] BUILT-IN-MANUALS (in-GUI usage manual panel per plugin, embedded from docs/)
 - [ ] PEDAL-UI (modern stompbox theme in suite-core::ui + suite-wide retrofit)
 **FINAL CHECKPOINT**
