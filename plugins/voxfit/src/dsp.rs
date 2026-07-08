@@ -47,6 +47,17 @@ const SMOOTH_MS: f32 = 12.0;
 // reduced *fully*; a single band-pass would leave an un-removable residual (its passband gain
 // is < 1 across a sub-octave 5–9 kHz band).
 const DEESS_XOVER: f32 = 5000.0;
+/// Upper edge of the sibilant band. The de-esser keys and ducks only the band **between**
+/// `DEESS_XOVER` and this — true air (> `DEESS_AIR`, the 12 kHz shelf region and up) is split
+/// off and passed at unity, so ducking an ess never dulls the vocal's sparkle. (Previously the
+/// sibilant band was `x − low` = everything above 5 kHz → a de-ess pulled the air down as hard
+/// as the sibilance, measured −20 to −33 dB of 11–18 kHz air on the de-ess-heavy presets.)
+const DEESS_AIR: f32 = 10000.0;
+/// Gain-reduction smoothing (ms) on the de-ess band. Rounds the infinite-ratio `gr` step so it
+/// no longer clicks on an ess onset (measured 3 click outliers/render before, ratio up to 19.5),
+/// while staying short enough to catch the sibilant onset (a longer smoother lets the un-ducked
+/// onset transient through).
+const DEESS_GR_MS: f32 = 0.5;
 const HARSH_CENTER: f32 = 3162.0; // geo-mean of 2000..5000
 const HARSH_Q: f32 = 1.05; // fc / bandwidth ≈ 3162 / 3000
 const TILT_PIVOT: f32 = 1000.0;
@@ -239,11 +250,17 @@ impl Controls {
 /// channels (recomputed at block rate in [`VoxFitCore::configure`]); each channel owns its own
 /// filter *state*. The de-ess / harsh detectors run per channel (independent stereo de-essing).
 struct ChannelStrip {
-    // De-ess split: two cascaded SVF low-passes @5k (24 dB/oct) give the LOW band; the sibilant
-    // HIGH band = x − low (complementary, sums back to x, so the reduction can be total).
+    // De-ess 3-way complementary split (low + sib + air = x exactly, so the sibilant band can
+    // still be reduced *fully*): two cascaded SVF low-passes @5k give LOW (<5k), two cascaded
+    // SVF high-passes @10k give AIR (>10k), and SIB = x − low − air is the 5–10 kHz sibilant
+    // band. Only SIB is keyed and ducked; AIR always passes at unity.
     deess_lp_a: Svf,
     deess_lp_b: Svf,
+    deess_air_a: Svf,
+    deess_air_b: Svf,
     deess_env: EnvFollower,
+    // Smoother on the de-ess gain reduction — declicks the infinite-ratio `gr` step at ess onset.
+    deess_gr: OnePole,
     // Harsh band: unity-peak (0 dB) band-pass; its output feeds both the detector and the subtract.
     harsh_bp: Biquad,
     harsh_env: EnvFollower,
@@ -260,8 +277,15 @@ impl ChannelStrip {
         deess_lp_a.set(DEESS_XOVER, 0.707, sr);
         let mut deess_lp_b = Svf::new();
         deess_lp_b.set(DEESS_XOVER, 0.707, sr);
+        let mut deess_air_a = Svf::new();
+        deess_air_a.set(DEESS_AIR, 0.707, sr);
+        let mut deess_air_b = Svf::new();
+        deess_air_b.set(DEESS_AIR, 0.707, sr);
         let mut deess_env = EnvFollower::new(Detector::Peak);
         deess_env.set_times(1.0, 60.0, sr);
+        let mut deess_gr = OnePole::new();
+        deess_gr.set_time(DEESS_GR_MS, sr);
+        deess_gr.reset(1.0);
         let mut harsh_env = EnvFollower::new(Detector::Peak);
         harsh_env.set_times(3.0, 80.0, sr);
         let mut harsh_bp = Biquad::default();
@@ -269,7 +293,10 @@ impl ChannelStrip {
         Self {
             deess_lp_a,
             deess_lp_b,
+            deess_air_a,
+            deess_air_b,
             deess_env,
+            deess_gr,
             harsh_bp,
             harsh_env,
             tilt_low: Biquad::default(),
@@ -282,7 +309,10 @@ impl ChannelStrip {
     fn reset(&mut self) {
         self.deess_lp_a.reset();
         self.deess_lp_b.reset();
+        self.deess_air_a.reset();
+        self.deess_air_b.reset();
         self.deess_env.reset();
+        self.deess_gr.reset(1.0);
         self.harsh_bp.reset();
         self.harsh_env.reset();
         self.tilt_low.reset();
@@ -303,23 +333,28 @@ impl ChannelStrip {
         harsh_thresh: f32,
         harsh_amount: f32,
     ) -> f32 {
-        // --- De-esser: complementary split at 5 kHz; key the HIGH (sibilant) band and pull it
-        // down over threshold. low + high = x exactly, so the reduction can be total. ---
+        // --- De-esser: 3-way complementary split (low + sib + air = x). Key & duck only the
+        // 5–10 kHz sibilant band; AIR (>10 kHz) always passes at unity, so ducking an ess never
+        // pulls the vocal's sparkle down with it. ---
         let low = self.deess_lp_b.process(self.deess_lp_a.process(x).lp).lp;
-        let high = x - low;
-        let env = self.deess_env.process(high);
+        let air = self.deess_air_b.process(self.deess_air_a.process(x).hp).hp;
+        let sib = x - low - air;
+        let env = self.deess_env.process(sib);
         // gr ∈ (0,1]: infinite-ratio downward gain, scaled by amount. amount=0 → gr=1 (bypass).
-        let gr = if env > deess_thresh && deess_amount > 0.0 {
+        let gr_target = if env > deess_thresh && deess_amount > 0.0 {
             (deess_thresh / env.max(1.0e-9)).powf(deess_amount)
         } else {
             1.0
         };
+        // Smooth the gain reduction (declick the onset step; still ms-fast).
+        let gr = self.deess_gr.process(gr_target);
         if deess_listen {
             // Monitor the removed sibilant content (silent at rest, lights up on esses).
-            return (1.0 - gr) * high;
+            return (1.0 - gr) * sib;
         }
-        // out = low + gr·high  ⇒ exact identity when gr = 1, full removal as gr → 0.
-        let deessed = low + gr * high;
+        // out = low + gr·sib + air ⇒ exact identity when gr = 1, full sibilant removal as gr → 0,
+        // air preserved throughout.
+        let deessed = low + gr * sib + air;
 
         // --- Harshness tamer: dynamic bell cut at 2–5 kHz (subtract k·bandpass, no coeff clicks). ---
         let hb = self.harsh_bp.process(deessed);

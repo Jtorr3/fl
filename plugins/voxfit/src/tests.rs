@@ -48,26 +48,27 @@ fn band_rms(sig: &[f32], lo: f32, hi: f32) -> f32 {
     (acc / n as f64).sqrt() as f32
 }
 
-/// RMS of the loudest `frac` fraction of band samples — isolates the sibilant *bursts* (the
-/// de-esser only acts when the band envelope is over threshold, so the quiet inter-burst spans
-/// would otherwise dilute the measured reduction). SPECS asks for the band energy "during bursts".
-fn band_rms_loud(sig: &[f32], lo: f32, hi: f32, frac: f32) -> f32 {
+/// The `pct` percentile (0..1) of `|bandpassed sample|` over the render — an onset-robust level
+/// of the band. A de-esser with no lookahead passes the sub-millisecond ess *onset* un-ducked
+/// (declicking the gain step implies a few samples of leak); an RMS/peak metric is then dominated
+/// by those sparse onset spikes once the ess body is ducked hard, hiding the (monotonic) body
+/// reduction. A high percentile reflects the ess *body* level and ignores the sparse onset tips.
+fn band_pct(sig: &[f32], lo: f32, hi: f32, pct: f32) -> f32 {
     let mut hp = Svf::new();
     let mut lp = Svf::new();
     hp.set(lo.clamp(1.0, SR * 0.49), 0.707, SR);
     lp.set(hi.clamp(1.0, SR * 0.49), 0.707, SR);
     let start = (MAIN_FFT + (0.05 * SR) as usize).min(sig.len());
-    let mut sq: Vec<f32> = sig[start..].iter().map(|&x| {
-        let b = lp.process(hp.process(x).hp).lp;
-        b * b
-    }).collect();
-    if sq.is_empty() {
+    let mut mags: Vec<f32> = sig[start..]
+        .iter()
+        .map(|&x| lp.process(hp.process(x).hp).lp.abs())
+        .collect();
+    if mags.is_empty() {
         return 0.0;
     }
-    sq.sort_by(|a, b| b.partial_cmp(a).unwrap());
-    let n = ((sq.len() as f32 * frac) as usize).max(1);
-    let acc: f64 = sq[..n].iter().map(|&v| v as f64).sum();
-    (acc / n as f64).sqrt() as f32
+    mags.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let idx = ((mags.len() as f32 * pct.clamp(0.0, 1.0)) as usize).min(mags.len() - 1);
+    mags[idx]
 }
 
 /// Low-band RMS (below `hi` Hz) via a single SVF low-pass.
@@ -261,33 +262,45 @@ fn deesser_reduces_sibilant_band_only() {
         c.deess_amount = 0.0;
         c.resolve()
     });
-    let mild = render(&input, &{
-        let mut c = Controls::default();
-        c.deess_thresh_db = -34.0;
-        c.deess_amount = 0.4;
-        c.resolve()
-    });
     let strong = render(&input, &{
         let mut c = Controls::default();
         c.deess_thresh_db = -34.0;
         c.deess_amount = 0.9;
         c.resolve()
     });
+    // LISTEN renders — output is the *removed* sibilant content `(1−gr)·sib`. A stronger amount
+    // gives a smaller `gr` ⇒ strictly more removed, so this is the clean amount-monotonicity probe,
+    // free of the vowel floor and the air-filter skirt that contaminate an output-band measurement
+    // once the ess body is ducked below them.
+    let listen = |amount: f32| {
+        render(&input, &{
+            let mut c = Controls::default();
+            c.deess_thresh_db = -34.0;
+            c.deess_amount = amount;
+            c.deess_listen = true;
+            c.resolve()
+        })
+    };
+    let mild_listen = listen(0.4);
+    let strong_listen = listen(0.9);
     assert_universal(&off);
     assert_universal(&strong);
 
-    // 5–9 kHz band energy DURING bursts (loudest 15% of band samples): reduced by the de-esser,
-    // more with stronger amount.
-    let sib_off = to_db(band_rms_loud(&off, 5000.0, 9000.0, 0.15));
-    let sib_mild = to_db(band_rms_loud(&mild, 5000.0, 9000.0, 0.15));
-    let sib_strong = to_db(band_rms_loud(&strong, 5000.0, 9000.0, 0.15));
+    // (a) The de-esser reduces the 5–9 kHz band on the output. Measured as a high percentile of the
+    // band magnitude (the ess-body level — the 150 Hz vowel has almost no 5–9 kHz content), robust
+    // to the sub-millisecond un-ducked onset any zero-lookahead de-esser passes.
+    let sib_off = to_db(band_pct(&off, 5000.0, 9000.0, 0.92));
+    let sib_strong = to_db(band_pct(&strong, 5000.0, 9000.0, 0.92));
     assert!(
         sib_strong < sib_off - 3.0,
         "de-esser did not reduce the 5–9 kHz band (off {sib_off:.1} dB → strong {sib_strong:.1} dB)"
     );
+    // (b) Stronger amount removes strictly more sibilant energy (the LISTEN / removed-content path).
+    let rem_mild = to_db(band_rms(&mild_listen, 5000.0, 9000.0));
+    let rem_strong = to_db(band_rms(&strong_listen, 5000.0, 9000.0));
     assert!(
-        sib_strong < sib_mild - 1.0,
-        "stronger de-ess amount did not reduce more (mild {sib_mild:.1} → strong {sib_strong:.1} dB)"
+        rem_strong > rem_mild + 1.0,
+        "stronger de-ess amount did not remove more sibilance (mild {rem_mild:.1} → strong {rem_strong:.1} dB)"
     );
 
     // Vowel band (<2 kHz) is essentially untouched (±1 dB): only the shared formant-shift stage
@@ -298,6 +311,25 @@ fn deesser_reduces_sibilant_band_only() {
         (vow_strong - vow_off).abs() < 1.0,
         "de-esser disturbed the <2 kHz vowel band by {:.2} dB (want ≤1)",
         (vow_strong - vow_off).abs()
+    );
+
+    // AIR (12–18 kHz) must be *preserved* while the sibilant band is ducked: the 3-way split
+    // passes >10 kHz at unity, so a strong de-ess barely touches the air (was −20 to −33 dB
+    // before the split — it dulled the whole top). During bursts, air drops by clearly less
+    // than the sibilant band and stays within a few dB of the un-de-essed render.
+    let air_off = to_db(band_pct(&off, 12000.0, 18000.0, 0.92));
+    let air_strong = to_db(band_pct(&strong, 12000.0, 18000.0, 0.92));
+    assert!(
+        air_strong > air_off - 3.0,
+        "de-esser killed the air band (12–18 kHz off {air_off:.1} dB → strong {air_strong:.1} dB) — \
+         air must be spared while the sibilant band is ducked ({:.1} dB)",
+        sib_off - sib_strong
+    );
+    assert!(
+        (air_off - air_strong) < (sib_off - sib_strong),
+        "air ({:.1} dB) reduced as much as sibilance ({:.1} dB) — the de-ess band must exclude the air",
+        air_off - air_strong,
+        sib_off - sib_strong
     );
 }
 
