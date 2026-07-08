@@ -400,6 +400,25 @@ profile wins; assist at 0 changes NOTHING in the audio path (null test).
 **Also retains from v1:** context-tuned defaults per type, type-aware metering,
 Master grid badges/colors, thematic preset banks filtered by (now auto-known) type.
 
+**LEARN button (user requirement — Ozone-style deliberate capture, on both plugins):**
+- Node LEARN: press, play the track's most representative section; Node captures a
+  focused 8 s feature window (progress ring in GUI), then COMMITS: type locked in
+  (overriding drift), context defaults applied, suggested strip settings computed
+  from the captured stats (e.g. measured low-band excess -> EQ suggestion; crest
+  factor -> comp threshold/ratio suggestion) shown as ghost values with an APPLY
+  button. Learn results persist with the project (nih-plug persist field).
+- Master LEARN: press, play the loudest/fullest section of the arrangement; Master
+  captures 12 s across ALL live Nodes simultaneously (via Bus feature publishing) +
+  its own mix analysis, then commits: theme locked, assist targets computed once
+  (not drifting), per-Node suggestions pushed as ghost values. GUI shows a summary
+  card: detected theme, per-track types, and the 3 biggest suggested moves.
+- Relationship to continuous Auto: Auto (confidence-gated, on-the-fly) remains the
+  default for type display; LEARN is the commitment mechanism — after a Learn,
+  continuous reclassification stops for that instance until the user presses Learn
+  again or switches the param off AUTO/LEARNED. Done bar: learn window captures
+  exactly N seconds (fake transport test), committed type matches the fixture
+  played during the window even if a different fixture plays after commit.
+
 - Node gains an Instrument Type param (enum: KICK, BASS, RUMBLE, PERC, HATS, SNARE,
   BREAKS, VOCAL, PAD, LEAD, ATMOS, FX, BUS, MASTER-ish). Type drives:
   (a) context-tuned defaults (EQ band starting freqs, comp time constants, sat amount,
