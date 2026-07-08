@@ -185,6 +185,38 @@ fn color_weight(f_hz: f32) -> f32 {
     db_to_lin(0.35 * db).clamp(0.4, 3.0)
 }
 
+/// First-order DC blocker (~5 Hz corner at 48 kHz). Odd-symmetric shapers should not
+/// create DC from a zero-mean input, but heavy saturation of a near-square/asymmetric
+/// bass envelope (plus filter-startup bias) leaks a measurable offset — up to ~-0.06 on
+/// hot Reese presets — which eats asymmetric headroom on a bass. This keeps the summed
+/// wet path bias-free without touching the harmonic character (−0.1 dB at 40 Hz).
+#[derive(Clone, Copy, Default)]
+struct DcBlock {
+    x1: f32,
+    y1: f32,
+    r: f32,
+}
+
+impl DcBlock {
+    fn set(&mut self, sample_rate: f32) {
+        // ~10 Hz corner: strips saturation DC and sub-audio wander (e.g. the ~0.8 Hz
+        // detune beat of a Reese) while costing only ~-0.25 dB at 41 Hz, so the lowest
+        // 808/Reese fundamentals stay powerful.
+        self.r = 1.0 - (std::f32::consts::TAU * 10.0 / sample_rate.max(1.0));
+    }
+    #[inline]
+    fn process(&mut self, x: f32) -> f32 {
+        let y = x - self.x1 + self.r * self.y1;
+        self.x1 = x;
+        self.y1 = y;
+        y
+    }
+    fn reset(&mut self) {
+        self.x1 = 0.0;
+        self.y1 = 0.0;
+    }
+}
+
 /// Linkwitz-Riley 4th-order crossover: two cascaded 2nd-order Butterworth LP and HP
 /// sections (TPT SVF, Q = 1/√2). `process` returns `(low, high)`.
 #[derive(Clone, Copy, Default)]
@@ -222,6 +254,8 @@ impl Lr4Crossover {
 struct Channel {
     xover: [Lr4Crossover; 3],
     band_os: [Oversampler2x; MAX_BANDS],
+    /// DC blocker on the summed wet path (removes saturation-injected bias).
+    dc: DcBlock,
     /// Instability heal ramp (samples remaining of a fade-in after a reset).
     heal: u32,
 }
@@ -236,6 +270,7 @@ impl Channel {
                 Oversampler2x::new(),
                 Oversampler2x::new(),
             ],
+            dc: DcBlock::default(),
             heal: 0,
         }
     }
@@ -246,6 +281,8 @@ impl Channel {
         for o in self.band_os.iter_mut() {
             o.reset();
         }
+        // Preserve the configured corner; only clear the filter memory.
+        self.dc.reset();
         self.heal = 0;
     }
 }
@@ -300,6 +337,10 @@ impl TracerCore {
     pub fn set_sample_rate(&mut self, sample_rate: f32) {
         self.sr = if sample_rate > 0.0 { sample_rate } else { 48_000.0 };
         self.tracker = PitchTracker::new(self.sr, 110.0);
+        for c in self.ch.iter_mut() {
+            c.dc.set(self.sr);
+            c.dc.reset();
+        }
         self.configured = false;
     }
 
@@ -461,6 +502,10 @@ impl TracerCore {
                 wet *= g;
                 self.ch[ci].heal -= 1;
             }
+
+            // Strip saturation-injected DC from the summed wet before the blend. Wet-path
+            // only, so the mix=0 null against the dry path is untouched.
+            wet = self.ch[ci].dc.process(wet);
 
             let mixed = dry[ci] * (1.0 - mix) + wet * mix;
             out[ci] = (mixed * out_lin).clamp(-8.0, 8.0);
@@ -670,6 +715,98 @@ mod tests {
         // Clamp policy (TRIAGE 2026-07-08): final clamp is a ±8.0 runaway/NaN guard
         // (≈ +18 dBFS), not a 0 dBFS ceiling — extreme fuzz asserts finite && ≤ the guard.
         assert!(peak <= 8.001, "peak {peak} exceeded the +18 dBFS safety guard");
+    }
+
+    /// Mean (DC) of a buffer.
+    fn dc_mean(x: &[f32]) -> f32 {
+        x.iter().copied().sum::<f32>() / x.len().max(1) as f32
+    }
+
+    /// First-difference outlier "click" count vs a local (50 ms) RMS floor — a port of
+    /// tools/audition.py::detect_clicks so the zipper regression matches the sound-pass metric.
+    fn click_count(x: &[f32], sr: f32, thresh_ratio: f32) -> usize {
+        if x.len() < 8 {
+            return 0;
+        }
+        let d: Vec<f32> = x.windows(2).map(|w| (w[1] - w[0]).abs()).collect();
+        let win = ((50.0e-3 * sr) as usize).max(8);
+        // Boxcar RMS of the difference.
+        let mut count = 0;
+        let edge = (20.0e-3 * sr) as usize;
+        for i in edge..d.len().saturating_sub(edge) {
+            let lo = i.saturating_sub(win / 2);
+            let hi = (i + win / 2).min(d.len());
+            let ms = d[lo..hi].iter().map(|&v| v * v).sum::<f32>() / (hi - lo) as f32;
+            let local_rms = ms.sqrt() + 1e-9;
+            if d[i] / local_rms > thresh_ratio {
+                count += 1;
+            }
+        }
+        count
+    }
+
+    /// REGRESSION (DC-blocker): heavy odd-saturation of a bass leaks DC without the wet-path
+    /// blocker — hot Reese presets measured up to ~-0.06. Assert the summed wet stays
+    /// bias-free (well under the audition DC flag threshold of 1e-3) on a hot config.
+    #[test]
+    fn hot_saturation_does_not_inject_dc() {
+        let sr = 48_000.0f32;
+        let reese = testsig::synth_reese(55.0, 3.0, sr);
+        // A deliberately hot, asymmetric-leaning config (mirrors "Reese Tracker": high mid
+        // drive, Fold band) that produced the worst DC before the blocker.
+        let mut s = Settings::default();
+        s.band_count = 3;
+        s.band_drive_db = [12.0, 15.0, 8.0, 4.0];
+        s.band_shape = [ShapeKind::Tube, ShapeKind::Fold, ShapeKind::Tape, ShapeKind::Tape];
+        s.mix = 1.0;
+        let mut core = TracerCore::new(sr);
+        let mut out = reese.clone();
+        core.process_mono(&mut out, &s);
+        // Skip the DC blocker's own settle (its ~5 Hz corner needs a few hundred ms).
+        let tail = &out[sr as usize..];
+        let dc = dc_mean(tail).abs();
+        assert!(dc < 1.0e-3, "wet path leaked DC {dc:.5} (blocker not working)");
+    }
+
+    /// REGRESSION (no zipper on a glide): the crossover cutoffs step every 32-sample control
+    /// block as the tracked pitch glides. On a SMOOTH gliding sine (no source reset edges to
+    /// confound the detector) the moving LR4 tree must not emit discontinuities — assert the
+    /// click count stays negligible. A raw saw is unusable here (its per-cycle reset is itself
+    /// a discontinuity); the sine isolates crossover-modulation artifacts.
+    #[test]
+    fn gliding_pitch_no_crossover_zipper() {
+        let sr = 48_000.0f32;
+        let len = (sr * 3.0) as usize;
+        // Smooth sine gliding 60 → 150 Hz (exponential), amp 0.7.
+        let mut phase = 0.0f32;
+        let sine: Vec<f32> = (0..len)
+            .map(|n| {
+                let f = testsig::sliding_saw_f0(60.0, 150.0, n, len);
+                phase += f / sr;
+                if phase >= 1.0 {
+                    phase -= phase.floor();
+                }
+                0.7 * (std::f32::consts::TAU * phase).sin()
+            })
+            .collect();
+
+        // Tracking crossovers, fast slew so the cutoffs actually move each block; moderate
+        // drive so any coefficient-step zipper would surface as an output discontinuity.
+        let mut s = Settings::default();
+        s.band_count = 4;
+        s.slew_hz_per_ms = 800.0;
+        s.band_drive_db = [10.0, 10.0, 8.0, 6.0];
+        s.mix = 1.0;
+        let mut core = TracerCore::new(sr);
+        let mut out = sine.clone();
+        core.process_mono(&mut out, &s);
+
+        assert!(out.iter().all(|v| v.is_finite()));
+        // The dry sine glide itself yields 0 clicks; allow a tiny margin for the harmonic
+        // richening from saturation. Real zipper would spike this into the hundreds (one per
+        // control block ≈ thousands over 3 s).
+        let clicks = click_count(&out, sr, 8.0);
+        assert!(clicks <= 4, "gliding-pitch crossover zipper: {clicks} click(s) detected");
     }
 
     #[test]

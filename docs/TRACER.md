@@ -17,8 +17,14 @@ in ─┬─ mono sum → MPM pitch detect (decimated ~12 kHz, window 1024)
     │
     └─ LR4 crossover tree (cutoffs = harmonic × f0 × 2^SmartFreq, recomputed per
          32-sample control block; confidence < 0.6 freezes them)
-           band0..3: [drive → shaper(bank) → 2x OS → level] → sum → mix → out
+           band0..3: [drive → shaper(bank) → 2x OS → level] → sum → DC-block → mix → out
 ```
+
+The summed wet path passes through a ~10 Hz DC blocker before the dry/wet mix: heavy
+odd-symmetric saturation of an asymmetric bass envelope (and sub-audio detune wander)
+leaks a small offset that would otherwise eat one-sided headroom on a bass. The blocker
+is wet-only (the `Mix` = 0 null against dry is untouched) and costs ≈ −0.25 dB at 41 Hz,
+so the lowest 808/Reese fundamentals stay powerful and clean.
 
 ## Pitch tracking (`suite_core::pitch`)
 

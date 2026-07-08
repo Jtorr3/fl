@@ -864,6 +864,66 @@ mod render_tests {
         );
     }
 
+    /// SOUND-PASS audition render: every factory preset + the default state over a Reese
+    /// bed and a sliding-808 glide, written to renders/_audition/TRACER/<QVS_AUDITION_DIR>/.
+    /// `#[ignore]`d (offline audition, not a CI gate) — run explicitly:
+    ///   QVS_AUDITION_DIR=before cargo test -p tracer --release audition_render -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn audition_render() {
+        use crate::dsp::Settings;
+        let sr = 48_000.0f32;
+        let n = (sr * 4.0) as usize;
+        // Reese bed (dark-techno low end) + a sliding 808 that glides DOWN 110→41 Hz to
+        // stress the pitch tracker / moving crossovers.
+        let reese = testsig::synth_reese(55.0, 4.0, sr);
+        let slide = testsig::sliding_saw(110.0, 41.0, 0.6, n, sr);
+
+        let subdir = std::env::var("QVS_AUDITION_DIR").unwrap_or_else(|_| "before".to_string());
+        // plugins/tracer -> repo root/renders/_audition/TRACER/<subdir>
+        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(|p| p.parent())
+            .expect("repo root")
+            .to_path_buf();
+        let out_dir = root.join("renders").join("_audition").join("TRACER").join(&subdir);
+        std::fs::create_dir_all(&out_dir).expect("create audition dir");
+
+        // Dry-source baselines: the click detector fires on the naive saw's periodic reset
+        // edges and the ringing/DC detectors on a sustained tone, so write the untouched
+        // sources too — the sound-pass judges TRACER by what it ADDS over these baselines.
+        write_wav(&out_dir.join("_drybed__reese.wav"), &reese, sr as u32).expect("write dry reese");
+        write_wav(&out_dir.join("_drybed__slide.wav"), &slide, sr as u32).expect("write dry slide");
+
+        // (label, Settings) for every preset plus the default state.
+        let presets = load_all(PRESET_JSON);
+        let mut cases: Vec<(String, Settings)> = presets
+            .iter()
+            .map(|p| (p.name.clone(), settings_from_preset(p)))
+            .collect();
+        cases.push(("default".to_string(), Settings::default()));
+
+        for (name, s) in &cases {
+            let label = name.to_lowercase().replace([' ', '·', '-'], "_");
+            for (src, tag) in [(&reese, "reese"), (&slide, "slide")] {
+                let mut core = TracerCore::new(sr);
+                let mut out = src.clone();
+                core.process_mono(&mut out, s);
+                // Audition render must ALWAYS write (the WAV analysis is the judge), so we
+                // don't hard-gate on peak here — but finite-ness is non-negotiable, and any
+                // >0 dBFS peak is surfaced as a warning for the sound-pass to weigh.
+                assert!(out.iter().all(|v| v.is_finite()), "{label}/{tag} produced NaN/inf");
+                let peak = out.iter().fold(0.0f32, |m, &v| m.max(v.abs()));
+                if peak > 1.0 {
+                    eprintln!("  ! {label}__{tag}: peak {:+.2} dBFS (over 0)", 20.0 * peak.log10());
+                }
+                let path = out_dir.join(format!("{label}__{tag}.wav"));
+                write_wav(&path, &out, sr as u32).expect("write audition render");
+            }
+        }
+        eprintln!("audition renders written to {}", out_dir.display());
+    }
+
     /// Render each factory preset over a sliding-saw glide and a steady synthetic vocal,
     /// write the WAVs into renders/TRACER/, and assert the universal properties.
     #[test]
