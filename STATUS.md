@@ -1,6 +1,6 @@
 # STATUS
 
-CURRENT: (none) | STEP: - | ATTEMPTS: 0 | LAST-ACTION: OVERSEER-ENRICH v2 SHIPPED — auto-classification + theme inference + LEARN (both plugins) + theme assist + context defaults + thematic type/theme-filtered preset banks. cargo test --workspace --release GREEN (39 bins, 0 failed); build.ps1 -All GREEN (18 crates). Next §7 item: FLYBY (Phase 2b).
+CURRENT: FLYBY | STEP: 1 | ATTEMPTS: 0 | LAST-ACTION: start(FLYBY) — Phase 2b doppler spatializer (Transfer clone). Fresh crate from plugins/_template.
 PUSH-PENDING: no
 DONE: BOOTSTRAP, GRIT, EMBER, IMPACT, TRACER, OVERSEER, W8-VITALGEN, W4-SESSION-BOOTSTRAP, HARD-CHECKPOINT-1, DRIFT, WIRE, OUROBOROS, SWARM, SMUDGE, MURMUR, UNDERTOW, SNAP, SEANCE, W9-VOXRIP, VOXKEY, VOXFIT, UI-CORE-FIX, ASCEND, W1-RUMBLE-BASSLINE, W2-BREAK-CHOP, W3-DARK-PROGRESSION, HARD-CHECKPOINT-2, PRESET-SYSTEM, OVERSEER-ENRICH
 DESCOPED: GRIT Mode C (spectral STFT) → DEFERRED.md; OVERSEER Ozone hosting + tier-2 bus (by spec/design) → DEFERRED.md; W4 tempo application (no MCP command exists) → DEFERRED.md; WIRE true-per-bandwidth Opus internal-rate + real FEC/PLC (opus-rs 12k/24k paths buggy; PRD §5-sanctioned pre-LP approximation) → DEFERRED.md (NOT an attempt-budget descope; WIRE shipped full)
