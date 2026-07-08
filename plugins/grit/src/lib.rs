@@ -360,21 +360,13 @@ impl Plugin for Grit {
                         );
                         ui.add_space(6.0);
 
-                        // Preset selector
-                        ui.horizontal(|ui| {
-                            ui.label(
-                                egui::RichText::new("PRESET").color(suite_core::ui::TEXT_DIM).small(),
-                            );
-                            egui::ComboBox::from_id_salt("grit-preset")
-                                .selected_text("select…")
-                                .show_ui(ui, |ui| {
-                                    for p in presets.iter() {
-                                        if ui.selectable_label(false, &p.name).clicked() {
-                                            apply_preset(&params, setter, p);
-                                        }
-                                    }
-                                });
-                        });
+                        // Preset bar: factory + user presets, save/save-as/delete, dirty dot.
+                        suite_core::ui::PresetBar::new("grit", presets.as_slice()).show(
+                            ui,
+                            &*params,
+                            setter,
+                            |setter, p| apply_preset(&params, setter, p),
+                        );
                         ui.separator();
 
                         egui::ScrollArea::vertical().show(ui, |ui| {

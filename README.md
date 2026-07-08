@@ -42,6 +42,12 @@ as one unit with 75/100/125/150 % snap points in a corner size menu, persisted w
 project). Boolean params render as toggles. Full reference: [docs/UI.md](docs/UI.md).
 The endgame CONSOLE v2 theme only re-skins these widgets; the interactions stay as-is.
 
+Every editor also carries the shared **preset bar** (`suite_core::ui::PresetBar`): one
+dropdown with **FACTORY** and **USER** sections, **Save** / **Save As** / **Delete**, and a
+**dirty dot** when the live params diverge from the loaded preset. User presets are saved
+as flat JSON under `[Documents]\Qeynos\Presets\<plugin>\` and never touch the audio thread.
+Full reference: [docs/PRESETS.md](docs/PRESETS.md).
+
 ## Tools (Phase 4)
 
 | Tool | Type | Summary | Docs |

@@ -12,6 +12,26 @@ use nih_plug_egui::{
     EguiState,
 };
 use std::sync::Arc;
+use suite_core::presets::{load_all, Preset};
+
+/// Factory presets — the template keeps a couple so it also demonstrates the suite
+/// preset bar (factory + user save/load) that every plugin adopts. Values are plain
+/// (linear gain).
+const PRESET_JSON: &[&str] = &[
+    r#"{ "name": "Unity", "gain": 1.0 }"#,
+    r#"{ "name": "Quiet -12", "gain": 0.25118864 }"#,
+    r#"{ "name": "Loud +6", "gain": 1.9952623 }"#,
+];
+
+/// Apply a factory preset to the live params through the host (the per-plugin pretty-key
+/// mapping; user presets go through the generic param-id path in `suite_core::ui`).
+fn apply_preset(params: &TemplateParams, setter: &ParamSetter, p: &Preset) {
+    if let Some(g) = p.get("gain") {
+        setter.begin_set_parameter(&params.gain);
+        setter.set_parameter(&params.gain, g);
+        setter.end_set_parameter(&params.gain);
+    }
+}
 
 /// Time for the peak meter to decay ~12 dB after silence.
 const PEAK_METER_DECAY_MS: f64 = 150.0;
@@ -45,6 +65,7 @@ pub struct Template {
     params: Arc<TemplateParams>,
     peak_meter_decay_weight: f32,
     peak_meter: Arc<AtomicF32>,
+    factory_presets: Arc<Vec<Preset>>,
 }
 
 #[derive(Params)]
@@ -62,6 +83,7 @@ impl Default for Template {
             params: Arc::new(TemplateParams::default()),
             peak_meter_decay_weight: 1.0,
             peak_meter: Arc::new(AtomicF32::new(util::MINUS_INFINITY_DB)),
+            factory_presets: Arc::new(load_all(PRESET_JSON)),
         }
     }
 }
@@ -120,6 +142,7 @@ impl Plugin for Template {
     fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
         let params = self.params.clone();
         let peak_meter = self.peak_meter.clone();
+        let presets = self.factory_presets.clone();
         let egui_state = self.params.editor_state.clone();
         create_egui_editor(
             self.params.editor_state.clone(),
@@ -138,6 +161,15 @@ impl Plugin for Template {
                                 .color(suite_core::ui::ACCENT),
                         );
                         ui.add_space(8.0);
+
+                        // Preset bar: factory + user presets, save/save-as/delete, dirty dot.
+                        suite_core::ui::PresetBar::new("_template", presets.as_slice()).show(
+                            ui,
+                            &*params,
+                            setter,
+                            |setter, p| apply_preset(&params, setter, p),
+                        );
+                        ui.separator();
 
                         suite_core::ui::labeled_slider(ui, "GAIN", &params.gain, setter);
 
