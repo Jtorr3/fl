@@ -500,6 +500,88 @@ fn stutter_pitch_up_wrap_is_click_free() {
 }
 
 // ---------------------------------------------------------------------------
+// SOUND-PASS regression: a tape-stop held to a full stop decays to SILENCE — it
+// must not freeze the read head on a single (non-zero, DC) sample. Before the fix
+// the tail sat on a frozen ~-0.13 DC value (audible thump + DC-offset defect).
+// ---------------------------------------------------------------------------
+#[test]
+fn tape_stop_tail_has_no_dc() {
+    let f0 = 200.0f32;
+    let dur_s = 0.5f32;
+    let engage = 24_064usize; // block-aligned, after warmup
+    let dur = (dur_s * SR) as usize;
+    let hold_past = SR as usize; // hold ~1 s past the full stop
+    let total = engage + dur + hold_past;
+    let input = sine(f0, 0.6, total);
+
+    let s = Settings {
+        tape_sync: TapeSync::Free,
+        tape_free_s: dur_s,
+        tape_curve: 0.5,
+        tape_release: TapeRelease::Instant,
+        mix: 1.0,
+        ..Settings::default()
+    };
+    // Tape-stop engaged and HELD to the end (never released → no Instant crossfade,
+    // so the tail is the raw braked reader, which must have braked to silence).
+    let (l, _r) = render(&s, &input, 120.0, true, &[(engage, only(0))]);
+
+    // Tail = the last 0.5 s, well past the full stop at engage+dur.
+    let tail = &l[total - SR as usize / 2..];
+    let mean: f32 = tail.iter().copied().sum::<f32>() / tail.len() as f32;
+    let peak = tail.iter().fold(0.0f32, |m, &v| m.max(v.abs()));
+    assert!(
+        mean.abs() < 1e-3,
+        "tape-stop tail froze on a DC sample: mean {mean:.5}"
+    );
+    assert!(
+        peak < 1e-3,
+        "tape-stop tail not silent: peak {peak:.5} (froze instead of decaying to zero)"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// SOUND-PASS regression: switching DIRECTLY between modes (not just engage from /
+// disengage to dry) stays click-free — every mode-to-mode boundary's max sample-
+// delta is bounded vs the steady-state slope. Guards the 5 ms equal-power crossfade
+// on mode changes, incl. entering/leaving the new tape-stop level fade.
+// ---------------------------------------------------------------------------
+#[test]
+fn mode_boundaries_click_free() {
+    let f0 = 220.0f32;
+    let amp = 0.6f32;
+    let total = 128_000usize;
+    let input = sine(f0, amp, total);
+
+    let s = Settings { mix: 1.0, ..Settings::default() };
+    // half-speed → reverse → stutter → tape-stop → release, each a direct switch.
+    // Boundaries are kept clear of a stutter loop-wrap: the stutter engages at 68 000
+    // and its 1/8 @120 BPM loop retriggers every 12 000 samples (80 000 / 92 000 / …),
+    // so the switch to tape-stop and the release are placed BETWEEN wraps (98 000,
+    // 110 000). Two crossfades stacking within one 5 ms window (a mode switch landing
+    // on a retrigger) is a separate, rare collision — see LIMITATION in the pass notes.
+    let events = [
+        (20_000usize, only(3)),
+        (44_000, only(2)),
+        (68_000, only(1)),
+        (98_000, only(0)),
+        (110_000, [false; NUM_MODES]),
+    ];
+    let (l, _r) = render(&s, &input, 120.0, true, &events);
+
+    let steady = max_delta(&input, 1_000, 18_000).max(1e-6);
+    let guard = (0.004 * SR) as usize; // ±4 ms around each boundary
+    for &(at, _) in &events {
+        let d = max_delta(&l, at - guard, at + guard);
+        assert!(
+            d <= 3.0 * steady,
+            "mode boundary @ {at} clicks: max delta {d:.4} > 3× steady {steady:.4}"
+        );
+    }
+    assert_universal(&l[1_000..]);
+}
+
+// ---------------------------------------------------------------------------
 // P0/P1: Out trim never steps the level between the idle passthrough and the active path.
 // ---------------------------------------------------------------------------
 #[test]
@@ -582,6 +664,72 @@ fn live_mix_route_produces_nonzero_delta() {
 
     writer.release(idx, src);
     let _ = std::fs::remove_file(&path);
+}
+
+// ---------------------------------------------------------------------------
+// SOUND-PASS audition render (permanent infra, `#[ignore]`d in normal runs).
+// Renders the default state AND every factory preset over a genre-right break
+// (each preset through its category's signature gesture), PLUS one render per FX
+// mode from the default state — tape-stop / stutter / pitched-stutter / reverse —
+// so the audition can catch mode-boundary clicks and the tape-stop tail. Writes
+// into renders/_audition/HALT/<QVS_AUDITION_DIR or "before">/. Analyzed offline by
+// tools/audition.py.
+// ---------------------------------------------------------------------------
+#[test]
+#[ignore]
+fn audition_render_musical_sources() {
+    let bpm = 140.0;
+    let subdir = std::env::var("QVS_AUDITION_DIR").unwrap_or_else(|_| "before".into());
+
+    // Genre-right source: a synthesized amen-style break at 140 BPM, 4 bars.
+    let break_src = testsig::synth_break(bpm as f32, 4, SR);
+    // Engage the gesture one bar in and HOLD to the end — for tape-stop this drives
+    // it all the way to a full stop so the tail is captured (it must decay to
+    // silence, not freeze on a DC sample); for the others it exercises the sustained
+    // mode and both the engage + (implicit end-of-file) boundaries.
+    let engage_at = (60.0 / bpm * SR as f64 * 4.0) as usize; // one 4/4 bar
+
+    // Category → signature mode index (tape-stop 0 / stutter 1 / reverse 2 / half 3).
+    fn mode_for_category(cat: Option<&str>) -> usize {
+        match cat.map(|c| c.to_lowercase()) {
+            Some(c) if c.contains("stutter") => 1,
+            Some(c) if c.contains("reverse") => 2,
+            Some(c) if c.contains("half") => 3,
+            _ => 0, // Tape-Stop Feels (and any uncategorised)
+        }
+    }
+
+    let write = |fname: &str, l: &[f32]| {
+        let path = render_path("_audition/HALT", &format!("{subdir}/{fname}"));
+        write_wav(&path, l, SR as u32).expect("write audition render");
+    };
+
+    // --- Family A: default + every preset over the break through its gesture ---
+    let (l, _r) = render(&Settings::default(), &break_src, bpm, true, &[(engage_at, only(0))]);
+    write("default", &l);
+
+    let presets = load_all(PRESET_JSON);
+    for p in &presets {
+        let s = settings_from_preset(p);
+        let mode = mode_for_category(p.category.as_deref());
+        let (l, _r) = render(&s, &break_src, bpm, true, &[(engage_at, only(mode))]);
+        let fname = p.name.to_lowercase().replace([' ', '&', '-', '/', '·'], "_");
+        write(&fname, &l);
+    }
+
+    // --- Family B: one render per FX mode from the DEFAULT state ---
+    let mode_render = |name: &str, s: &Settings, mode: usize| {
+        let (l, _r) = render(s, &break_src, bpm, true, &[(engage_at, only(mode))]);
+        write(name, &l);
+    };
+    mode_render("mode_tapestop", &Settings::default(), 0);
+    mode_render("mode_stutter", &Settings::default(), 1);
+    mode_render(
+        "mode_stutter_pitched",
+        &Settings { stutter_pitch: 12, ..Settings::default() },
+        1,
+    );
+    mode_render("mode_reverse", &Settings::default(), 2);
 }
 
 // ---------------------------------------------------------------------------

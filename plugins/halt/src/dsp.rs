@@ -300,7 +300,19 @@ impl Reader {
             return (l_in, r_in);
         }
         let (l, r) = read_interp(buf_l, buf_r, len, self.read_pos);
-        let out = (l * self.amp, r * self.amp);
+        // Tape-stop brakes to silence: as the transport reaches a full stop the read
+        // rate hits 0 and the read head would otherwise FREEZE on a single sample —
+        // a held, non-zero DC value (audible thump + DC-offset defect). Fold in a
+        // level that decays to zero across the final approach so a full stop dies to
+        // silence (musical: pitch AND level glide down together), and — during a Ramp
+        // release (phase falling 1→0) — fades the wet back in symmetrically. Below the
+        // knee this is exactly 1.0, so the glide itself is untouched.
+        let amp = if self.mode == Mode::TapeStop {
+            self.amp * tape_stop_gain(self.tape_phase)
+        } else {
+            self.amp
+        };
+        let out = (l * amp, r * amp);
         self.advance();
         out
     }
@@ -345,6 +357,24 @@ fn read_interp(buf_l: &[f32], buf_r: &[f32], len: usize, pos: f64) -> (f32, f32)
 fn wrap_index(i: i64, len: usize) -> usize {
     let l = len as i64;
     (((i % l) + l) % l) as usize
+}
+
+/// Tape-stop output level vs. brake phase (0 = full speed, 1 = dead stop). Unity through
+/// the whole glide, then a raised-cosine fade to SILENCE across the final `1 - KNEE` of the
+/// stop so a full stop decays to zero instead of freezing on a (DC) sample. The raised cosine
+/// has zero slope at both ends, so the knee itself is click-free; scaling by a smooth gain
+/// never moves a zero-crossing, so the tape-stop pitch-glide measurement is unaffected. A Ramp
+/// release runs the phase back 1→0, so this fades the wet symmetrically back in as the tape
+/// spins up. Identity (`1.0`) for every phase at or below the knee.
+#[inline]
+fn tape_stop_gain(phase: f64) -> f32 {
+    const KNEE: f64 = 0.9;
+    if phase <= KNEE {
+        1.0
+    } else {
+        let t = ((phase - KNEE) / (1.0 - KNEE)).clamp(0.0, 1.0);
+        (0.5 * (1.0 + (std::f64::consts::PI * t).cos())) as f32
+    }
 }
 
 /// Equal-power crossfade gains for the incoming reader at progress `t` in `[0, 1]`.
