@@ -1828,6 +1828,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "seance"
+version = "0.1.0"
+dependencies = [
+ "hound",
+ "nih_plug",
+ "nih_plug_egui",
+ "suite-core",
+]
+
+[[package]]
 name = "semver"
 version = "1.0.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
