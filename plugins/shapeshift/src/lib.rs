@@ -678,20 +678,22 @@ fn xy_pad(ui: &mut egui::Ui, params: &ShapeshiftParams, setter: &ParamSetter, ph
             egui::Stroke::new(1.0, egui::Color32::from_rgb(40, 43, 48)),
             egui::StrokeKind::Middle,
         );
-        // Corner labels (which shaper each corner uses).
+        // Corner labels (which shaper each corner uses). Each label is placed at its DSP corner
+        // in data space — A=(0,0) bottom-left, B=(1,0) bottom-right, C=(0,1) top-left,
+        // D=(1,1) top-right — so the pad labels match the DSP blend weights
+        // (`dsp::bilinear_weights`) and the manual (docs/SHAPESHIFT.md). GUI-ONLY fix: the DSP
+        // and the pointer↔param mapping (`xy_to_screen`/`screen_to_xy`) are unchanged, so presets
+        // sound identical; only the label positions (previously vertically mirrored) are corrected.
+        // `xy_to_screen` performs the data→screen y-flip; the anchor keeps each label's text inside
+        // the pad at the named corner.
         let labels = [
-            (0.02, 0.06, format!("A · {}", corner_name(params.corner_a.value()))),
-            (0.98, 0.06, format!("B · {}", corner_name(params.corner_b.value()))),
-            (0.02, 0.98, format!("C · {}", corner_name(params.corner_c.value()))),
-            (0.98, 0.98, format!("D · {}", corner_name(params.corner_d.value()))),
+            (0.02, 0.02, egui::Align2::LEFT_BOTTOM, format!("A · {}", corner_name(params.corner_a.value()))),
+            (0.98, 0.02, egui::Align2::RIGHT_BOTTOM, format!("B · {}", corner_name(params.corner_b.value()))),
+            (0.02, 0.98, egui::Align2::LEFT_TOP, format!("C · {}", corner_name(params.corner_c.value()))),
+            (0.98, 0.98, egui::Align2::RIGHT_TOP, format!("D · {}", corner_name(params.corner_d.value()))),
         ];
-        for (fx, fy, text) in labels {
-            let anchor = if fx < 0.5 {
-                egui::Align2::LEFT_TOP
-            } else {
-                egui::Align2::RIGHT_TOP
-            };
-            let pos = xy_to_screen(rect, fx, 1.0 - fy);
+        for (dx, dy, anchor, text) in labels {
+            let pos = xy_to_screen(rect, dx, dy);
             painter.text(
                 pos,
                 anchor,

@@ -304,8 +304,10 @@ pub struct ShapeshiftCore {
     x_s: OnePole,
     y_s: OnePole,
     primed: bool,
-    // Orbit LFO.
+    // Orbit LFO. `orbit_phase` is a free-running accumulator (phase-offset independent); the
+    // PHASE-knob offset is added at read time so turning PHASE rotates the orbit live.
     orbit_phase: f32,
+    orbit_phase0: f32,
     phase_inc: f32,
     // Auto-gain: 300 ms one-pole running mean-square of pre / post (mono sum).
     ag_coef: f32,
@@ -331,6 +333,7 @@ impl ShapeshiftCore {
             y_s,
             primed: false,
             orbit_phase: 0.0,
+            orbit_phase0: 0.0,
             phase_inc: 0.0,
             ag_coef: 0.0,
             pre_ms: 0.0,
@@ -348,9 +351,10 @@ impl ShapeshiftCore {
         self.latency as u32
     }
 
-    /// Current orbit phase (0..1), published to the GUI for the live orbit dot.
+    /// Current orbit phase (0..1), published to the GUI for the live orbit dot. Includes the
+    /// live PHASE-knob offset so the drawn dot tracks the same angle the audio uses.
     pub fn orbit_phase(&self) -> f32 {
-        self.orbit_phase
+        (self.orbit_phase + self.orbit_phase0).rem_euclid(1.0)
     }
 
     pub fn set_sample_rate(&mut self, sample_rate: f32) {
@@ -370,6 +374,7 @@ impl ShapeshiftCore {
         }
         self.primed = false;
         self.orbit_phase = 0.0;
+        self.orbit_phase0 = 0.0;
         self.pre_ms = 0.0;
         self.post_ms = 0.0;
         for d in self.dry_delay.iter_mut() {
@@ -391,18 +396,24 @@ impl ShapeshiftCore {
         };
         self.phase_inc = (cyc_hz / self.sr).max(0.0);
 
-        // Prime the position smoothers and orbit phase on the first configure after a reset so a
-        // freshly-instantiated core sits exactly at its target XY from sample 0 (needed for the
-        // corner-null done-bar to be an exact-path null).
+        // Read the PHASE-knob offset every block (NOT only at prime) so turning ORBIT PHASE during
+        // playback rotates the orbit live. It is applied as `angle = orbit_phase + orbit_phase0`
+        // at read time, leaving the free-running accumulator undisturbed (no jump).
+        self.orbit_phase0 = s.orbit_phase0.rem_euclid(1.0);
+
+        // Prime the position smoothers on the first configure after a reset so a freshly-
+        // instantiated core sits exactly at its target XY from sample 0 (needed for the
+        // corner-null done-bar to be an exact-path null). The free-running orbit accumulator
+        // starts at 0; the initial position already reflects the phase offset via `orbit_phase0`.
         if !self.primed {
             let (ox, oy) = if s.orbit_on {
-                orbit_offset(s.orbit_shape, s.orbit_phase0.rem_euclid(1.0), s.orbit_radius)
+                orbit_offset(s.orbit_shape, self.orbit_phase0, s.orbit_radius)
             } else {
                 (0.0, 0.0)
             };
             self.x_s.reset((s.x + ox).clamp(0.0, 1.0));
             self.y_s.reset((s.y + oy).clamp(0.0, 1.0));
-            self.orbit_phase = s.orbit_phase0.rem_euclid(1.0);
+            self.orbit_phase = 0.0;
             self.primed = true;
         }
     }
@@ -417,11 +428,13 @@ impl ShapeshiftCore {
 
         // --- XY position (user point + orbit), smoothed → bilinear weights ---
         let (ox, oy) = if s.orbit_on {
-            orbit_offset(s.orbit_shape, self.orbit_phase, s.orbit_radius)
+            // Current angle = free-running accumulator + live PHASE offset (see `configure`).
+            let angle = (self.orbit_phase + self.orbit_phase0).rem_euclid(1.0);
+            orbit_offset(s.orbit_shape, angle, s.orbit_radius)
         } else {
             (0.0, 0.0)
         };
-        // Advance the orbit phase.
+        // Advance the free-running orbit accumulator.
         self.orbit_phase = (self.orbit_phase + self.phase_inc).rem_euclid(1.0);
 
         let tx = (s.x + ox).clamp(0.0, 1.0);

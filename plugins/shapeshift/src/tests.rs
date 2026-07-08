@@ -4,7 +4,7 @@
 
 use super::*;
 use std::f32::consts::TAU;
-use suite_core::harness::{assert_single_coherent_peak, assert_universal, null_residual_db};
+use suite_core::harness::{assert_single_coherent_peak, null_residual_db};
 
 const SR: f32 = 48_000.0;
 
@@ -261,6 +261,70 @@ fn orbit_modulates_thd_periodically() {
     assert!(
         a_full > a_half && a_full > 0.3 * a0,
         "THD not periodic at orbit rate: a0 {a0:.4} a_full {a_full:.4} a_half {a_half:.4}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Regression: ORBIT PHASE applies live (read every block, not only at prime).
+// Pre-fix, `orbit_phase0` was read solely inside the `!primed` gate, so turning the
+// PHASE knob during playback did nothing. A phase change *after* the orbit is primed
+// must rotate the orbit on the following samples.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn orbit_phase_applies_live_after_prime() {
+    let block = 2048usize;
+    let f0 = 300.0f32;
+    // Contrasting corners (clean A/C vs harsh B/D) so the orbit position strongly colours
+    // the output — a rotated orbit lands on audibly different shaper blends.
+    let mut s = base_settings();
+    s.corner = [
+        Corner::TapeSoft, // A (0,0) — clean
+        Corner::HardClip, // B (1,0) — harsh
+        Corner::TapeSoft, // C (0,1) — clean
+        Corner::HardClip, // D (1,1) — harsh
+    ];
+    s.gain_db = [-6.0, 15.0, -6.0, 15.0];
+    s.x = 0.5;
+    s.y = 0.5;
+    s.orbit_on = true;
+    s.orbit_shape = OrbitShape::Circle;
+    s.orbit_rate_hz = 1.0;
+    s.orbit_radius = 0.45;
+    s.orbit_sync = false;
+    s.orbit_phase0 = 0.0;
+
+    let input = sine(f0, 0.6, block);
+
+    // Control core: prime with a block, then a SECOND block with the phase unchanged.
+    let mut core_a = ShapeshiftCore::new(SR);
+    let mut a1 = input.clone();
+    core_a.process_mono(&mut a1, &s); // primes at phase0 = 0.0
+    let mut a2 = input.clone();
+    core_a.process_mono(&mut a2, &s); // still phase0 = 0.0
+
+    // Test core: identical priming block, then a second block with the PHASE knob moved.
+    let mut core_b = ShapeshiftCore::new(SR);
+    let mut b1 = input.clone();
+    core_b.process_mono(&mut b1, &s); // identical prime
+    let mut s2 = s;
+    s2.orbit_phase0 = 0.5; // half-cycle rotation, applied AFTER prime
+    let mut b2 = input.clone();
+    core_b.process_mono(&mut b2, &s2);
+
+    // The priming blocks are identical (same init, input, params) → exact null.
+    assert!(
+        null_residual_db(&a1, &b1) < -120.0,
+        "priming blocks diverged unexpectedly"
+    );
+
+    // After the mid-stream PHASE change the second blocks must differ: the orbit is rotated
+    // half a cycle, so the blend (and thus the output) changes. Pre-fix this residual was
+    // effectively -inf (identical), so a loud residual proves the phase now applies live.
+    let resid = null_residual_db(&a2, &b2);
+    assert!(
+        resid > -30.0,
+        "ORBIT PHASE change after prime had no effect (residual {resid:.1} dB) — phase still gated by !primed"
     );
 }
 
