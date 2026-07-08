@@ -119,3 +119,49 @@ four corner labels show which shaper each corner uses, and the sound morphs betw
 a corner's **Gain** to drive harder; pull **Post LP** down to tame fold/crush fizz; **Auto-Gain**
 keeps the level steady; **Mix** blends back the dry. A sustained synth, bass, or drum bus shows
 the morph best.
+
+## What It Is
+
+A distortion whose character is a point on a 2-D pad. Four corners each pick one of eight
+waveshapers, and an XY position bilinearly blends between them, so the tone morphs continuously
+from clean tube to crushed fold as you move. A built-in orbit LFO can fly the point around on
+its own for hands-free, evolving grit — everything 4x oversampled to keep it clean.
+
+## Signal Flow
+
+```
+in ─ Pre-Gain ─ 4x oversample ─ [Corner A][B][C][D] ─ bilinear XY blend ─ DC block ─ Post LP ─ Mix ─ Out
+                                        ▲
+                        XY point (X, Y) + Orbit LFO (Rate / Sync·Division, Radius, Shape, Phase)
+```
+
+## Controls
+
+- **X** — horizontal morph position on the pad, 0–1 (blends left↔right corners).
+- **Y** — vertical morph position on the pad, 0–1 (blends bottom↔top corners).
+- **Corner A** — waveshaper at the bottom-left corner (8-curve bank).
+- **Corner B** — waveshaper at the bottom-right corner.
+- **Corner C** — waveshaper at the top-left corner.
+- **Corner D** — waveshaper at the top-right corner.
+- **Gain A** — input drive trim into Corner A's shaper, −24…+24 dB.
+- **Gain B** — input drive trim into Corner B's shaper, −24…+24 dB.
+- **Gain C** — input drive trim into Corner C's shaper, −24…+24 dB.
+- **Gain D** — input drive trim into Corner D's shaper, −24…+24 dB.
+- **Pre-Gain** — drive into the whole shaper bank, −12…+36 dB.
+- **Orbit** — enable the XY orbit LFO, on/off.
+- **Orbit Rate** — free orbit rate, 0.01–20 Hz (when not synced).
+- **Orbit Sync** — lock the orbit to host tempo, on/off.
+- **Orbit Division** — synced orbit length: ½, 1, 2, or 4 bars.
+- **Orbit Radius** — how far the orbit swings around the user point, 0–0.5 of the pad.
+- **Orbit Shape** — orbit trajectory: Circle or Figure-8.
+- **Orbit Phase** — orbit start-phase offset, 0–1.
+- **Post LP** — output low-pass to tame fold/crush harshness, 200 Hz–20 kHz.
+- **Auto-Gain** — match output loudness to input over ~300 ms, on/off.
+- **Mix** — dry/wet, 0–100 % (0 nulls the dry).
+- **Out** — output trim, −24…+24 dB.
+
+## Recipes
+
+1. **Dark-techno erosion** — load **Rusted Godhead** (Corner shapers Tri/Hard fold, Pre-Gain 20 dB, Post LP 8 kHz, Mix 100 %, Out −3 dB): a fixed, brutal fold-clip that corrodes a bassline or stab into gravel.
+2. **Atmospheric-dnb drift** — load **Tidal Drift** (Orbit on, Orbit Rate 0.15 Hz, Orbit Radius 0.30, Circle, Pre-Gain 9 dB, Mix 90 %): a slow circular orbit that keeps a pad's harmonic character gently shifting under the beat.
+3. **Vocal-rip digital bloom** — load **Chlorine Bloom** (Corner bit-crush/hard shapers, Pre-Gain 9 dB, Post LP 8 kHz, Mix 100 %, Out −1 dB) on a vocal chop for a chlorinated, datamoshed digital edge.

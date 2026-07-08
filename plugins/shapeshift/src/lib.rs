@@ -28,6 +28,9 @@ use suite_core::bus::PluginKind;
 use suite_core::presets::{load_all, Preset};
 use suite_core::spectrum::SpectrumPublisher;
 
+/// Usage manual embedded from docs, rendered in-GUI by the '?' button (BUILT-IN-MANUALS).
+pub const MANUAL_DOC: &str = include_str!("../../../docs/SHAPESHIFT.md");
+
 // ---------------------------------------------------------------------------
 // Param-facing enums (nih-plug `Enum`), mapped onto the pure-DSP enums.
 // ---------------------------------------------------------------------------
@@ -455,6 +458,7 @@ impl Plugin for Shapeshift {
                         ui.heading(
                             egui::RichText::new("QEYNOS · SHAPESHIFT").color(suite_core::ui::ACCENT),
                         );
+                        suite_core::ui::manual_button(ui, "shapeshift", "SHAPESHIFT", MANUAL_DOC);
                         ui.label(
                             egui::RichText::new("XY-morphing distortion — blend four shapers")
                                 .color(suite_core::ui::TEXT_DIM)
@@ -786,6 +790,14 @@ mod render_tests {
     use suite_core::harness::{assert_universal, render_path, write_wav};
     use suite_core::presets::load_all;
     use suite_core::testsig;
+
+    #[test]
+    fn manual_covers_all_params_and_has_recipes() {
+        suite_core::manual::assert_manual_covers_params(
+            crate::MANUAL_DOC,
+            &crate::ShapeshiftParams::default(),
+        );
+    }
 
     /// Render each factory preset over pink noise and a full-band chirp, write the WAVs (L
     /// channel) into renders/SHAPESHIFT/, and assert the universal properties on each channel.

@@ -133,3 +133,37 @@ Accents** / **Half-Time Flip** for fills. Pick **Slice Mode = Transient** on a b
 snap to the hits (raise **Sensitivity** for more). Use the **LANE** buttons to paint gate,
 reverse, roll, probability and level per step; **Randomize** (with **Density**) throws a new
 pattern; **Swing** adds groove. Pull **Mix** down to blend the chop under the dry signal.
+
+## What It Is
+
+A beat-slicer that records whatever you feed it into a rolling 2-bar buffer, cuts it into
+slices (on a musical grid or by transient), and replays them from a transport-locked step
+sequencer. Every step chooses its slice, gate, reverse, pitch, roll, probability, and level, so
+you can rebuild a break, stutter-gate a pad, or mangle a loop into a new rhythm.
+
+## Signal Flow
+
+```
+in ─┬────────────────────────────────────── dry ─────────────────────────┐
+    │                                                                      ├─ Mix ─► Out
+    └─► 2-bar capture ─► slice (Slice Mode: Grid=1/8·1/16·1/32 | Transient·Sensitivity)
+                          ─► step sequencer (Steps, Swing, transport-locked)
+                          ─► grain voices · per-step gate/reverse/pitch/roll/prob/level ─ wet ┘
+```
+
+## Controls
+
+- **Slice Mode** — how the buffer is cut: **Transient** (onset detection) or **Grid** (fixed divisions).
+- **Grid** — grid-mode slice division: 1/8, 1/16, or 1/32.
+- **Sensitivity** — transient-mode onset threshold, 0–100 % (higher = more slices).
+- **Steps** — number of steps dividing the 2-bar pattern, 16–64.
+- **Swing** — delays the off-steps by up to half a step, 0–75 %.
+- **Density** — busyness of the **Randomize** button's generated pattern, 0–100 %.
+- **Mix** — dry/wet, 0–100 % (0 = exact passthrough).
+- **Out** — output trim, −24…+24 dB.
+
+## Recipes
+
+1. **Dark-techno rechop** — load **Warehouse Rechop** (Slice Mode Grid, Grid 1/8, Steps 16, Swing 10 %, Mix 100 %): a clean, driving 1:1 re-slice that locks a loop tight to the grid with a hint of groove.
+2. **Atmospheric-dnb rollers** — load **Liquid Rollers** (Slice Mode Transient, Grid 1/16, Steps 32, Swing 8 %, Mix 80 %) on a break: soft transient-snapped rolls that sit under the dry drums. Raise **Sensitivity** for busier chops.
+3. **Vocal-rip stutter** — load **Cynthoni Wash** (Slice Mode Transient, Steps 24, Swing 0 %, Mix 45 %) on a vocal, then use the **LANE** editor to paint reverse and roll on a few steps for glitched, half-present phrases.

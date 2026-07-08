@@ -30,6 +30,9 @@ mod tests;
 use dsp::{MurmurCore, Settings};
 use suite_core::presets::{load_all, Preset};
 
+/// Usage manual embedded from docs, rendered in-GUI by the '?' button (BUILT-IN-MANUALS).
+pub const MANUAL_DOC: &str = include_str!("../../../docs/MURMUR.md");
+
 // ---------------------------------------------------------------------------
 // Plugin + params
 // ---------------------------------------------------------------------------
@@ -203,6 +206,7 @@ impl Plugin for Murmur {
                         use suite_core::ui::labeled_slider as row;
                         ui.add_space(4.0);
                         ui.heading(egui::RichText::new("QEYNOS · MURMUR").color(suite_core::ui::ACCENT));
+                        suite_core::ui::manual_button(ui, "murmur", "MURMUR", MANUAL_DOC);
                         ui.label(
                             egui::RichText::new("stochastic reverb — a new random room on every onset")
                                 .color(suite_core::ui::TEXT_DIM)
@@ -402,6 +406,14 @@ mod render_tests {
     use crate::presets::{settings_from_preset, PRESET_JSON};
     use suite_core::harness::{assert_universal, render_path, write_wav};
     use suite_core::presets::load_all;
+
+    #[test]
+    fn manual_covers_all_params_and_has_recipes() {
+        suite_core::manual::assert_manual_covers_params(
+            crate::MANUAL_DOC,
+            &crate::MurmurParams::default(),
+        );
+    }
 
     /// Render each factory preset with two short impulses + a percussive noise burst then
     /// silence (so onset-triggered room swaps and the tails are audible), write to

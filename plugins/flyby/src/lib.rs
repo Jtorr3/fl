@@ -29,6 +29,9 @@ pub mod presets;
 use dsp::{FlybyCore, PathShape, Settings, SyncDivision, MAX_NODES, MIN_NODES};
 use suite_core::presets::{load_all, Preset};
 
+/// Usage manual embedded from docs, rendered in-GUI by the '?' button (BUILT-IN-MANUALS).
+pub const MANUAL_DOC: &str = include_str!("../../../docs/FLYBY.md");
+
 // ---------------------------------------------------------------------------
 // Param-facing enum (nih-plug `Enum`), mapped onto the pure-DSP enum.
 // ---------------------------------------------------------------------------
@@ -400,6 +403,7 @@ impl Plugin for Flyby {
                         ui.heading(
                             egui::RichText::new("QEYNOS · FLYBY").color(suite_core::ui::ACCENT),
                         );
+                        suite_core::ui::manual_button(ui, "flyby", "FLYBY", MANUAL_DOC);
                         ui.label(
                             egui::RichText::new("doppler spatializer — fly a source around the listener")
                                 .color(suite_core::ui::TEXT_DIM)
@@ -716,6 +720,14 @@ mod render_tests {
     use suite_core::harness::{assert_universal, render_path, write_wav};
     use suite_core::presets::load_all;
     use suite_core::testsig;
+
+    #[test]
+    fn manual_covers_all_params_and_has_recipes() {
+        suite_core::manual::assert_manual_covers_params(
+            crate::MANUAL_DOC,
+            &crate::FlybyParams::default(),
+        );
+    }
 
     /// Render each factory preset over pink noise and a full-band chirp, write the WAVs (L
     /// channel) into renders/FLYBY/, and assert the universal properties on each channel.

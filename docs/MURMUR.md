@@ -147,3 +147,41 @@ toggle; Freeze Mix sets how much of the held/frozen texture you hear versus the 
 while Freeze is engaged. At 100% it is the classic hard freeze (unchanged); lower it to blend
 the live source back in so the freeze is a smooth crossfade rather than a sudden jump. The
 blend is smoothed (~15 ms) and only active while Freeze is on.
+
+## What It Is
+
+A stochastic reverb whose room is redrawn on every onset — play the same note twice and each
+tail lands in a subtly different hall. An 8×8 Householder FDN re-randomises its delay lengths,
+diffusion, and damping on every transient, crossfading click-free between two rooms. Use it
+where a static reverb sits dead: it makes pads breathe, drum spaces vary hit-to-hit, and vocals
+haunt a slightly different space each line.
+
+## Signal Flow
+
+```
+in ─┬─ onset detector (Sensitivity) ─ trigger ─┐        ┌ RE-ROLL (manual)
+    │                                           ▼        ▼
+    ├─► FDN room A ─┐  draw a NEW random room (Size · Randomness · Color) into the
+    └─► FDN room B ─┤  idle FDN, then a 50 ms equal-power crossfade to it
+                    └─► Width ─ Freeze / Freeze Mix ─ wet
+in ─────────────────────────────────────────────► out = dry + Mix·(wet − dry)
+```
+
+## Controls
+
+- **Size** — room scale; scales the delay-length window, 0–100 %. Applies on the next draw.
+- **Decay** — RT60 tail length, 0.2–20 s, applied live to both rooms.
+- **Color** — damping tilt from bright (−1) through mild (0) to dark (+1).
+- **Randomness** — how far each new draw strays from the nominal room, 0–100 % (at 0 it is a fixed reverb whose RT60 exactly equals Decay).
+- **Sensitivity** — onset-detector threshold, 0–100 % (higher re-rolls on smaller transients).
+- **Freeze** — sends RT60 to infinity and ducks the input: hold the current wash as an eternal pad.
+- **Freeze Mix** — while Freeze is engaged, the blend of the held texture against the live signal, 0–100 %.
+- **Re-Roll** — button; manually draw a fresh room and crossfade to it any time.
+- **Width** — stereo width of the wet, 0–100 % (0 = mono).
+- **Mix** — dry/wet blend, 0–100 % (0 leaves the dry untouched).
+
+## Recipes
+
+1. **Dark-techno stab room** — load **Concrete Antechamber** (Size 55 %, Decay 2.6 s, Color +0.35, Randomness 45 %, Sensitivity 55 %, Width 85 %, Mix 33 %): a boxy concrete mid-room that shifts just enough to keep a repeating stab alive across a 16-bar loop.
+2. **Atmospheric-dnb undertow** — load **Submerged Memory** (Size 80 %, Decay 7 s, Color +0.5, Randomness 55 %, Width 100 %, Mix 48 %) on a pad, then drop Sensitivity to ~40 % so only strong hits redraw the deep, slowly-drifting bed.
+3. **Vocal-rip fog** — load **Mourning Fog** (Size 65 %, Decay 4.5 s, Color +0.6, Randomness 60 %, Width 95 %, Mix 40 %) on a chopped vocal and hit **Re-Roll** between phrases so each line dissolves into a different grey room.

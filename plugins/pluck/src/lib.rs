@@ -30,6 +30,9 @@ use dsp::{
 };
 use suite_core::presets::{load_all, Preset};
 
+/// Usage manual embedded from docs, rendered in-GUI by the '?' button (BUILT-IN-MANUALS).
+pub const MANUAL_DOC: &str = include_str!("../../../docs/PLUCK.md");
+
 // ---------------------------------------------------------------------------
 // Param-facing enums (nih-plug `Enum`), mapped onto the pure-DSP enums.
 // ---------------------------------------------------------------------------
@@ -482,6 +485,7 @@ impl Plugin for Pluck {
                         ui.heading(
                             egui::RichText::new("QEYNOS · PLUCK").color(suite_core::ui::ACCENT),
                         );
+                        suite_core::ui::manual_button(ui, "pluck", "PLUCK", MANUAL_DOC);
                         ui.label(
                             egui::RichText::new(
                                 "Karplus-Strong strummer — audio excites six tuned strings",

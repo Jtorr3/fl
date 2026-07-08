@@ -29,6 +29,9 @@ use dsp::{
 };
 use suite_core::presets::{load_all, Preset};
 
+/// Usage manual embedded from docs, rendered in-GUI by the '?' button (BUILT-IN-MANUALS).
+pub const MANUAL_DOC: &str = include_str!("../../../docs/CLEAVE.md");
+
 // ---------------------------------------------------------------------------
 // Param-facing enums, mapped onto the pure-DSP enums.
 // ---------------------------------------------------------------------------
@@ -302,6 +305,7 @@ impl Plugin for Cleave {
                         ui.heading(
                             egui::RichText::new("QEYNOS · CLEAVE").color(suite_core::ui::ACCENT),
                         );
+                        suite_core::ui::manual_button(ui, "cleave", "CLEAVE", MANUAL_DOC);
                         ui.label(
                             egui::RichText::new(
                                 "multi-slicer — transport-locked step sequencer over a 2-bar buffer",

@@ -18,6 +18,14 @@ use suite_core::testsig::{self, FakeTransport};
 const SR: f32 = 48_000.0;
 const BLOCK: usize = 512;
 
+#[test]
+fn manual_covers_all_params_and_has_recipes() {
+    suite_core::manual::assert_manual_covers_params(
+        crate::MANUAL_DOC,
+        &crate::CleaveParams::default(),
+    );
+}
+
 /// Samples in `bars` bars of 4/4 at `bpm`.
 fn bars_to_samples(bars: f64, bpm: f64) -> usize {
     (bars * 4.0 * (60.0 / bpm) * SR as f64).round() as usize

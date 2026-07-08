@@ -131,3 +131,45 @@ the input's transients strum the strings. Pick a **Chord** + **Root**, set **Str
 strings track the input's key for a sympathetic wash — try it with **Continuous** on and a low
 **Mix**. **Body** adds the woody resonance; **Spread** + **Stereo Alt** widen it; **Wet Solo**
 auditions the pure resonance.
+
+## What It Is
+
+A Karplus-Strong strummer that turns your audio into the pick: an onset detector strums six
+tuned strings using the input's transient as the exciter, so drums, vocals, or noise become
+plucked chords. The strings are tuned from a dark chord table, held MIDI notes, or a key-detect
+that tracks the input, and a modal body IR gives it a woody instrument resonance.
+
+## Signal Flow
+
+```
+ in(audio) ─► onset ─► capture exciter burst ─┐  (staggered by Strum Time / Direction)
+ held MIDI / Chord+Root / Key Detect ─► tune 6 strings ─► KS loops (Decay, Damp) ─► Σ
+                                                          Body IR · Spread · Stereo Alt
+                                                                       │
+                                                    dry ─ Mix / Wet Solo ─ Out ◄──┘
+```
+
+## Controls
+
+- **Source** — string tuning source: Chord, MIDI Held, or Key Detect.
+- **Root** — root pitch class (C…B) for the Chord / Key-Detect fallback.
+- **Chord** — six-string voicing: Minor, Minor 7, Sus2, Minor 9, 5th Stack, or Sus4.
+- **Decay** — string sustain time, 0–100 % (≈0.3–12 s target).
+- **Damp** — loop low-pass; brightness and how fast highs die, 0–100 %.
+- **Strum Time** — total strum span across the six strings, 5–80 ms (stride = time/5).
+- **Direction** — strum order: Up, Down, or Alternate.
+- **Exciter Gain** — level of the captured burst injected into the strings, 0–2×.
+- **Continuous** — feed the input into every string constantly for a droning sympathetic mode, on/off.
+- **Vel→Bright** — how much onset level opens the damping (brighter on hard hits), 0–100 %.
+- **Body** — modal body-IR convolution amount, 0–100 %.
+- **Spread** — per-string detune, 0–50 cents.
+- **Stereo Alt** — pan the strings alternately L/R to widen the strum, 0–100 %.
+- **Wet Solo** — output the pure string/body signal, ignoring Mix, on/off.
+- **Mix** — dry/wet, 0–100 % (0 = exact passthrough).
+- **Out** — output trim, −24…+24 dB.
+
+## Recipes
+
+1. **Dark-techno pluck stab** — load **Warehouse Pluck** (Source Chord, Chord 5th Stack, Root C, Decay 35 %, Damp 45 %, Strum Time 10 ms, Direction Up, Mix 100 %): a tight, dry, percussive power-5th hit that reads like a warehouse-techno stab.
+2. **Atmospheric-dnb bed** — load **Nocturne Drift** (Chord Minor 9, Root Eb, Decay 85 %, Strum Time 60 ms, Spread 18 ct, Stereo Alt 70 %, Mix 75 %): slow, hazy, wide upstrums for a nocturne pad under the beat.
+3. **Vocal-rip sympathetic wash** — load **Sympathetic Wash** (Source Key Detect, Continuous on, Decay 95 %, Body 70 %, Mix 60 %) on a vocal so the strings ring in the vocal's own key, a resonant ghost trailing under each line.

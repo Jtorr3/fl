@@ -102,3 +102,40 @@ FLYBY-specific, all in `tests.rs`:
 
 Renders (each factory preset over pink noise + a full-band chirp) are written to
 `renders/FLYBY/` by the offline harness.
+
+## What It Is
+
+A doppler spatializer that flies a mono source around an editable path on an XY plane, with you
+(the listener) fixed at the centre. As the source sweeps near and far it bends pitch, changes
+level, darkens with air absorption, and pans — a genuine fly-by, not a static auto-panner. Use
+it to give synths, vocals, and drones real motion and depth.
+
+## Signal Flow
+
+```
+ in(mono) ─► fractional delay (distance = delay, Doppler) ─► 1/r level ─► Air LP
+                    │                                                        │
+   path (Nodes on the XY pad, Speed / Sync·Division) ──► r, θ                ▼
+                                            equal-power pan(θ) ─ ITD ─ Width ─ Mix ─ Out
+```
+
+## Controls
+
+- **Node 0 X**, **Node 0 Y**, **Node 1 X**, **Node 1 Y**, **Node 2 X**, **Node 2 Y**, **Node 3 X**, **Node 3 Y**, **Node 4 X**, **Node 4 Y**, **Node 5 X**, **Node 5 Y**, **Node 6 X**, **Node 6 Y**, **Node 7 X**, **Node 7 Y** — the X/Y coordinates (−2…2 each) of the eight path control points; drag them on the XY pad. Only the first **Nodes** points are traversed.
+- **Nodes** — number of active control points on the path, 4–8.
+- **Speed** — free traversal rate, 0.01–20 Hz (loops per second) when not synced.
+- **Sync** — lock the loop length to host tempo instead of the free Speed.
+- **Division** — synced loop length: ½, 1, 2, or 4 bars.
+- **Size** — distance scale, 1–30; bigger = farther passes with more doppler, air, and level travel.
+- **Doppler** — depth of the distance→delay pitch bend, 0–100 % (0 = no pitch move).
+- **Air** — depth of the distance-dependent low-pass, 0–100 %.
+- **ITD** — sub-millisecond opposite-ear micro-delay for stronger externalisation, on/off.
+- **Width** — post-pan stereo width, 0–200 %.
+- **Mix** — dry/wet, 0–100 % (0 nulls the dry input exactly).
+- **Out** — output trim, −24…+24 dB.
+
+## Recipes
+
+1. **Dark-techno rhythmic sweep** — load **Fast Circle 1/2** (Sync on, Division ½, Speed 2 Hz, Doppler 80 %, Size 7, Width 100 %): a tempo-locked half-note orbit that snaps a stab or hat to the groove and swings it hard left↔right.
+2. **Atmospheric-dnb ghost trails** — load **Ghost Trails** (Figure-8, Doppler 50 %, Air 70 %, Width 160 %, Mix 70 %) on a pad: smeared, over-wide doppler trails that drift ghostly behind the beat.
+3. **Vocal-rip distant flyover** — load **Distant Flyover** (Size 20, Doppler 90 %, Air 85 %, Speed 0.2 Hz, Mix 85 %) on a vocal chop so it passes far overhead, dark and slow, tumbling in and out of focus.

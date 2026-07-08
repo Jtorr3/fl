@@ -16,6 +16,14 @@ use suite_core::testsig;
 
 const SR: f32 = 48_000.0;
 
+#[test]
+fn manual_covers_all_params_and_has_recipes() {
+    suite_core::manual::assert_manual_covers_params(
+        crate::MANUAL_DOC,
+        &crate::PluckParams::default(),
+    );
+}
+
 /// A percussive exciter: two short white-noise bursts (strum onsets), then silence.
 fn exciter(len: usize) -> Vec<f32> {
     let noise = testsig::white_noise(0.5, len, 0x51EED);
