@@ -342,7 +342,7 @@ POLISH phase (user feedback 2026-07-07; PRESET-SYSTEM + OVERSEER-ENRICH pulled
 forward to after HARD CHECKPOINT 2 — see above)
 - [ ] PRESET-EXPANSION (deep factory banks, 15-30 purpose-named presets per plugin)
 - [ ] BUILT-IN-MANUALS (in-GUI usage manual panel per plugin, embedded from docs/)
-- [ ] PEDAL-UI (modern stompbox theme in suite-core::ui + suite-wide retrofit)
+- [ ] PEDAL-UI (LOCKED: CONSOLE v2 — pedal + amber CRT terminal; usability guardrails in SPECS override aesthetics)
 **FINAL CHECKPOINT**
 
 ## 8. Model & token policy (user directive 2026-07-07)

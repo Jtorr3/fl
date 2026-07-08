@@ -449,7 +449,41 @@ Master grid badges/colors, thematic preset banks filtered by (now auto-known) ty
   listed in the manual exists in the param set (test cross-checks names); recipes
   section non-empty.
 
-### PEDAL-UI — modern stompbox theme (endgame, after all plugins exist)
+### PEDAL-UI — LOCKED 2026-07-07: "CONSOLE v2" (user-approved from mockups)
+Reference: artifact batch 3 (pedal-themes.html, label batch3-console-v2). Hardware
+pedal + embedded amber CRT terminal. Hammond-style enclosure, recessed screen bay,
+curved-glass amber phosphor CRT (scanlines/glare/drift INSIDE the glass only),
+tick-ringed machined knobs with amber needles, mono value readouts, jack furniture,
+LED + hex-collar footswitch bypass. Amber is the suite identity; per-plugin accent
+tints ride on the PANEL (not the phosphor). CRT content = honest telemetry each
+plugin already computes (GRIT: SC/THD/GR/env; OVERSEER Master: theme/nodes/
+suggestions/LUFS; VOXKEY: detected→target note; etc.).
+
+**USABILITY GUARDRAILS (user directive: "make sure we aren't sacrificing usability
+for theme porn") — these override aesthetics wherever they conflict:**
+1. Every value is readable at 100% scale: min effective text size, phosphor glow
+   never blurs digits (glow radius capped; value text gets the lightest glow tier).
+2. Flicker + phosphor-drift effects: subtle by default AND a settings toggle
+   (per-plugin persisted) that turns all CRT motion off; respect host/system
+   reduced-motion when detectable.
+3. The CRT is additive instrumentation — every parameter value is ALSO on its knob
+   readout in plain text; nothing operable lives only inside the screen.
+4. Interaction behavior from UI-CORE-FIX is untouchable: knob drag/fine/reset,
+   click-to-type, uniform scaling. Theme is paint on those widgets, never new
+   interaction rules.
+5. Contrast: amber-on-black body text ≥ 4.5:1 effective; dim/label tier ≥ 3:1.
+6. Performance: CRT effects are cheap painter ops (no per-frame full-face repaints
+   beyond egui's normal cadence; scanlines = static texture, cursor blink + meter
+   updates only). If GUI CPU measurably rises vs pre-theme, cut effects until it
+   doesn't.
+Done bar additions: usability checklist above verified per plugin during retrofit;
+a THEME-OFF fallback (plain suite-dark) remains available behind a setting for
+emergency legibility.
+
+(Original generic stompbox notes below retained for widget details.)
+
+#### (superseded generic notes)
+
 - suite-core::ui v2: pedal-style visual language — textured dark panel, chunky
   rotary knobs with position indicator + value readout on hover, plugin-accent
   color per pedal (GRIT rust-orange, EMBER ember-red, WIRE circuit-teal, ...),
