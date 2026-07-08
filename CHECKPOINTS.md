@@ -244,3 +244,13 @@
       tracks get canonical names (KICK/SNARE/HAT/PERC/BASS/VOX/PAD/LEAD/FX/CLAP) and
       category colors, Master is untouched, and a second `--apply` reports 0 ops
       (idempotent).
+
+## W6 — SAMPLE-LIBRARIAN (2026-07-08)
+- [ ] **Optional real-library audition (no hardware dependency — fully offline-tested).**
+      W6 is a pure file tool; its 37-check offline gate exercises real BPM/key analysis on
+      synthesized WAVs + a tmp-dir plan/apply/undo round-trip, so this is a nice-to-have, not
+      a blocker. When convenient, point it at a real pack:
+      `uv run --python 3.12 tools\sample_librarian.py sort "D:\Samples\unsorted"` (dry-run) to
+      eyeball categories/BPM/key, then `--apply`. Confirm the undo manifest restores the tree
+      (`sample_librarian.py undo <manifest>`). First run downloads librosa/soundfile into a uv
+      env (~26 pkgs).
