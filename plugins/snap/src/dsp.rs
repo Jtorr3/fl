@@ -191,6 +191,12 @@ pub struct SnapVoice {
     attack_remaining: u32,
     attack_len: u32,
     attack_start: f32,
+    // Note-off declick: when the amp env decays below the cutoff, ramp it linearly to exactly
+    // 0 over the declick window before deactivating, instead of hard-cutting. A hard cut steps
+    // the still-running noise floor to zero — a sub -74 dBFS single-sample discontinuity the
+    // SOUND-PASS audition flagged as CLICK on the short presets (0.9-1.1 s into the dead tail).
+    release_remaining: u32,
+    release_start: f32,
     trig_remaining: u32, // fade-in for the fast noise layers
     rattle_env: f32,
     click_env: f32,
@@ -242,6 +248,8 @@ impl SnapVoice {
             attack_remaining: 0,
             attack_len: 1,
             attack_start: 0.0,
+            release_remaining: 0,
+            release_start: 0.0,
             trig_remaining: 0,
             rattle_env: 0.0,
             click_env: 0.0,
@@ -279,6 +287,7 @@ impl SnapVoice {
         self.amp_env = 0.0;
         self.peak = 0.0;
         self.attack_remaining = 0;
+        self.release_remaining = 0;
         self.trig_remaining = 0;
         self.rattle_env = 0.0;
         self.click_env = 0.0;
@@ -402,6 +411,7 @@ impl SnapVoice {
         // Declick: ramp the master amp env from its CURRENT value to the new peak over 1.5 ms.
         self.attack_start = self.amp_env;
         self.attack_remaining = self.attack_len;
+        self.release_remaining = 0; // cancel any in-progress note-off ramp on retrigger
         // Fade the fast noise layers in from zero over the same window (they are decayed by
         // mid-note, so this re-onsets them without a step — IMPACT's declick recipe).
         self.trig_remaining = self.attack_len;
@@ -511,11 +521,20 @@ impl SnapVoice {
             if self.attack_remaining == 0 {
                 self.amp_t = 0.0;
             }
+        } else if self.release_remaining > 0 {
+            // Note-off declick: linear ramp to exactly 0 over the declick window, then sleep.
+            self.release_remaining -= 1;
+            self.amp_env = self.release_start * (self.release_remaining as f32 / self.attack_len as f32);
+            if self.release_remaining == 0 {
+                self.active = false;
+            }
         } else {
             self.amp_env = self.peak * (-self.amp_t * self.sr * self.amp_inv_tau).exp();
             self.amp_t += 1.0 / self.sr;
             if self.amp_env < 1.0e-4 && n > self.attack_len {
-                self.active = false;
+                // Begin the note-off declick ramp instead of hard-cutting to zero.
+                self.release_start = self.amp_env;
+                self.release_remaining = self.attack_len;
             }
         }
         self.pitch_n = self.pitch_n.saturating_add(1);
@@ -561,6 +580,42 @@ mod tests {
         let early: f32 = l[..win].iter().map(|v| v * v).sum::<f32>() / win as f32;
         let late: f32 = l[l.len() - win..].iter().map(|v| v * v).sum::<f32>() / win as f32;
         assert!(late < early * 0.25, "voice did not decay (early {early} late {late})");
+    }
+
+    /// SOUND-PASS regression: the note-off declick ramp means a short, high-snap drum's fully
+    /// decayed tail has no single-sample discontinuity at voice deactivation. Before the ramp,
+    /// the hard `active=false` cut stepped the running noise floor to zero (a sub -74 dBFS click
+    /// the audition flagged on the short presets). The max sample step in the dead tail must be
+    /// tiny (the release ramps to exactly 0, so the final step is ~release_start/attack_len).
+    #[test]
+    fn note_off_deactivation_is_click_free() {
+        let sr = 48_000.0;
+        let s = Settings {
+            mode: 0.32,
+            tune: 225.0,
+            balance: 0.5,
+            snap: 0.95,
+            decay_ms: 100.0, // short — fully decayed well before the tail window
+            drive: 0.6,
+            width: 0.0,
+            ..Settings::default()
+        };
+        let (l, _r) = render(&s, (sr * 1.2) as usize);
+        // Find the deactivation point: the last nonzero sample before the voice sleeps to
+        // permanent silence. A hard cut leaves that sample at the full noise-floor level
+        // (~1e-4·noise), so its step to the following zero is a click; the release ramp leaves
+        // it at ~release_start/attack_len·noise ≈ 1e-6 — a negligible step.
+        let last_nonzero = l.iter().rposition(|&x| x != 0.0).expect("voice produced output");
+        // Everything after must be true silence (voice slept, not still ringing).
+        assert!(
+            l[last_nonzero + 1..].iter().all(|&x| x == 0.0),
+            "samples after deactivation are not silent"
+        );
+        assert!(
+            l[last_nonzero].abs() < 1.0e-5,
+            "last sample before silence is {:.2e} — note-off deactivation steps to zero (click)",
+            l[last_nonzero].abs()
+        );
     }
 
     #[test]
