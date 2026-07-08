@@ -574,4 +574,54 @@ mod render_tests {
             write_wav(&path, &out, sr as u32).expect("write render");
         }
     }
+
+    /// SOUND-PASS audition render (permanent infra, `#[ignore]`d in normal runs).
+    /// Renders every factory preset AND `Settings::default()` over the genre-right
+    /// KAS:ST scenario — main = detuned reese bass, sidechain = a 4-on-the-floor kick
+    /// loop — into renders/_audition/CARVE/<QVS_AUDITION_DIR or "before">/<preset>.wav.
+    /// The spectral duck should carve the kick's pocket out of the reese without
+    /// pumping / warble. Analyzed offline by tools/audition.py.
+    #[test]
+    #[ignore]
+    fn audition_render_musical_sources() {
+        use crate::dsp::Settings;
+        use suite_core::testsig;
+
+        let sr = 48_000.0f32;
+        let subdir = std::env::var("QVS_AUDITION_DIR").unwrap_or_else(|_| "before".into());
+
+        // Main: 4 s of detuned reese bass at 50 Hz (dark, low, thick — the KAS:ST reese).
+        let main_src = testsig::synth_reese(50.0, 4.0, sr);
+        // Sidechain: 4-on-the-floor kick loop at 140 BPM, sized to cover the main length
+        // (mirror GRIT's sidechain sizing).
+        let bar_samples = (60.0 / 140.0 * sr).round() as usize * 4;
+        let n_bars = (main_src.len() / bar_samples) + 2;
+        let sc = testsig::synth_kick_loop(140.0, n_bars, sr);
+
+        // Render every factory preset plus the default state (labelled "default").
+        let presets = load_all(PRESET_JSON);
+        let mut jobs: Vec<(String, Settings)> = presets
+            .iter()
+            .map(|p| {
+                let fname = p.name.to_lowercase().replace([' ', '·', '-'], "_");
+                (fname, settings_from_preset(p))
+            })
+            .collect();
+        jobs.push(("default".into(), Settings::default()));
+
+        // Dry-source baseline: the unprocessed reese, so the analyzer can separate
+        // artifacts CARVE introduces from ones inherent to the raw saw-bass source.
+        {
+            let path = render_path("_audition/CARVE", &format!("{subdir}/_dry_reese"));
+            write_wav(&path, &main_src, sr as u32).expect("write dry baseline");
+        }
+
+        for (fname, s) in &jobs {
+            let mut core = CarveCore::new(sr);
+            let mut out = main_src.clone();
+            core.process_mono(&mut out, &sc, s);
+            let path = render_path("_audition/CARVE", &format!("{subdir}/{fname}"));
+            write_wav(&path, &out, sr as u32).expect("write audition render");
+        }
+    }
 }
