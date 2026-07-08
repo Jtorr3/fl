@@ -237,6 +237,9 @@ pub struct MurmurCore {
     duck: OnePole,
     /// Smoothed Freeze-Mix (live↔frozen blend, applied only while frozen).
     fm: OnePole,
+    /// Smoothed freeze engage/release (0=live path, 1=frozen blend) — driven by the freeze
+    /// bool so toggling FREEZE crossfades the blend instead of stepping it in one sample.
+    freeze_blend: OnePole,
     prev_color: f32,
     prev_freeze: bool,
     dc_l: DcBlock,
@@ -258,6 +261,9 @@ impl MurmurCore {
         let mut fm = OnePole::new();
         fm.set_time(15.0, sr);
         fm.reset(1.0);
+        let mut freeze_blend = OnePole::new();
+        freeze_blend.set_time(20.0, sr);
+        freeze_blend.reset(0.0);
         let d = Settings::default();
         let mut core = Self {
             sr,
@@ -273,6 +279,7 @@ impl MurmurCore {
             pending_reroll: false,
             duck,
             fm,
+            freeze_blend,
             prev_color: d.color,
             prev_freeze: d.freeze,
             dc_l: DcBlock::default(),
@@ -298,6 +305,7 @@ impl MurmurCore {
         self.onset.reset();
         self.duck.reset(1.0);
         self.fm.reset(self.settings.freeze_mix);
+        self.freeze_blend.reset(if self.settings.freeze { 1.0 } else { 0.0 });
         self.dc_l.reset();
         self.dc_r.reset();
         self.cur = 0;
@@ -335,6 +343,7 @@ impl MurmurCore {
         // Input-duck target: 0 under freeze (let the tail sustain), 1 otherwise.
         self.duck.set_time(DUCK_MS, self.sr);
         self.fm.set_time(15.0, self.sr);
+        self.freeze_blend.set_time(20.0, self.sr);
         self.prev_freeze = s.freeze;
     }
 
@@ -453,11 +462,16 @@ impl MurmurCore {
         // keeps the live source audible under the frozen tail. (Always smoothed; when not
         // frozen the smoother still tracks the target but the branch below is inactive.)
         let fm = self.fm.process(self.settings.freeze_mix.clamp(0.0, 1.0));
-        if self.settings.freeze {
-            (fm * out_l + (1.0 - fm) * l, fm * out_r + (1.0 - fm) * r)
-        } else {
-            (out_l, out_r)
-        }
+        // Smoothed engage/release: crossfade the live path ↔ the frozen blend over ~20 ms so
+        // toggling FREEZE (in particular releasing it with fm<1) doesn't step the output in
+        // one sample. fz=1 → fully frozen blend, fz=0 → live path. At fm=1 the two paths are
+        // identical so classic hard-freeze behaviour is unchanged.
+        let fz = self
+            .freeze_blend
+            .process(if self.settings.freeze { 1.0 } else { 0.0 });
+        let frozen_l = fm * out_l + (1.0 - fm) * l;
+        let frozen_r = fm * out_r + (1.0 - fm) * r;
+        (out_l + fz * (frozen_l - out_l), out_r + fz * (frozen_r - out_r))
     }
 
     /// Offline mono convenience for the harness: process `buf` in place with a fixed `Settings`.

@@ -333,6 +333,9 @@ pub struct EmberCore {
     dry_r: Delay,
     /// Smoothed Freeze-Mix (live↔frozen blend, applied only while frozen).
     fm: OnePole,
+    /// Smoothed freeze engage/release (0=live path, 1=frozen blend) — driven by the freeze
+    /// bool so toggling FREEZE crossfades the blend instead of stepping it in one sample.
+    freeze_blend: OnePole,
 }
 
 impl EmberCore {
@@ -359,6 +362,12 @@ impl EmberCore {
                 op.reset(1.0);
                 op
             },
+            freeze_blend: {
+                let mut op = OnePole::new();
+                op.set_time(20.0, sr);
+                op.reset(0.0);
+                op
+            },
         }
     }
 
@@ -373,6 +382,7 @@ impl EmberCore {
         self.dry_l.reset();
         self.dry_r.reset();
         self.fm.reset(self.cfg.freeze_mix);
+        self.freeze_blend.reset(if self.cfg.freeze { 1.0 } else { 0.0 });
     }
 
     /// Recompute derived per-bin config from a settings snapshot (call at block rate).
@@ -394,11 +404,14 @@ impl EmberCore {
         // Freeze Mix: while frozen, crossfade back toward the live (latency-matched dry)
         // signal so the freeze isn't an all-or-nothing jump. fm=1 → classic hard freeze.
         let fm = self.fm.process(self.cfg.freeze_mix);
-        if self.cfg.freeze {
-            (fm * out_l + (1.0 - fm) * dry_l, fm * out_r + (1.0 - fm) * dry_r)
-        } else {
-            (out_l, out_r)
-        }
+        // Smoothed engage/release: crossfade the live path ↔ the frozen blend over ~20 ms so
+        // toggling FREEZE (in particular releasing it with fm<1) doesn't step the output in
+        // one sample. fz=1 → fully frozen blend, fz=0 → live path. At fm=1 the two paths are
+        // identical so classic hard-freeze behaviour is unchanged.
+        let fz = self.freeze_blend.process(if self.cfg.freeze { 1.0 } else { 0.0 });
+        let frozen_l = fm * out_l + (1.0 - fm) * dry_l;
+        let frozen_r = fm * out_r + (1.0 - fm) * dry_r;
+        (out_l + fz * (frozen_l - out_l), out_r + fz * (frozen_r - out_r))
     }
 
     /// Offline mono convenience for the harness: process `buf` in place through the core
@@ -540,6 +553,85 @@ mod tests {
             mx - mn
         );
         assert!(db(rms(&out[start..])) > -40.0, "freeze tail too quiet");
+    }
+
+    /// Toggling FREEZE mid-render (engage AND release) with Freeze Mix < 1 must not step the
+    /// output: the live↔frozen blend is smoothed, so the max adjacent-sample delta across each
+    /// toggle stays bounded relative to the steady-state slope. Regression for the unsmoothed
+    /// release-blend click (the release side jumped from `fm·wet+(1−fm)·dry` to full wet in one
+    /// sample).
+    #[test]
+    fn freeze_toggle_blend_is_click_free() {
+        let sr = 48_000.0f32;
+        let mut s = Settings::default();
+        s.attack_ms = [5.0; N_BANDS];
+        s.mix = 1.0;
+        s.freeze_mix = 0.5; // partial blend → a hard toggle would step by (1−fm)·(wet−dry)
+
+        let seg = (sr * 0.5) as usize;
+        let f0 = 220.0f32;
+        let amp = 0.5f32;
+        let sig = |n: usize, off: usize| -> Vec<f32> {
+            (0..n)
+                .map(|i| amp * (TAU * f0 * (i + off) as f32 / sr).sin())
+                .collect()
+        };
+
+        let mut core = EmberCore::new(sr);
+        let mut out: Vec<f32> = Vec::new();
+
+        // Phase 1: freeze OFF (warm up).
+        s.freeze = false;
+        core.configure(&s);
+        for x in sig(seg, 0) {
+            let (y, _) = core.process_sample(x, x, s.mix);
+            out.push(y);
+        }
+        // Phase 2: ENGAGE freeze.
+        s.freeze = true;
+        core.configure(&s);
+        let engage = out.len();
+        for x in sig(seg, seg) {
+            let (y, _) = core.process_sample(x, x, s.mix);
+            out.push(y);
+        }
+        // Phase 3: RELEASE freeze.
+        s.freeze = false;
+        core.configure(&s);
+        let release = out.len();
+        for x in sig(seg, 2 * seg) {
+            let (y, _) = core.process_sample(x, x, s.mix);
+            out.push(y);
+        }
+
+        let max_delta = |a: usize, b: usize| -> f32 {
+            let b = b.min(out.len());
+            let mut m = 0.0f32;
+            for i in a + 1..b {
+                m = m.max((out[i] - out[i - 1]).abs());
+            }
+            m
+        };
+        // Steady slope from a settled window in each held state (skip FFT latency + smoothers).
+        let lat = core.latency();
+        let steady = max_delta(lat + seg / 8, seg)
+            .max(max_delta(engage + lat + seg / 8, engage + seg))
+            .max(1.0e-6);
+        // Window that fully contains the ~20 ms blend ramp after each toggle.
+        let post = (0.05 * sr) as usize;
+        let pre = (0.003 * sr) as usize;
+        let eng = max_delta(engage - pre, engage + post);
+        let rel = max_delta(release - pre, release + post);
+
+        assert!(out.iter().all(|v| v.is_finite()));
+        assert!(
+            eng <= 4.0 * steady,
+            "engage click: max delta {eng:.4} > 4× steady {steady:.4}"
+        );
+        assert!(
+            rel <= 4.0 * steady,
+            "release click: max delta {rel:.4} > 4× steady {steady:.4}"
+        );
     }
 
     /// mix=0 nulls against the dry input delayed by the reported latency (< −80 dB).

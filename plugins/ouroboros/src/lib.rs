@@ -398,6 +398,7 @@ fn apply_preset(params: &OuroParams, setter: &ParamSetter, p: &Preset) {
     set_f(&params.feedback, g("feedback", 0.5));
     set_f(&params.decay, g("decay", 1.0));
     set_f(&params.mix, g("mix", 0.5));
+    set_f(&params.freeze_mix, g("freezemix", Settings::default().freeze_mix));
     set_f(&params.out, g("out", 0.0));
 
     let set_slot = |slot: &SlotParams, pfx: &str| {

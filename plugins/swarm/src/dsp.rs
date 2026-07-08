@@ -336,6 +336,9 @@ pub struct SwarmCore {
     out_s: OnePole,
     shimmer_s: OnePole,
     fm_s: OnePole, // Freeze-Mix (live↔frozen blend, applied only while frozen)
+    // Smoothed freeze engage/release (0=live path, 1=frozen blend) — driven by the freeze
+    // bool so toggling FREEZE crossfades the blend instead of stepping it in one sample.
+    freeze_blend_s: OnePole,
     primed: bool,
 }
 
@@ -359,6 +362,7 @@ impl SwarmCore {
             out_s: OnePole::new(),
             shimmer_s: OnePole::new(),
             fm_s: OnePole::new(),
+            freeze_blend_s: OnePole::new(),
             primed: false,
         };
         core.set_sample_rate(sr);
@@ -388,6 +392,7 @@ impl SwarmCore {
         self.out_s.set_time(t, self.sr);
         self.shimmer_s.set_time(t, self.sr);
         self.fm_s.set_time(t, self.sr);
+        self.freeze_blend_s.set_time(20.0, self.sr);
         self.primed = false;
     }
 
@@ -412,6 +417,7 @@ impl SwarmCore {
         self.out_s.reset(s.out_db);
         self.shimmer_s.reset(s.shimmer.clamp(0.0, 1.1));
         self.fm_s.reset(s.freeze_mix.clamp(0.0, 1.0));
+        self.freeze_blend_s.reset(if s.freeze { 1.0 } else { 0.0 });
         self.primed = true;
     }
 
@@ -591,15 +597,19 @@ impl SwarmCore {
         let _ = self.width_s.process(s.width.clamp(0.0, 1.0)); // smoothed for future use/parity
         let out_lin = db_to_lin(self.out_s.process(s.out_db));
         let fm = self.fm_s.process(s.freeze_mix.clamp(0.0, 1.0));
+        // Smoothed freeze engage/release — see field doc. Advanced once per sample.
+        let fz = self.freeze_blend_s.process(if s.freeze { 1.0 } else { 0.0 });
         let base_l = (in_l * (1.0 - mix) + wet_l * mix) * out_lin;
         let base_r = (in_r * (1.0 - mix) + wet_r * mix) * out_lin;
         // Freeze Mix: while frozen, crossfade back toward the live input so the freeze isn't an
-        // all-or-nothing jump. fm=1 → classic hard freeze (frozen cloud per mix).
-        let (base_l, base_r) = if s.freeze {
-            (fm * base_l + (1.0 - fm) * in_l, fm * base_r + (1.0 - fm) * in_r)
-        } else {
-            (base_l, base_r)
-        };
+        // all-or-nothing jump. fm=1 → classic hard freeze (frozen cloud per mix). The
+        // engage/release is itself smoothed by `fz` (0=live path, 1=frozen blend) so toggling
+        // FREEZE with fm<1 crossfades over ~20 ms instead of stepping in one sample. At fm=1
+        // the two paths are identical so hard-freeze behaviour is unchanged.
+        let frozen_l = fm * base_l + (1.0 - fm) * in_l;
+        let frozen_r = fm * base_r + (1.0 - fm) * in_r;
+        let base_l = base_l + fz * (frozen_l - base_l);
+        let base_r = base_r + fz * (frozen_r - base_r);
         let ol = base_l.clamp(-8.0, 8.0);
         let or = base_r.clamp(-8.0, 8.0);
         (ol, or)

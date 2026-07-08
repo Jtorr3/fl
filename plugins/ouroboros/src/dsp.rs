@@ -735,6 +735,9 @@ pub struct OuroCore {
     mix_s: OnePole,
     out_s: OnePole,
     fm_s: OnePole, // Freeze-Mix (live↔frozen blend, applied only while frozen)
+    // Smoothed freeze engage/release (0=live path, 1=frozen blend) — driven by the freeze
+    // bool so toggling FREEZE crossfades the blend instead of stepping it in one sample.
+    freeze_blend_s: OnePole,
     slot_amount_s: [OnePole; 3],
     slot_param_s: [OnePole; 3],
     primed: bool,
@@ -754,6 +757,7 @@ impl OuroCore {
             mix_s: OnePole::new(),
             out_s: OnePole::new(),
             fm_s: OnePole::new(),
+            freeze_blend_s: OnePole::new(),
             slot_amount_s: [OnePole::new(); 3],
             slot_param_s: [OnePole::new(); 3],
             primed: false,
@@ -778,6 +782,7 @@ impl OuroCore {
         // Delay length and the freeze input-gate get a longer, click-free glide.
         self.delay_ms_s.set_time(40.0, self.sr);
         self.input_gate_s.set_time(20.0, self.sr);
+        self.freeze_blend_s.set_time(20.0, self.sr);
         for s in self.slot_amount_s.iter_mut() {
             s.set_time(t, self.sr);
         }
@@ -819,6 +824,7 @@ impl OuroCore {
         self.fb_s.reset((s.feedback * s.decay_scale).clamp(0.0, 1.1));
         self.decay_s.reset(s.decay_scale.clamp(0.0, 1.0));
         self.input_gate_s.reset(if s.freeze { 0.0 } else { 1.0 });
+        self.freeze_blend_s.reset(if s.freeze { 1.0 } else { 0.0 });
         self.mix_s.reset(s.mix.clamp(0.0, 1.0));
         self.fm_s.reset(s.freeze_mix.clamp(0.0, 1.0));
         self.out_s.reset(s.out_db);
@@ -872,6 +878,8 @@ impl OuroCore {
             .process(if s.freeze { 0.0 } else { 1.0 });
         let mix = self.mix_s.process(s.mix.clamp(0.0, 1.0));
         let fm = self.fm_s.process(s.freeze_mix.clamp(0.0, 1.0));
+        // Smoothed freeze engage/release — see field doc. Advanced once per sample.
+        let fz = self.freeze_blend_s.process(if s.freeze { 1.0 } else { 0.0 });
         let out_lin = db_to_lin(self.out_s.process(s.out_db));
         for i in 0..3 {
             self.slot_amount_s[i].process(s.slots[i].amount);
@@ -922,8 +930,12 @@ impl OuroCore {
             let dry = inputs[cidx];
             let mixed = (dry * (1.0 - mix) + tap * mix) * out_lin;
             // Freeze Mix: while frozen, crossfade back toward the live input so the freeze
-            // isn't an all-or-nothing jump. fm=1 → classic hard freeze.
-            let blended = if s.freeze { fm * mixed + (1.0 - fm) * dry } else { mixed };
+            // isn't an all-or-nothing jump. fm=1 → classic hard freeze. The engage/release is
+            // itself smoothed by `fz` (0=live path, 1=frozen blend) so toggling FREEZE with
+            // fm<1 crossfades over ~20 ms instead of stepping in one sample. At fm=1 the two
+            // paths are identical so hard-freeze behaviour is unchanged.
+            let frozen = fm * mixed + (1.0 - fm) * dry;
+            let blended = mixed + fz * (frozen - mixed);
             outs[cidx] = blended.clamp(-8.0, 8.0);
         }
         (outs[0], outs[1])

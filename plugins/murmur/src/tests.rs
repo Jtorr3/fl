@@ -97,6 +97,74 @@ fn freeze_mix_blends_live_vs_frozen() {
     assert!(tail_rms > 1e-4, "freeze_mix=1 tail should sustain, rms {tail_rms:.6}");
 }
 
+/// Toggling FREEZE mid-render (engage AND release) with Freeze Mix < 1 must not step the
+/// output — the live↔frozen blend is smoothed, so the max adjacent-sample delta across each
+/// toggle stays bounded relative to the steady-state slope. Regression for the unsmoothed
+/// freeze-mix branch that stepped by (1−fm)·(out−dry) in one sample on toggle.
+#[test]
+fn freeze_toggle_blend_is_click_free() {
+    use std::f32::consts::TAU;
+    let sr = 48_000.0f32;
+    let mut s = Settings {
+        sensitivity: 0.0, // steady tone must not self-trigger a re-roll during the render
+        mix: 1.0,
+        freeze_mix: 0.5, // partial blend → a hard toggle would step by (1−fm)·(out−dry)
+        ..base_settings()
+    };
+
+    let seg = (sr * 0.5) as usize;
+    let f0 = 200.0f32;
+    let amp = 0.4f32;
+    let sig = |n: usize, off: usize| -> Vec<f32> {
+        (0..n)
+            .map(|i| amp * (TAU * f0 * (i + off) as f32 / sr).sin())
+            .collect()
+    };
+
+    let mut core = MurmurCore::new(sr);
+    let mut out: Vec<f32> = Vec::new();
+    s.freeze = false;
+    core.configure(&s);
+    for x in sig(seg, 0) {
+        let (y, _) = core.process_sample(x, x, s.mix);
+        out.push(y);
+    }
+    s.freeze = true;
+    core.configure(&s);
+    let engage = out.len();
+    for x in sig(seg, seg) {
+        let (y, _) = core.process_sample(x, x, s.mix);
+        out.push(y);
+    }
+    s.freeze = false;
+    core.configure(&s);
+    let release = out.len();
+    for x in sig(seg, 2 * seg) {
+        let (y, _) = core.process_sample(x, x, s.mix);
+        out.push(y);
+    }
+
+    let max_delta = |a: usize, b: usize| -> f32 {
+        let b = b.min(out.len());
+        let mut m = 0.0f32;
+        for i in a + 1..b {
+            m = m.max((out[i] - out[i - 1]).abs());
+        }
+        m
+    };
+    let pre = (0.003 * sr) as usize;
+    let post = (0.05 * sr) as usize;
+    let steady = max_delta(seg / 4, engage - pre)
+        .max(max_delta(engage + post, release - pre))
+        .max(1.0e-6);
+    let eng = max_delta(engage - pre, engage + post);
+    let rel = max_delta(release - pre, release + post);
+
+    assert!(out.iter().all(|v| v.is_finite()));
+    assert!(eng <= 4.0 * steady, "engage click: max delta {eng:.5} > 4× steady {steady:.5}");
+    assert!(rel <= 4.0 * steady, "release click: max delta {rel:.5} > 4× steady {steady:.5}");
+}
+
 /// Done-bar (1): two identical impulses 2 s apart with randomness up land in different rooms —
 /// their tail waveforms must decorrelate (cross-correlation < 0.9).
 #[test]

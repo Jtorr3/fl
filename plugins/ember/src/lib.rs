@@ -226,6 +226,7 @@ fn apply_preset(params: &EmberParams, setter: &ParamSetter, p: &Preset) {
     set_f(&params.gate, p.get("gate").unwrap_or(d.gate_db));
     set_f(&params.tailgain, p.get("tailgain").unwrap_or(d.tail_gain_db));
     set_f(&params.mix, p.get("mix").unwrap_or(d.mix));
+    set_f(&params.freeze_mix, p.get("freezemix").unwrap_or(d.freeze_mix));
 
     let freeze = p.get("freeze").unwrap_or(0.0) >= 0.5;
     setter.begin_set_parameter(&params.freeze);
