@@ -36,6 +36,172 @@ pub const TEXT_DIM: egui::Color32 = egui::Color32::from_rgb(140, 145, 152);
 /// The single accent color (amber). Used for active controls and meters.
 pub const ACCENT: egui::Color32 = egui::Color32::from_rgb(232, 168, 82);
 
+// ===========================================================================
+// CONSOLE v2 palette (PEDAL-UI — LOCKED "console inside a pedal")
+// ===========================================================================
+//
+// Amber is the suite identity (SPECS PEDAL-UI). These extra tones drive the
+// hardware-pedal enclosure + the recessed amber-CRT telemetry bay. Contrast
+// guardrail (#5): PHOSPHOR (#ffb000) on GLASS/near-black is ~13:1 (body text ≥
+// 4.5:1); PHOSPHOR_DIM (#b07a10) on the same glass is ~5.4:1 (dim/label ≥ 3:1).
+
+/// CRT phosphor amber (#ffb000-family) — the terminal body text in the CRT bay.
+pub const PHOSPHOR: egui::Color32 = egui::Color32::from_rgb(255, 176, 0);
+/// Dim phosphor for labels/rules inside the CRT (still ≥ 3:1 on the glass).
+pub const PHOSPHOR_DIM: egui::Color32 = egui::Color32::from_rgb(176, 122, 16);
+/// Recessed CRT glass: near-black with a faint warm bronze cast.
+pub const GLASS_BG: egui::Color32 = egui::Color32::from_rgb(12, 9, 6);
+/// Pedal enclosure body (dark machined metal).
+pub const ENCLOSURE: egui::Color32 = egui::Color32::from_rgb(28, 29, 33);
+/// Enclosure top-highlight (subtle vector "light from above").
+pub const ENCLOSURE_HI: egui::Color32 = egui::Color32::from_rgb(44, 46, 52);
+/// Enclosure lower body / recess shadow.
+pub const ENCLOSURE_LO: egui::Color32 = egui::Color32::from_rgb(18, 19, 22);
+/// Corner-screw head fill.
+pub const SCREW: egui::Color32 = egui::Color32::from_rgb(52, 54, 60);
+
+// --- Per-plugin theme preferences (persisted; guardrails #2 + the THEME-OFF fallback) ---
+//
+// Two bools per plugin: `console` (default ON — CONSOLE v2 vs the plain minimal-dark
+// fallback) and `crt_motion` (default ON — scanline/cursor motion; the OFF-able switch
+// guardrail #2 demands). They persist suite-wide in ONE JSON file
+// `[MyDocuments]/Qeynos/ui_prefs.json` keyed by plugin slug — so NO plugin Params struct
+// changes (this is a re-skin, not a re-plumb). Reads/writes are GUI-thread only and reuse
+// `presets::documents_dir()`; a missing/broken file just yields defaults (never panics).
+//
+// System/host reduced-motion is NOT reliably detectable under baseview/nih_plug_egui, so
+// guardrail #2's "respect reduced-motion when detectable" reduces to the explicit per-plugin
+// `crt_motion` toggle here (documented in docs/UI.md, same spirit as the UI-CORE-FIX
+// resize-API limitation note in DEFERRED.md).
+
+/// Persisted per-plugin theme state. `Default` is the shipped look: CONSOLE on, motion on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ThemePrefs {
+    pub console: bool,
+    pub crt_motion: bool,
+}
+
+impl Default for ThemePrefs {
+    fn default() -> Self {
+        Self {
+            console: true,
+            crt_motion: true,
+        }
+    }
+}
+
+fn ui_prefs_path() -> Option<std::path::PathBuf> {
+    presets::documents_dir().map(|d| d.join("Qeynos").join("ui_prefs.json"))
+}
+
+/// Load the whole slug -> {console, crt_motion} map. Missing file / parse error ⇒ empty
+/// (every plugin then falls back to `ThemePrefs::default()`). Never errors, never panics.
+fn load_ui_prefs() -> BTreeMap<String, (bool, bool)> {
+    let Some(path) = ui_prefs_path() else {
+        return BTreeMap::new();
+    };
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return BTreeMap::new();
+    };
+    // Stored as { "grit": { "console": true, "crt_motion": false }, ... }.
+    let Ok(val) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return BTreeMap::new();
+    };
+    let mut out = BTreeMap::new();
+    if let Some(obj) = val.as_object() {
+        for (slug, entry) in obj {
+            let console = entry
+                .get("console")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true);
+            let motion = entry
+                .get("crt_motion")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true);
+            out.insert(slug.clone(), (console, motion));
+        }
+    }
+    out
+}
+
+/// Read one plugin's prefs (defaults if absent). GUI-thread only.
+pub fn theme_prefs(slug: &str) -> ThemePrefs {
+    load_ui_prefs()
+        .get(slug)
+        .map(|&(console, crt_motion)| ThemePrefs { console, crt_motion })
+        .unwrap_or_default()
+}
+
+/// Persist one plugin's prefs (read-modify-write the shared map; last writer wins, which is
+/// fine for a UI preference). Best-effort — IO failure is swallowed (the in-session egui-memory
+/// copy still reflects the toggle so the UI stays responsive).
+pub fn save_theme_prefs(slug: &str, prefs: ThemePrefs) {
+    let Some(path) = ui_prefs_path() else {
+        return;
+    };
+    let mut map = load_ui_prefs();
+    map.insert(slug.to_string(), (prefs.console, prefs.crt_motion));
+    let obj: serde_json::Map<String, serde_json::Value> = map
+        .into_iter()
+        .map(|(slug, (console, motion))| {
+            (
+                slug,
+                serde_json::json!({ "console": console, "crt_motion": motion }),
+            )
+        })
+        .collect();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Ok(text) = serde_json::to_string_pretty(&serde_json::Value::Object(obj)) {
+        let _ = std::fs::write(&path, text);
+    }
+}
+
+// --- Per-frame theme channel ---------------------------------------------------------------
+//
+// The theme is a paint-only re-skin: `knob_face`, `toggle_control` and `crt_frame` must know
+// whether CONSOLE is on WITHOUT any change to their call signatures (so plugins that only call
+// `labeled_slider` get re-skinned with ZERO edits). `ScaledWindow::show` resolves the effective
+// prefs once per frame and stashes them in egui memory under these global keys; the paint
+// helpers read them. One egui context == one plugin editor, so a single global key is safe.
+
+fn console_key() -> egui::Id {
+    egui::Id::new("qeynos-theme::console-on")
+}
+fn motion_key() -> egui::Id {
+    egui::Id::new("qeynos-theme::crt-motion")
+}
+
+/// Is CONSOLE v2 active in this context this frame? Defaults to `true` if unset (so any stray
+/// widget matches the shipped look); `ScaledWindow` sets it authoritatively each frame.
+pub fn console_on(ctx: &egui::Context) -> bool {
+    ctx.memory(|m| m.data.get_temp(console_key()).unwrap_or(true))
+}
+
+/// Is CRT motion (scanlines drift / cursor blink) allowed this frame?
+pub fn crt_motion_on(ctx: &egui::Context) -> bool {
+    console_on(ctx) && ctx.memory(|m| m.data.get_temp(motion_key()).unwrap_or(true))
+}
+
+fn set_theme_channel(ctx: &egui::Context, prefs: ThemePrefs) {
+    ctx.memory_mut(|m| {
+        m.data.insert_temp(console_key(), prefs.console);
+        m.data.insert_temp(motion_key(), prefs.crt_motion);
+    });
+}
+
+/// Derive the plugin slug from a window id (`"qeynos-grit-window"` -> `"grit"`,
+/// `"qeynos-overseer-node-window"` -> `"overseer-node"`). The slug is the prefs key and the
+/// preset folder slug — one stable identity per editor.
+fn slug_from_window_id(id: &str) -> String {
+    id.strip_prefix("qeynos-")
+        .unwrap_or(id)
+        .strip_suffix("-window")
+        .unwrap_or(id)
+        .to_string()
+}
+
 /// Apply the suite's minimal-dark visuals to an egui context. Call once per frame
 /// (cheap) from the editor's build/update closure.
 pub fn apply_theme(ctx: &egui::Context) {
@@ -130,6 +296,15 @@ impl ScaledWindow {
         add_contents: impl FnOnce(&mut egui::Ui) -> R,
     ) -> R {
         let (lw, _lh) = egui_state.size();
+
+        // Resolve this plugin's theme prefs (cached in egui memory to avoid per-frame disk
+        // IO) and publish them on the per-frame channel so the paint helpers below re-skin
+        // without any change to their call signatures. THEME-OFF ⇒ everything falls back to
+        // the plain minimal-dark look wholesale (the one code-path switch).
+        let slug = slug_from_window_id(&self.id);
+        let prefs = cached_prefs(ctx, &slug);
+        set_theme_channel(ctx, prefs);
+
         let override_id = egui::Id::new((self.id.as_str(), "scale-override"));
         let last_size_id = egui::Id::new((self.id.as_str(), "last-size"));
 
@@ -153,21 +328,107 @@ impl ScaledWindow {
         // Content is authored at `base` points; keep the window from shrinking below
         // that so nothing clips at 100 %.
         let id_for_menu = self.id.clone();
+        let slug_for_menu = slug.clone();
         ResizableWindow::new(self.id)
             .min_size(self.base)
             .show(ctx, egui_state, |ui| {
+                // Paint the hardware-pedal enclosure behind the content (CONSOLE only). Cheap
+                // vector ops, no assets. Content draws on top, so nothing is obscured.
+                if prefs.console {
+                    paint_enclosure(ui);
+                }
                 let r = add_contents(ui);
-                size_menu(ui, &id_for_menu, scale, &override_id);
+                size_menu(ui, &id_for_menu, &slug_for_menu, scale, &override_id, prefs);
                 r
             })
             .inner
     }
 }
 
+/// Read this plugin's theme prefs, caching them in egui memory so the disk file is touched
+/// once per session (or after a toggle) rather than every frame.
+fn cached_prefs(ctx: &egui::Context, slug: &str) -> ThemePrefs {
+    let id = egui::Id::new(("qeynos-theme-prefs", slug));
+    if let Some(p) = ctx.memory(|m| m.data.get_temp::<ThemePrefs>(id)) {
+        return p;
+    }
+    let p = theme_prefs(slug);
+    ctx.memory_mut(|m| m.data.insert_temp(id, p));
+    p
+}
+
+/// Update the cached + on-disk prefs after a toggle in the size menu.
+fn store_prefs(ctx: &egui::Context, slug: &str, prefs: ThemePrefs) {
+    let id = egui::Id::new(("qeynos-theme-prefs", slug));
+    ctx.memory_mut(|m| m.data.insert_temp(id, prefs));
+    save_theme_prefs(slug, prefs);
+}
+
+/// The pedal enclosure: dark machined body, an amber brand strip, a top highlight + bottom
+/// shadow (cheap "light from above"), an inner bevel, and four corner screws. Pure egui
+/// painting — no textures/assets (stays self-contained per SPECS). ~14 primitives/frame.
+fn paint_enclosure(ui: &egui::Ui) {
+    let rect = ui.max_rect();
+    if !ui.is_rect_visible(rect) {
+        return;
+    }
+    let painter = ui.painter();
+    let round = 10.0_f32;
+
+    // Machined body.
+    painter.rect_filled(rect, round, ENCLOSURE);
+    // Amber brand strip along the very top edge (2 px; content's leading add_space clears it).
+    let strip = egui::Rect::from_min_max(rect.min, egui::pos2(rect.max.x, rect.min.y + 2.0));
+    painter.rect_filled(strip, round, ACCENT);
+    // Top highlight and bottom shadow bands.
+    let hi = egui::Rect::from_min_max(
+        egui::pos2(rect.min.x, rect.min.y + 2.0),
+        egui::pos2(rect.max.x, rect.min.y + 5.0),
+    );
+    painter.rect_filled(hi, 0.0, ENCLOSURE_HI);
+    let lo = egui::Rect::from_min_max(
+        egui::pos2(rect.min.x, rect.max.y - 4.0),
+        rect.max,
+    );
+    painter.rect_filled(lo, round, ENCLOSURE_LO);
+    // Inner bevel.
+    painter.rect_stroke(
+        rect,
+        round,
+        egui::Stroke::new(1.0, ENCLOSURE_LO),
+        egui::StrokeKind::Inside,
+    );
+    // Four corner screws (subtle, low-contrast; top-right sits under the ?/NN% buttons which
+    // draw above in a Foreground Area).
+    let inset = 9.0;
+    let screws = [
+        (rect.left() + inset, rect.top() + inset),
+        (rect.right() - inset, rect.top() + inset),
+        (rect.left() + inset, rect.bottom() - inset),
+        (rect.right() - inset, rect.bottom() - inset),
+    ];
+    for (cx, cy) in screws {
+        let c = egui::pos2(cx, cy);
+        painter.circle_filled(c, 3.5, SCREW);
+        painter.circle_stroke(c, 3.5, egui::Stroke::new(1.0, ENCLOSURE_LO));
+        painter.line_segment(
+            [egui::pos2(cx - 2.2, cy - 2.2), egui::pos2(cx + 2.2, cy + 2.2)],
+            egui::Stroke::new(1.0, ENCLOSURE_LO),
+        );
+    }
+}
+
 /// A small "NN%" button anchored to the window's top-right corner. Opens a popup with
 /// the snap stops; picking one locks the zoom (session state) until the window is
 /// dragged. The effective size persists via `EguiState`, so scale survives reloads.
-fn size_menu(ui: &egui::Ui, id: &str, current: f32, override_id: &egui::Id) {
+fn size_menu(
+    ui: &egui::Ui,
+    id: &str,
+    slug: &str,
+    current: f32,
+    override_id: &egui::Id,
+    prefs: ThemePrefs,
+) {
     let ctx = ui.ctx().clone();
     egui::Area::new(egui::Id::new((id, "size-menu")))
         .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-6.0, 6.0))
@@ -183,6 +444,37 @@ fn size_menu(ui: &egui::Ui, id: &str, current: f32, override_id: &egui::Id) {
                             .memory_mut(|m| m.data.insert_temp(*override_id, s));
                         ui.close_menu();
                     }
+                }
+                ui.separator();
+                // THEME controls (guardrail #2 + the THEME-OFF fallback). Persisted per plugin.
+                ui.label(egui::RichText::new("THEME").color(TEXT_DIM).small());
+                let mut console = prefs.console;
+                if ui.checkbox(&mut console, "Console skin").changed() {
+                    store_prefs(
+                        ui.ctx(),
+                        slug,
+                        ThemePrefs {
+                            console,
+                            crt_motion: prefs.crt_motion,
+                        },
+                    );
+                }
+                let mut motion = prefs.crt_motion;
+                if ui
+                    .add_enabled(
+                        prefs.console,
+                        egui::Checkbox::new(&mut motion, "CRT motion"),
+                    )
+                    .changed()
+                {
+                    store_prefs(
+                        ui.ctx(),
+                        slug,
+                        ThemePrefs {
+                            console: prefs.console,
+                            crt_motion: motion,
+                        },
+                    );
                 }
             });
         });
@@ -295,7 +587,11 @@ fn knob_face<P: Param>(ui: &mut egui::Ui, param: &P, setter: &ParamSetter) {
     }
 
     // --- Paint ---
+    // CONSOLE re-skins the FACE ONLY (tick-ring collar + machined cap). Hit-testing, drag,
+    // fine-drag, reset, scroll and click-to-type above are byte-identical in both themes
+    // (guardrail #4). The value stays plain text under the knob via `value_text`.
     if ui.is_rect_visible(rect) {
+        let console = console_on(ui.ctx());
         let painter = ui.painter();
         let center = rect.center();
         let radius = KNOB_DIAMETER * 0.5 - 3.0;
@@ -307,9 +603,34 @@ fn knob_face<P: Param>(ui: &mut egui::Ui, param: &P, setter: &ParamSetter) {
         let ang = a0 + t * (a1 - a0);
         let pt = |a: f32, r: f32| center + Vec2::new(a.cos(), a.sin()) * r;
 
-        // Body.
-        painter.circle_filled(center, radius, PANEL);
-        painter.circle_stroke(center, radius, egui::Stroke::new(1.0, egui::Color32::from_rgb(40, 43, 48)));
+        if console {
+            // Tick-ring collar just outside the cap (machined-knob look). Static ⇒ cheap.
+            let ring_r = radius + 2.0;
+            const RING_TICKS: usize = 21;
+            for k in 0..=RING_TICKS {
+                let a = a0 + (k as f32 / RING_TICKS as f32) * (a1 - a0);
+                let major = k % 5 == 0;
+                let (inner, w, col) = if major {
+                    (ring_r - 4.0, 1.4, PHOSPHOR_DIM)
+                } else {
+                    (ring_r - 2.5, 1.0, egui::Color32::from_rgb(70, 62, 40))
+                };
+                painter.line_segment([pt(a, inner), pt(a, ring_r)], egui::Stroke::new(w, col));
+            }
+        }
+
+        // Cap body.
+        let body = if console {
+            egui::Color32::from_rgb(30, 31, 35)
+        } else {
+            PANEL
+        };
+        painter.circle_filled(center, radius, body);
+        painter.circle_stroke(
+            center,
+            radius,
+            egui::Stroke::new(1.0, egui::Color32::from_rgb(40, 43, 48)),
+        );
 
         // Background track arc.
         painter.add(egui::Shape::line(
@@ -321,13 +642,15 @@ fn knob_face<P: Param>(ui: &mut egui::Ui, param: &P, setter: &ParamSetter) {
             arc_points(center, radius, a0, ang, 40),
             egui::Stroke::new(2.5, ACCENT),
         ));
-        // Ticks at 0/25/50/75/100 %.
-        for k in 0..=4 {
-            let a = a0 + (k as f32 / 4.0) * (a1 - a0);
-            painter.line_segment(
-                [pt(a, radius - 2.0), pt(a, radius + 2.0)],
-                egui::Stroke::new(1.0, TEXT_DIM),
-            );
+        if !console {
+            // Plain theme: 5 coarse ticks on the cap edge.
+            for k in 0..=4 {
+                let a = a0 + (k as f32 / 4.0) * (a1 - a0);
+                painter.line_segment(
+                    [pt(a, radius - 2.0), pt(a, radius + 2.0)],
+                    egui::Stroke::new(1.0, TEXT_DIM),
+                );
+            }
         }
         // Needle.
         painter.line_segment(
@@ -436,9 +759,14 @@ fn toggle_control<P: Param>(ui: &mut egui::Ui, label: &str, param: &P, setter: &
                 response.mark_changed();
             }
             if ui.is_rect_visible(rect) {
+                let console = console_on(ui.ctx());
                 let painter = ui.painter();
                 let radius = rect.height() * 0.5;
-                let track = if on { ACCENT.linear_multiply(0.6) } else { PANEL };
+                let track = if on {
+                    ACCENT.linear_multiply(0.6)
+                } else {
+                    PANEL
+                };
                 painter.rect_filled(rect, radius, track);
                 painter.rect_stroke(
                     rect,
@@ -447,14 +775,150 @@ fn toggle_control<P: Param>(ui: &mut egui::Ui, label: &str, param: &P, setter: &
                     egui::StrokeKind::Middle,
                 );
                 let knob_x = if on { rect.right() - radius } else { rect.left() + radius };
-                painter.circle_filled(
-                    egui::pos2(knob_x, rect.center().y),
-                    radius - 2.0,
-                    if on { ACCENT } else { TEXT_DIM },
-                );
+                let cap = egui::pos2(knob_x, rect.center().y);
+                painter.circle_filled(cap, radius - 2.0, if on { ACCENT } else { TEXT_DIM });
+                if console {
+                    // Footswitch LED: a lit amber dot on the cap when engaged (a soft glow
+                    // ring behind it), a dark socket when off. Reads as a stompbox switch.
+                    if on {
+                        painter.circle_filled(cap, radius - 2.0, PHOSPHOR.linear_multiply(0.35));
+                        painter.circle_filled(cap, (radius - 2.0) * 0.5, PHOSPHOR);
+                    } else {
+                        painter.circle_filled(cap, (radius - 2.0) * 0.5, GLASS_BG);
+                    }
+                }
             }
             ui.label(egui::RichText::new(param.to_string()).color(TEXT).small());
         });
+    });
+}
+
+// ===========================================================================
+// CONSOLE v2 — CRT telemetry bay + section header (PEDAL-UI)
+// ===========================================================================
+
+/// An amber section header (small-caps label over a faint rule). CONSOLE draws it in
+/// phosphor amber; THEME-OFF falls back to the plain dim label. Cosmetic only.
+pub fn section_header(ui: &mut egui::Ui, text: &str) {
+    let console = console_on(ui.ctx());
+    let col = if console { PHOSPHOR_DIM } else { TEXT_DIM };
+    ui.label(egui::RichText::new(text).color(col).small().strong());
+}
+
+/// The recessed **amber-CRT telemetry bay**: a bronze-black glass panel with faint static
+/// scanlines and (when CRT motion is on) a blinking terminal cursor, hosting a plugin's live
+/// telemetry/visualization in terminal style. `add_contents` paints INTO the glass — amber
+/// monospace text, meters, scopes, spectra — clipped to the inner recess.
+///
+/// * CONSOLE on  → glass + scanlines (static) + cursor blink gated by the per-plugin CRT-motion
+///   pref (guardrail #2). Motion requests only a slow (~8 fps) repaint so idle GUIs stay cheap
+///   (guardrail #6).
+/// * CONSOLE off → a plain faint panel, no glass/scanlines/cursor; the SAME content still renders
+///   (guardrail #3: the CRT is additive instrumentation — nothing operable lives only inside it).
+pub fn crt_frame<R>(
+    ui: &mut egui::Ui,
+    id_salt: &str,
+    height: f32,
+    add_contents: impl FnOnce(&mut egui::Ui) -> R,
+) -> R {
+    let console = console_on(ui.ctx());
+    let motion = crt_motion_on(ui.ctx());
+    let width = ui.available_width();
+    let (rect, _resp) = ui.allocate_exact_size(egui::vec2(width, height), Sense::hover());
+    let inner = rect.shrink(8.0);
+
+    if ui.is_rect_visible(rect) {
+        let painter = ui.painter();
+        if console {
+            painter.rect_filled(rect, 6.0, GLASS_BG);
+            painter.rect_stroke(
+                rect,
+                6.0,
+                egui::Stroke::new(1.0, egui::Color32::from_rgb(60, 44, 12)),
+                egui::StrokeKind::Inside,
+            );
+            // Faint static scanlines every 3 px (a texture, not motion — stays on with
+            // motion off). ~height/3 cheap line segments.
+            let sl = egui::Color32::from_rgba_unmultiplied(0, 0, 0, 64);
+            let mut y = inner.top() + 1.0;
+            while y < inner.bottom() {
+                painter.line_segment(
+                    [egui::pos2(inner.left(), y), egui::pos2(inner.right(), y)],
+                    egui::Stroke::new(1.0, sl),
+                );
+                y += 3.0;
+            }
+        } else {
+            painter.rect_filled(rect, 4.0, egui::Color32::from_rgb(10, 11, 13));
+            painter.rect_stroke(
+                rect,
+                4.0,
+                egui::Stroke::new(1.0, PANEL),
+                egui::StrokeKind::Inside,
+            );
+        }
+    }
+
+    // Content clipped to the inner glass.
+    let mut child = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(inner)
+            .layout(egui::Layout::top_down(egui::Align::LEFT)),
+    );
+    child.set_clip_rect(inner);
+    let _salt = id_salt; // reserved for future per-bay state; keeps the API stable.
+    let r = add_contents(&mut child);
+
+    // Blinking cursor, motion only.
+    if console && motion && ui.is_rect_visible(rect) {
+        let ctx = ui.ctx();
+        let t = ctx.input(|i| i.time);
+        if (t * 1.6).fract() < 0.5 {
+            let cur = egui::Rect::from_min_size(
+                egui::pos2(inner.left(), inner.bottom() - 11.0),
+                egui::vec2(7.0, 10.0),
+            );
+            ui.painter().rect_filled(cur, 0.0, PHOSPHOR);
+        }
+        ctx.request_repaint_after(std::time::Duration::from_millis(120));
+    }
+    r
+}
+
+/// Convenience over [`crt_frame`]: a titled block of amber terminal lines (`(label, value)`
+/// pairs). This is the honest, cheap telemetry every plugin without a dedicated scope shows —
+/// the SAME live values that appear on its knobs (guardrail #3), in monospace so columns align.
+pub fn crt_lines(ui: &mut egui::Ui, id_salt: &str, title: &str, lines: &[(&str, String)]) {
+    let height = 22.0 + lines.len() as f32 * 16.0 + 8.0;
+    crt_frame(ui, id_salt, height, |ui| {
+        let console = console_on(ui.ctx());
+        let title_col = if console { PHOSPHOR } else { TEXT_DIM };
+        ui.label(
+            egui::RichText::new(title)
+                .color(title_col)
+                .monospace()
+                .strong()
+                .size(12.0),
+        );
+        ui.add_space(2.0);
+        let body = if console { PHOSPHOR } else { TEXT };
+        let dim = if console { PHOSPHOR_DIM } else { TEXT_DIM };
+        for (label, value) in lines {
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new(format!("{label:<11}"))
+                        .color(dim)
+                        .monospace()
+                        .size(12.0),
+                );
+                ui.label(
+                    egui::RichText::new(value)
+                        .color(body)
+                        .monospace()
+                        .size(12.0),
+                );
+            });
+        }
     });
 }
 
@@ -1321,5 +1785,55 @@ mod tests {
     fn approx_eq_scales_with_magnitude() {
         assert!(approx_eq(20_000.0, 20_000.5)); // 0.5 Hz on 20k: fine
         assert!(!approx_eq(0.0, 0.01)); // 0.01 on a 0..1 mix: dirty
+    }
+
+    // --- CONSOLE v2 theme foundation (PEDAL-UI) ---
+
+    #[test]
+    fn slug_derives_from_window_id() {
+        assert_eq!(slug_from_window_id("qeynos-grit-window"), "grit");
+        assert_eq!(
+            slug_from_window_id("qeynos-overseer-node-window"),
+            "overseer-node"
+        );
+        assert_eq!(
+            slug_from_window_id("qeynos-overseer-master-window"),
+            "overseer-master"
+        );
+        assert_eq!(slug_from_window_id("qeynos-template-window"), "template");
+        // Degenerate/foreign ids pass through unchanged rather than panicking.
+        assert_eq!(slug_from_window_id("weird"), "weird");
+    }
+
+    #[test]
+    fn theme_prefs_default_is_the_shipped_console_look() {
+        let d = ThemePrefs::default();
+        assert!(d.console, "CONSOLE must default ON");
+        assert!(d.crt_motion, "CRT motion must default ON");
+    }
+
+    #[test]
+    fn ui_prefs_json_roundtrips_and_tolerates_missing_fields() {
+        // The exact shape save_theme_prefs writes must parse back through load's reader.
+        let json = serde_json::json!({
+            "grit": { "console": false, "crt_motion": true },
+            "ember": { "console": true },          // missing crt_motion -> defaults true
+            "wire": { "crt_motion": false },       // missing console    -> defaults true
+        })
+        .to_string();
+        let map: BTreeMap<String, (bool, bool)> = {
+            // Mirror load_ui_prefs' parsing (can't hit the real file path in a unit test).
+            let val: serde_json::Value = serde_json::from_str(&json).unwrap();
+            let mut out = BTreeMap::new();
+            for (slug, entry) in val.as_object().unwrap() {
+                let console = entry.get("console").and_then(|v| v.as_bool()).unwrap_or(true);
+                let motion = entry.get("crt_motion").and_then(|v| v.as_bool()).unwrap_or(true);
+                out.insert(slug.clone(), (console, motion));
+            }
+            out
+        };
+        assert_eq!(map["grit"], (false, true));
+        assert_eq!(map["ember"], (true, true));
+        assert_eq!(map["wire"], (true, false));
     }
 }

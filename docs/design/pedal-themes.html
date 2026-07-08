@@ -1,0 +1,537 @@
+<title>Qeynos Suite — Pedal Theme Mockups</title>
+<style>
+  :root{
+    --bg:#101014; --ink:#e8e6e1; --sub:#9a97a0; --line:#2a2a33; --accent:#d96e30;
+  }
+  :root[data-theme="light"]{ --bg:#ecebe7; --ink:#1c1b20; --sub:#5f5d66; --line:#cfcdc6; }
+  @media (prefers-color-scheme: light){ :root:not([data-theme="dark"]){ --bg:#ecebe7; --ink:#1c1b20; --sub:#5f5d66; --line:#cfcdc6; } }
+  *{box-sizing:border-box; margin:0}
+  body{background:var(--bg); color:var(--ink); font:15px/1.6 "Segoe UI",system-ui,sans-serif; padding:48px 24px 80px}
+  .wrap{max-width:1060px; margin:0 auto}
+  h1{font-family:Bahnschrift,"Arial Narrow",sans-serif; font-size:34px; letter-spacing:.02em; text-wrap:balance}
+  .intro{color:var(--sub); max-width:62ch; margin:10px 0 40px}
+  .grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(460px,1fr)); gap:40px}
+  @media (max-width:520px){ .grid{grid-template-columns:1fr} }
+  .option{display:flex; flex-direction:column; gap:14px}
+  .opt-head{display:flex; align-items:baseline; gap:12px; border-bottom:1px solid var(--line); padding-bottom:8px}
+  .opt-head b{font-family:Bahnschrift,"Arial Narrow",sans-serif; font-size:19px; letter-spacing:.06em}
+  .opt-head span{color:var(--sub); font-size:13px}
+  .why{color:var(--sub); font-size:13.5px; max-width:58ch}
+
+  /* ---------- shared pedal anatomy ---------- */
+  .pedal{border-radius:14px; padding:20px 22px 18px; position:relative; min-height:360px;
+         display:flex; flex-direction:column; gap:18px; overflow:hidden}
+  .screw{position:absolute; width:11px; height:11px; border-radius:50%;}
+  .screw::after{content:""; position:absolute; left:1px; right:1px; top:4.5px; height:1.6px; transform:rotate(38deg)}
+  .s1{top:9px;left:9px}.s2{top:9px;right:9px}.s3{bottom:9px;left:9px}.s4{bottom:9px;right:9px}
+  .phead{display:flex; justify-content:space-between; align-items:center; gap:10px}
+  .brand{font-size:10.5px; letter-spacing:.28em}
+  .pname{font-size:22px; letter-spacing:.12em}
+  .preset{font-size:11px; padding:4px 10px; border-radius:5px; display:flex; gap:8px; align-items:center; white-space:nowrap}
+  .preset i{font-style:normal; opacity:.55}
+  .knobs{display:flex; justify-content:space-between; gap:8px; flex-wrap:wrap}
+  .k{display:flex; flex-direction:column; align-items:center; gap:7px; width:76px}
+  .dial{width:58px; height:58px; border-radius:50%; position:relative}
+  .dial::after{content:""; position:absolute; left:50%; top:5px; width:3px; height:16px; margin-left:-1.5px; border-radius:2px}
+  .k label{font-size:9.5px; letter-spacing:.18em}
+  .k output{font-size:10px; opacity:.6; font-variant-numeric:tabular-nums}
+  .row2{display:flex; justify-content:space-between; align-items:center; margin-top:auto}
+  .modes{display:flex; gap:6px}
+  .mode{font-size:9.5px; letter-spacing:.14em; padding:4px 9px; border-radius:4px}
+  .foot{display:flex; align-items:center; gap:14px}
+  .led{width:9px; height:9px; border-radius:50%}
+  .switch{width:46px; height:46px; border-radius:50%; position:relative}
+  .switch::after{content:""; position:absolute; inset:11px; border-radius:50%}
+  .meter{display:flex; gap:2.5px; align-items:flex-end; height:26px}
+  .meter i{width:4px; border-radius:1px}
+
+  /* ---------- 1 · RUST — industrial warehouse ---------- */
+  .t-rust{background:linear-gradient(165deg,#2b2b2e,#1c1c1f 60%,#232326);
+          border:1px solid #3d3d41; box-shadow:0 18px 40px -18px rgba(0,0,0,.8), inset 0 1px 0 #47474c;
+          font-family:Bahnschrift,"Arial Narrow",sans-serif; color:#d9d6cf}
+  .t-rust .screw{background:radial-gradient(circle at 35% 30%,#8a8a90,#4a4a4f)} .t-rust .screw::after{background:#26262a}
+  .t-rust .brand{color:#8f8c85}
+  .t-rust .pname{color:#e56b1f; font-weight:700; text-transform:uppercase; text-shadow:0 0 14px rgba(229,107,31,.35)}
+  .t-rust .preset{background:#141416; border:1px solid #3b3b3f; color:#c9c5bc}
+  .t-rust .dial{background:radial-gradient(circle at 38% 30%,#4e4e54,#232327 70%); border:2px solid #101012;
+                box-shadow:0 4px 8px rgba(0,0,0,.55), inset 0 1px 0 #5c5c62}
+  .t-rust .dial::after{background:#e56b1f}
+  .t-rust .k label{color:#a29e95} .t-rust .mode{border:1px solid #3f3f43; color:#a29e95}
+  .t-rust .mode.on{background:#e56b1f; color:#141416; border-color:#e56b1f; font-weight:700}
+  .t-rust .led{background:#ffb437; box-shadow:0 0 10px #ffb437}
+  .t-rust .switch{background:linear-gradient(#3a3a3f,#232327); border:2px solid #0f0f11}
+  .t-rust .switch::after{background:radial-gradient(circle at 40% 32%,#6a6a70,#3a3a3f); border:1px solid #101012}
+  .t-rust .meter i{background:#5a564e} .t-rust .meter i.hot{background:#e56b1f}
+
+  /* ---------- 2 · VOID — afterlife minimal ---------- */
+  .t-void{background:#0b0b0d; border:1px solid #1d1d22;
+          box-shadow:0 18px 40px -18px rgba(0,0,0,.9);
+          font-family:"Segoe UI",system-ui,sans-serif; font-weight:300; color:#c9c7cd}
+  .t-void .screw{display:none}
+  .t-void .brand{color:#55535c}
+  .t-void .pname{color:#e3e1e6; font-weight:200; letter-spacing:.5em; padding-left:.5em}
+  .t-void .preset{background:transparent; border:1px solid #26262c; color:#8f8d96}
+  .t-void .dial{background:#0b0b0d; border:1.5px solid #33323a; box-shadow:inset 0 0 0 6px #121215}
+  .t-void .dial::after{background:#c94141; box-shadow:0 0 8px rgba(201,65,65,.6)}
+  .t-void .k label{color:#6d6b75; font-weight:400}
+  .t-void .mode{border:1px solid #26262c; color:#6d6b75}
+  .t-void .mode.on{border-color:#c94141; color:#c94141}
+  .t-void .led{background:#c94141; box-shadow:0 0 12px rgba(201,65,65,.8)}
+  .t-void .switch{background:#0b0b0d; border:1.5px solid #33323a}
+  .t-void .switch::after{background:#121215; border:1px solid #26262c}
+  .t-void .meter i{background:#232228} .t-void .meter i.hot{background:#c94141}
+  .t-void .phead{border-bottom:1px solid #1d1d22; padding-bottom:12px}
+
+  /* ---------- 3 · CIRCUIT — digital hardware ---------- */
+  .t-circuit{background:linear-gradient(180deg,#0d1518,#0a0f12);
+             border:1px solid #1c2f33; box-shadow:0 18px 40px -18px rgba(0,0,0,.85), inset 0 0 60px rgba(24,214,192,.03);
+             font-family:Consolas,monospace; color:#bfd8d4}
+  .t-circuit .screw{background:#15242a; border:1px solid #234046} .t-circuit .screw::after{background:#0a0f12}
+  .t-circuit .brand{color:#3f6b68}
+  .t-circuit .pname{color:#18d6c0; text-shadow:0 0 16px rgba(24,214,192,.4)}
+  .t-circuit .preset{background:#07211f; border:1px solid #1a4a45; color:#18d6c0; font-family:Consolas,monospace}
+  .t-circuit .dial{background:#0d181b; border:1.5px solid #234046;
+                   box-shadow:0 0 0 3px #0a0f12, 0 0 12px rgba(24,214,192,.12)}
+  .t-circuit .dial::after{background:#18d6c0; box-shadow:0 0 8px rgba(24,214,192,.8)}
+  .t-circuit .k label{color:#578783} .t-circuit .k output{color:#18d6c0; opacity:.85}
+  .t-circuit .mode{border:1px solid #1a4a45; color:#578783}
+  .t-circuit .mode.on{background:#07211f; color:#18d6c0; border-color:#18d6c0}
+  .t-circuit .led{background:#18d6c0; box-shadow:0 0 12px rgba(24,214,192,.9)}
+  .t-circuit .switch{background:#0d181b; border:1.5px solid #234046}
+  .t-circuit .switch::after{background:#101d21; border:1px solid #1a4a45}
+  .t-circuit .meter i{background:#16302f} .t-circuit .meter i.hot{background:#18d6c0}
+
+  /* ---------- 4 · GHOST — drowned pale ---------- */
+  .t-ghost{background:linear-gradient(170deg,#23222b,#1a1922 65%,#201f29);
+           border:1px solid #34323f; box-shadow:0 18px 40px -18px rgba(10,8,20,.8);
+           font-family:Georgia,"Times New Roman",serif; color:#c6c2d4}
+  .t-ghost .screw{background:#3a3846; border:1px solid #232230} .t-ghost .screw::after{background:#1a1922}
+  .t-ghost .brand{color:#6f6b82; font-family:"Segoe UI",sans-serif}
+  .t-ghost .pname{color:#d9d5e6; font-style:italic; letter-spacing:.2em; font-weight:400}
+  .t-ghost .preset{background:#1a1922; border:1px solid #34323f; color:#9d99b0; font-family:"Segoe UI",sans-serif}
+  .t-ghost .dial{background:radial-gradient(circle at 40% 32%,#413e50,#26242f 72%); border:1.5px solid #16151d;
+                 box-shadow:0 3px 10px rgba(10,8,20,.5), inset 0 1px 0 #4d4a5e}
+  .t-ghost .dial::after{background:#9f86e8; box-shadow:0 0 9px rgba(159,134,232,.55)}
+  .t-ghost .k label{color:#7b7790; font-family:"Segoe UI",sans-serif}
+  .t-ghost .mode{border:1px solid #34323f; color:#7b7790; font-family:"Segoe UI",sans-serif}
+  .t-ghost .mode.on{background:#2c2a38; color:#b9a5f2; border-color:#5c5477}
+  .t-ghost .led{background:#9f86e8; box-shadow:0 0 12px rgba(159,134,232,.8)}
+  .t-ghost .switch{background:linear-gradient(#34323f,#232230); border:1.5px solid #131219}
+  .t-ghost .switch::after{background:#2c2a38; border:1px solid #413e50}
+  .t-ghost .meter i{background:#353244} .t-ghost .meter i.hot{background:#9f86e8}
+
+  .pick{margin-top:52px; padding:18px 22px; border:1px solid var(--line); border-radius:10px; color:var(--sub); font-size:14px}
+  .pick b{color:var(--ink)}
+  .batch{font-family:Bahnschrift,"Arial Narrow",sans-serif; font-size:24px; letter-spacing:.04em; margin:56px 0 6px}
+  .batchsub{color:var(--sub); max-width:64ch; margin-bottom:28px; font-size:14px}
+  @media (prefers-reduced-motion: no-preference){
+    .led{animation:pulse 2.4s ease-in-out infinite}
+    @keyframes pulse{50%{opacity:.55}}
+    .t-fall .pname, .t-fall .preset, .t-fall .k output{animation:flicker 4.7s steps(1) infinite}
+    @keyframes flicker{92%{opacity:1}93%{opacity:.78}94%{opacity:1}}
+  }
+
+  /* ---------- BATCH 3 · CONSOLE v2 — pedal with a real CRT ---------- */
+  .stage{display:flex; flex-direction:column; gap:44px; align-items:center; margin-top:28px}
+  .pedal2{width:min(620px,100%); border-radius:18px; position:relative; padding:26px 30px 24px;
+    font-family:"Segoe UI",system-ui,sans-serif; color:#cfccd6;
+    background:
+      repeating-linear-gradient(90deg, rgba(255,255,255,.012) 0 2px, transparent 2px 4px),
+      linear-gradient(172deg,#26262c 0%,#1a1a1f 38%,#141418 70%,#1c1c21 100%);
+    border:1px solid #33333b;
+    box-shadow:
+      0 30px 60px -24px rgba(0,0,0,.95),
+      0 2px 0 rgba(255,255,255,.05) inset,
+      0 -14px 30px -18px rgba(0,0,0,.8) inset,
+      0 0 0 1px #0c0c0f;
+  }
+  .pedal2 .screw2{position:absolute; width:14px; height:14px; border-radius:50%;
+    background:radial-gradient(circle at 35% 30%,#77777f,#3c3c43 65%,#26262b);
+    box-shadow:0 1px 2px rgba(0,0,0,.7), inset 0 0 0 1px #1a1a1e}
+  .pedal2 .screw2::after{content:""; position:absolute; left:2px; right:2px; top:6px; height:2px; background:#141417; transform:rotate(-24deg); border-radius:1px}
+  .p2h{display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:16px}
+  .p2h .brand2{font-size:10px; letter-spacing:.34em; color:#6e6b78}
+  .p2h .name2{font-size:26px; font-weight:250; letter-spacing:.3em; color:#e6e3ec; padding-left:.15em}
+  .p2h .ser{font-size:9px; letter-spacing:.18em; color:#57545f; text-align:right; line-height:1.7}
+
+  .crtshell{background:linear-gradient(#0b0b0d,#111114); border-radius:10px; padding:10px 12px 12px;
+    box-shadow:inset 0 2px 10px rgba(0,0,0,.9), 0 1px 0 rgba(255,255,255,.05);
+    border:1px solid #08080a; position:relative; margin-bottom:20px}
+  .crtshell::before,.crtshell::after{content:""; position:absolute; width:7px; height:7px; border-radius:50%;
+    background:radial-gradient(circle at 35% 30%,#55555e,#26262b); top:50%; margin-top:-3.5px}
+  .crtshell::before{left:4px} .crtshell::after{right:4px}
+  .crt2{border-radius:7px; padding:13px 16px; position:relative; overflow:hidden;
+    font-family:Consolas,"Lucida Console",monospace; font-size:12px; line-height:1.75;
+    color:#ffb642; text-shadow:0 0 6px rgba(255,170,40,.55), 0 0 18px rgba(255,170,40,.18);
+    background:
+      repeating-linear-gradient(0deg, rgba(0,0,0,.3) 0 1px, transparent 1px 3px),
+      radial-gradient(ellipse 120% 90% at 50% 38%, #221402 0%, #150c01 55%, #0a0501 100%)}
+  .crt2::after{content:""; position:absolute; inset:0; pointer-events:none;
+    background:radial-gradient(ellipse 65% 38% at 50% 8%, rgba(255,235,200,.07), transparent 60%)}
+  .crt2 .dim{color:#a97e2c; text-shadow:0 0 4px rgba(255,170,40,.3)}
+  .crt2 .hot2{color:#ffd98a}
+  .crt2 .bar{letter-spacing:-.06em}
+  .crt2 .rule{color:#6e5316; text-shadow:none}
+  .cursor{display:inline-block; width:7px; height:13px; background:#ffb642; vertical-align:-2px; box-shadow:0 0 8px rgba(255,170,40,.8)}
+  @media (prefers-reduced-motion: no-preference){
+    .cursor{animation:blink 1.1s steps(1) infinite}
+    @keyframes blink{50%{opacity:0}}
+    .crt2{animation:crtdrift 7s steps(1) infinite}
+    @keyframes crtdrift{88%{filter:none}89%{filter:brightness(1.12)}90%{filter:none}}
+  }
+  .knobs2{display:flex; justify-content:space-between; gap:6px; margin-bottom:20px}
+  .k2{display:flex; flex-direction:column; align-items:center; gap:8px; width:86px}
+  .tick{width:74px; height:74px; border-radius:50%; position:relative; display:grid; place-items:center;
+    background:
+      repeating-conic-gradient(from 225deg, #4a4852 0deg .9deg, transparent .9deg 33.6deg);
+    -webkit-mask:radial-gradient(circle, transparent 0 33px, #000 33px 37px, transparent 37px);
+    mask:radial-gradient(circle, transparent 0 33px, #000 33px 37px, transparent 37px)}
+  .k2 .dialwrap{width:74px; height:74px; position:relative; display:grid; place-items:center; margin-bottom:-74px}
+  .dial2{width:56px; height:56px; border-radius:50%; position:relative; z-index:1;
+    background:
+      radial-gradient(circle at 36% 28%, #4d4d56, #2a2a30 55%, #1b1b20 100%);
+    border:2px solid #0d0d10;
+    box-shadow:0 5px 10px rgba(0,0,0,.6), inset 0 1.5px 0 rgba(255,255,255,.14), inset 0 -3px 6px rgba(0,0,0,.5)}
+  .dial2::before{content:""; position:absolute; inset:6px; border-radius:50%;
+    background:repeating-conic-gradient(#33333a 0deg 8deg, #2c2c33 8deg 16deg); opacity:.5}
+  .dial2::after{content:""; position:absolute; left:50%; top:4px; width:3.5px; height:17px; margin-left:-1.75px;
+    background:#ffb642; border-radius:2px; box-shadow:0 0 8px rgba(255,170,40,.75)}
+  .k2 label{font-size:9.5px; letter-spacing:.22em; color:#8c8996}
+  .k2 output{font-family:Consolas,monospace; font-size:10.5px; color:#ffb642; text-shadow:0 0 5px rgba(255,170,40,.4); font-variant-numeric:tabular-nums}
+  .base2{display:flex; justify-content:space-between; align-items:center}
+  .jack{font-size:8.5px; letter-spacing:.2em; color:#57545f; display:flex; flex-direction:column; gap:3px}
+  .jack i{font-style:normal; display:inline-block; width:26px; height:5px; border-radius:3px; background:linear-gradient(#0a0a0c,#1c1c21); box-shadow:inset 0 1px 2px #000}
+  .fs2wrap{display:flex; align-items:center; gap:16px}
+  .led2{width:10px; height:10px; border-radius:50%; background:#ffb642; box-shadow:0 0 14px rgba(255,170,40,.95), 0 0 3px #fff inset}
+  .fs2{width:58px; height:58px; border-radius:50%; position:relative;
+    background:radial-gradient(circle at 40% 30%, #55555e, #2e2e35 60%, #1c1c21);
+    border:3px solid #0c0c0f;
+    box-shadow:0 6px 12px rgba(0,0,0,.65), 0 0 0 5px #232329, 0 0 0 6px #0c0c0f, inset 0 2px 0 rgba(255,255,255,.15)}
+  .fs2::after{content:""; position:absolute; inset:14px; border-radius:50%;
+    background:radial-gradient(circle at 40% 32%,#77777f,#3c3c43); border:1px solid #101013;
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.2)}
+  .stage .cap{color:var(--sub); font-size:13.5px; max-width:60ch; text-align:center; margin-top:-26px}
+
+  /* ---------- 5 · TERMINAL — full Fallout amber CRT ---------- */
+  .t-fall{background:
+      repeating-linear-gradient(0deg, rgba(0,0,0,.22) 0 1px, transparent 1px 3px),
+      radial-gradient(ellipse at 50% 42%, #241505 0%, #170d02 62%, #0d0701 100%);
+    border:2px solid #3a2a12; border-radius:10px;
+    box-shadow:0 18px 40px -18px rgba(0,0,0,.9), inset 0 0 70px rgba(255,168,32,.09);
+    font-family:Consolas,"Lucida Console",monospace; color:#ffb642; text-shadow:0 0 7px rgba(255,168,32,.5)}
+  .t-fall .screw{background:#2c1f0c; border:1px solid #4a3416} .t-fall .screw::after{background:#170d02}
+  .t-fall .brand{color:#a06f24}
+  .t-fall .pname{color:#ffb642; letter-spacing:.18em}
+  .t-fall .pname::before{content:"> "}
+  .t-fall .preset{background:rgba(255,168,32,.06); border:1px solid #5c4218; color:#ffb642}
+  .t-fall .dial{background:#170d02; border:1.5px solid #7a5a20;
+      box-shadow:0 0 0 3px #0d0701, 0 0 14px rgba(255,168,32,.22), inset 0 0 10px rgba(255,168,32,.12)}
+  .t-fall .dial::after{background:#ffb642; box-shadow:0 0 9px rgba(255,168,32,.9)}
+  .t-fall .k label{color:#b8862e} .t-fall .k output{color:#ffb642; opacity:.9}
+  .t-fall .mode{border:1px solid #5c4218; color:#b8862e}
+  .t-fall .mode.on{background:rgba(255,168,32,.14); color:#ffcf7a; border-color:#ffb642}
+  .t-fall .led{background:#ffb642; box-shadow:0 0 14px rgba(255,168,32,.95)}
+  .t-fall .switch{background:#170d02; border:1.5px solid #7a5a20}
+  .t-fall .switch::after{background:#241505; border:1px solid #5c4218}
+  .t-fall .meter i{background:#3a2a12} .t-fall .meter i.hot{background:#ffb642; box-shadow:0 0 6px rgba(255,168,32,.8)}
+
+  /* ---------- 6 · VOID//TERM — minimal void + amber phosphor ---------- */
+  .t-vt{background:#0a0a0c; border:1px solid #1d1c20;
+    box-shadow:0 18px 40px -18px rgba(0,0,0,.9);
+    font-family:Consolas,"Lucida Console",monospace; color:#c8c5cc}
+  .t-vt .screw{display:none}
+  .t-vt .brand{color:#514f58; letter-spacing:.34em}
+  .t-vt .pname{color:#e8e5ea; font-weight:400; letter-spacing:.4em; padding-left:.4em; font-size:19px}
+  .t-vt .preset{background:transparent; border:1px solid #26252b; color:#ffb642; text-shadow:0 0 6px rgba(255,168,32,.35)}
+  .t-vt .dial{background:#0a0a0c; border:1.5px solid #302f36; box-shadow:inset 0 0 0 6px #101013}
+  .t-vt .dial::after{background:#ffb642; box-shadow:0 0 8px rgba(255,168,32,.7)}
+  .t-vt .k label{color:#615f69}
+  .t-vt .k output{color:#ffb642; opacity:.85; text-shadow:0 0 6px rgba(255,168,32,.3)}
+  .t-vt .mode{border:1px solid #26252b; color:#615f69}
+  .t-vt .mode.on{border-color:#ffb642; color:#ffb642; text-shadow:0 0 6px rgba(255,168,32,.4)}
+  .t-vt .led{background:#ffb642; box-shadow:0 0 12px rgba(255,168,32,.85)}
+  .t-vt .switch{background:#0a0a0c; border:1.5px solid #302f36}
+  .t-vt .switch::after{background:#101013; border:1px solid #26252b}
+  .t-vt .meter i{background:#232227} .t-vt .meter i.hot{background:#ffb642}
+  .t-vt .phead{border-bottom:1px solid #1d1c20; padding-bottom:12px}
+
+  /* ---------- 7 · CONSOLE — matte hardware, CRT readout window ---------- */
+  .t-con{background:linear-gradient(170deg,#1b1b1f,#121216 60%,#17171b);
+    border:1px solid #2c2c32; box-shadow:0 18px 40px -18px rgba(0,0,0,.85), inset 0 1px 0 #33333a;
+    font-family:"Segoe UI",system-ui,sans-serif; color:#c9c6ce}
+  .t-con .screw{background:radial-gradient(circle at 35% 30%,#5c5c64,#333338)} .t-con .screw::after{background:#131316}
+  .t-con .brand{color:#6c6a74; letter-spacing:.3em}
+  .t-con .pname{color:#dcd9e0; font-weight:250; letter-spacing:.3em; font-size:20px}
+  .t-con .crt{background:
+      repeating-linear-gradient(0deg, rgba(0,0,0,.28) 0 1px, transparent 1px 3px),
+      radial-gradient(ellipse at 50% 30%, #221403 0%, #140b01 75%);
+    border:1px solid #43310f; border-radius:6px; padding:9px 12px;
+    font-family:Consolas,monospace; font-size:11.5px; color:#ffb642;
+    text-shadow:0 0 6px rgba(255,168,32,.5); display:flex; justify-content:space-between; gap:10px;
+    box-shadow:inset 0 0 18px rgba(255,168,32,.08)}
+  .t-con .crt b{font-weight:400; color:#ffcf7a}
+  .t-con .preset{background:#101013; border:1px solid #2c2c32; color:#a8a5ae}
+  .t-con .dial{background:radial-gradient(circle at 38% 30%,#3c3c44,#1d1d22 70%); border:2px solid #0e0e11;
+      box-shadow:0 4px 9px rgba(0,0,0,.5), inset 0 1px 0 #4a4a52}
+  .t-con .dial::after{background:#ffb642; box-shadow:0 0 7px rgba(255,168,32,.6)}
+  .t-con .k label{color:#8a8792; letter-spacing:.2em}
+  .t-con .k output{color:#ffb642; font-family:Consolas,monospace; opacity:.85}
+  .t-con .mode{border:1px solid #2c2c32; color:#8a8792}
+  .t-con .mode.on{background:#241a08; color:#ffb642; border-color:#5c4218}
+  .t-con .led{background:#ffb642; box-shadow:0 0 12px rgba(255,168,32,.85)}
+  .t-con .switch{background:linear-gradient(#33333a,#1d1d22); border:2px solid #0e0e11}
+  .t-con .switch::after{background:radial-gradient(circle at 40% 32%,#55555e,#33333a); border:1px solid #0e0e11}
+  .t-con .meter i{background:#3a3941} .t-con .meter i.hot{background:#ffb642}
+</style>
+<div class="wrap">
+  <h1>Qeynos Suite — pedal theme directions</h1>
+  <p class="intro">Four looks for the same plugin (GRIT shown on each). Every element is real UI anatomy — header with preset bar, knob row with value readouts, mode switches, meter, LED, footswitch bypass — so what you pick is what gets built, suite-wide, with one accent color per pedal.</p>
+
+  <div class="grid">
+
+    <div class="option">
+      <div class="opt-head"><b>1 · RUST</b><span>industrial warehouse — stencil type, gunmetal, hot metal accent</span></div>
+      <div class="pedal t-rust">
+        <span class="screw s1"></span><span class="screw s2"></span><span class="screw s3"></span><span class="screw s4"></span>
+        <div class="phead"><div><div class="brand">QEYNOS</div><div class="pname">GRIT</div></div>
+          <div class="preset">Kick-Driven Bass Grit <i>▾</i></div></div>
+        <div class="knobs">
+          <div class="k"><span class="dial" style="transform:rotate(40deg)"></span><label>DRIVE</label><output>8.2 dB</output></div>
+          <div class="k"><span class="dial" style="transform:rotate(-60deg)"></span><label>DEPTH</label><output>64 %</output></div>
+          <div class="k"><span class="dial" style="transform:rotate(90deg)"></span><label>FOCUS</label><output>92 Hz</output></div>
+          <div class="k"><span class="dial" style="transform:rotate(-15deg)"></span><label>ATTACK</label><output>4 ms</output></div>
+          <div class="k"><span class="dial" style="transform:rotate(120deg)"></span><label>MIX</label><output>100 %</output></div>
+        </div>
+        <div class="row2">
+          <div class="modes"><span class="mode on">ENV→DRIVE</span><span class="mode">WAVESHAPE</span><span class="mode">SC LISTEN</span></div>
+          <div class="foot">
+            <div class="meter"><i style="height:8px"></i><i style="height:14px"></i><i style="height:20px"></i><i class="hot" style="height:26px"></i><i style="height:12px"></i></div>
+            <span class="led"></span><span class="switch"></span>
+          </div>
+        </div>
+      </div>
+      <p class="why">Feels like gear that survived a warehouse. Bahnschrift stencil-adjacent type, machined knobs, amber-hot LED. The loudest personality of the four.</p>
+    </div>
+
+    <div class="option">
+      <div class="opt-head"><b>2 · VOID</b><span>afterlife minimal — hairline outlines, one ember accent, vast negative space</span></div>
+      <div class="pedal t-void">
+        <div class="phead"><div><div class="brand">QEYNOS</div><div class="pname">GRIT</div></div>
+          <div class="preset">Kick-Driven Bass Grit <i>▾</i></div></div>
+        <div class="knobs">
+          <div class="k"><span class="dial" style="transform:rotate(40deg)"></span><label>DRIVE</label><output>8.2 dB</output></div>
+          <div class="k"><span class="dial" style="transform:rotate(-60deg)"></span><label>DEPTH</label><output>64 %</output></div>
+          <div class="k"><span class="dial" style="transform:rotate(90deg)"></span><label>FOCUS</label><output>92 Hz</output></div>
+          <div class="k"><span class="dial" style="transform:rotate(-15deg)"></span><label>ATTACK</label><output>4 ms</output></div>
+          <div class="k"><span class="dial" style="transform:rotate(120deg)"></span><label>MIX</label><output>100 %</output></div>
+        </div>
+        <div class="row2">
+          <div class="modes"><span class="mode on">ENV→DRIVE</span><span class="mode">WAVESHAPE</span><span class="mode">SC LISTEN</span></div>
+          <div class="foot">
+            <div class="meter"><i style="height:8px"></i><i style="height:14px"></i><i style="height:20px"></i><i class="hot" style="height:26px"></i><i style="height:12px"></i></div>
+            <span class="led"></span><span class="switch"></span>
+          </div>
+        </div>
+      </div>
+      <p class="why">KAS:ST energy: near-black, ultra-light type tracked wide, thin-outline knobs, a single ember-red needle. Quietest and most modern; lets the music be the drama.</p>
+    </div>
+
+    <div class="option">
+      <div class="opt-head"><b>3 · CIRCUIT</b><span>digital hardware — mono type, LCD greens-teals, glowing indicators</span></div>
+      <div class="pedal t-circuit">
+        <span class="screw s1"></span><span class="screw s2"></span><span class="screw s3"></span><span class="screw s4"></span>
+        <div class="phead"><div><div class="brand">QEYNOS</div><div class="pname">GRIT</div></div>
+          <div class="preset">KICK_DRIVEN_01 <i>▾</i></div></div>
+        <div class="knobs">
+          <div class="k"><span class="dial" style="transform:rotate(40deg)"></span><label>DRIVE</label><output>8.2dB</output></div>
+          <div class="k"><span class="dial" style="transform:rotate(-60deg)"></span><label>DEPTH</label><output>64%</output></div>
+          <div class="k"><span class="dial" style="transform:rotate(90deg)"></span><label>FOCUS</label><output>92Hz</output></div>
+          <div class="k"><span class="dial" style="transform:rotate(-15deg)"></span><label>ATTACK</label><output>4ms</output></div>
+          <div class="k"><span class="dial" style="transform:rotate(120deg)"></span><label>MIX</label><output>100%</output></div>
+        </div>
+        <div class="row2">
+          <div class="modes"><span class="mode on">ENV→DRIVE</span><span class="mode">WAVESHAPE</span><span class="mode">SC LISTEN</span></div>
+          <div class="foot">
+            <div class="meter"><i style="height:8px"></i><i style="height:14px"></i><i style="height:20px"></i><i class="hot" style="height:26px"></i><i style="height:12px"></i></div>
+            <span class="led"></span><span class="switch"></span>
+          </div>
+        </div>
+      </div>
+      <p class="why">Reads as an instrument, not a pedal: terminal mono type, phosphor-teal glow, LCD preset slot. Pairs well with WIRE/CODEC-style digital plugins — maybe too techy for pads.</p>
+    </div>
+
+    <div class="option">
+      <div class="opt-head"><b>4 · GHOST</b><span>drowned pale — italic serif name, violet phosphor, soft haze</span></div>
+      <div class="pedal t-ghost">
+        <span class="screw s1"></span><span class="screw s2"></span><span class="screw s3"></span><span class="screw s4"></span>
+        <div class="phead"><div><div class="brand">QEYNOS</div><div class="pname">Grit</div></div>
+          <div class="preset">Kick-Driven Bass Grit <i>▾</i></div></div>
+        <div class="knobs">
+          <div class="k"><span class="dial" style="transform:rotate(40deg)"></span><label>DRIVE</label><output>8.2 dB</output></div>
+          <div class="k"><span class="dial" style="transform:rotate(-60deg)"></span><label>DEPTH</label><output>64 %</output></div>
+          <div class="k"><span class="dial" style="transform:rotate(90deg)"></span><label>FOCUS</label><output>92 Hz</output></div>
+          <div class="k"><span class="dial" style="transform:rotate(-15deg)"></span><label>ATTACK</label><output>4 ms</output></div>
+          <div class="k"><span class="dial" style="transform:rotate(120deg)"></span><label>MIX</label><output>100 %</output></div>
+        </div>
+        <div class="row2">
+          <div class="modes"><span class="mode on">ENV→DRIVE</span><span class="mode">WAVESHAPE</span><span class="mode">SC LISTEN</span></div>
+          <div class="foot">
+            <div class="meter"><i style="height:8px"></i><i style="height:14px"></i><i style="height:20px"></i><i class="hot" style="height:26px"></i><i style="height:12px"></i></div>
+            <span class="led"></span><span class="switch"></span>
+          </div>
+        </div>
+      </div>
+      <p class="why">The Cynthoni option: dusk-violet phosphor on a cold slate panel, italic serif nameplate against utilitarian labels. Melancholy but still legible as a tool.</p>
+    </div>
+
+  </div>
+
+  <h2 class="batch">Batch 2 — terminal directions <span style="opacity:.5">(VOID × CIRCUIT × Fallout amber)</span></h2>
+  <p class="batchsub">You liked 2 and 3 and asked for Fallout-4-terminal energy. Three takes on amber phosphor, from full CRT commitment to quiet restraint. Scanlines and glow are all drawable in the plugin's native renderer — nothing here is mockup-only.</p>
+
+  <div class="grid">
+
+    <div class="option">
+      <div class="opt-head"><b>5 · TERMINAL</b><span>full RobCo — amber phosphor CRT, scanlines, flicker, "&gt; GRIT"</span></div>
+      <div class="pedal t-fall">
+        <span class="screw s1"></span><span class="screw s2"></span><span class="screw s3"></span><span class="screw s4"></span>
+        <div class="phead"><div><div class="brand">QEYNOS INDUSTRIES (TM) TERMLINK</div><div class="pname">GRIT</div></div>
+          <div class="preset">KICK_DRIVEN_BASS.PST <i>▾</i></div></div>
+        <div class="knobs">
+          <div class="k"><span class="dial" style="transform:rotate(40deg)"></span><label>DRIVE</label><output>8.2dB</output></div>
+          <div class="k"><span class="dial" style="transform:rotate(-60deg)"></span><label>DEPTH</label><output>64%</output></div>
+          <div class="k"><span class="dial" style="transform:rotate(90deg)"></span><label>FOCUS</label><output>92Hz</output></div>
+          <div class="k"><span class="dial" style="transform:rotate(-15deg)"></span><label>ATTACK</label><output>4ms</output></div>
+          <div class="k"><span class="dial" style="transform:rotate(120deg)"></span><label>MIX</label><output>100%</output></div>
+        </div>
+        <div class="row2">
+          <div class="modes"><span class="mode on">[ENV→DRIVE]</span><span class="mode">[WAVESHAPE]</span><span class="mode">[SC LISTEN]</span></div>
+          <div class="foot">
+            <div class="meter"><i style="height:8px"></i><i style="height:14px"></i><i style="height:20px"></i><i class="hot" style="height:26px"></i><i style="height:12px"></i></div>
+            <span class="led"></span><span class="switch"></span>
+          </div>
+        </div>
+      </div>
+      <p class="why">Full commitment: everything lives inside the CRT — scanlines across the whole face, phosphor glow on every element, occasional flicker. Unmistakable, but the most visually loud over a 20-plugin suite.</p>
+    </div>
+
+    <div class="option">
+      <div class="opt-head"><b>6 · VOID//TERM</b><span>VOID's restraint, amber phosphor accents, mono everything</span></div>
+      <div class="pedal t-vt">
+        <div class="phead"><div><div class="brand">QEYNOS</div><div class="pname">GRIT</div></div>
+          <div class="preset">kick_driven_bass ▾</div></div>
+        <div class="knobs">
+          <div class="k"><span class="dial" style="transform:rotate(40deg)"></span><label>drive</label><output>8.2dB</output></div>
+          <div class="k"><span class="dial" style="transform:rotate(-60deg)"></span><label>depth</label><output>64%</output></div>
+          <div class="k"><span class="dial" style="transform:rotate(90deg)"></span><label>focus</label><output>92Hz</output></div>
+          <div class="k"><span class="dial" style="transform:rotate(-15deg)"></span><label>attack</label><output>4ms</output></div>
+          <div class="k"><span class="dial" style="transform:rotate(120deg)"></span><label>mix</label><output>100%</output></div>
+        </div>
+        <div class="row2">
+          <div class="modes"><span class="mode on">env→drive</span><span class="mode">waveshape</span><span class="mode">sc listen</span></div>
+          <div class="foot">
+            <div class="meter"><i style="height:8px"></i><i style="height:14px"></i><i style="height:20px"></i><i class="hot" style="height:26px"></i><i style="height:12px"></i></div>
+            <span class="led"></span><span class="switch"></span>
+          </div>
+        </div>
+      </div>
+      <p class="why">The hybrid you described: VOID's near-black emptiness and hairline knobs, but all type goes mono-terminal and every readout burns amber. No scanlines — the phosphor glow alone carries the terminal feel. Cleanest at scale.</p>
+    </div>
+
+    <div class="option">
+      <div class="opt-head"><b>7 · CONSOLE</b><span>matte hardware pedal with an embedded CRT readout strip</span></div>
+      <div class="pedal t-con">
+        <span class="screw s1"></span><span class="screw s2"></span><span class="screw s3"></span><span class="screw s4"></span>
+        <div class="phead"><div><div class="brand">QEYNOS</div><div class="pname">GRIT</div></div>
+          <div class="preset">Kick-Driven Bass Grit ▾</div></div>
+        <div class="crt"><span>&gt; SC:ACTIVE&nbsp; THD:+12.4%&nbsp; GR:-3.1dB</span><b>ENV→DRIVE</b></div>
+        <div class="knobs">
+          <div class="k"><span class="dial" style="transform:rotate(40deg)"></span><label>DRIVE</label><output>8.2dB</output></div>
+          <div class="k"><span class="dial" style="transform:rotate(-60deg)"></span><label>DEPTH</label><output>64%</output></div>
+          <div class="k"><span class="dial" style="transform:rotate(90deg)"></span><label>FOCUS</label><output>92Hz</output></div>
+          <div class="k"><span class="dial" style="transform:rotate(-15deg)"></span><label>ATTACK</label><output>4ms</output></div>
+          <div class="k"><span class="dial" style="transform:rotate(120deg)"></span><label>MIX</label><output>100%</output></div>
+        </div>
+        <div class="row2">
+          <div class="modes"><span class="mode on">ENV→DRIVE</span><span class="mode">WAVESHAPE</span><span class="mode">SC LISTEN</span></div>
+          <div class="foot">
+            <div class="meter"><i style="height:8px"></i><i style="height:14px"></i><i style="height:20px"></i><i class="hot" style="height:26px"></i><i style="height:12px"></i></div>
+            <span class="led"></span><span class="switch"></span>
+          </div>
+        </div>
+      </div>
+      <p class="why">Physical pedal, digital soul: matte panel and machined knobs stay tactile, while a real amber CRT strip (scanlines live only inside it) shows telemetry — sidechain state, THD, gain reduction, detected pitch, whatever each plugin knows. Best information-per-pixel of the seven.</p>
+    </div>
+
+  </div>
+
+  <h2 class="batch">Batch 3 — CONSOLE, developed</h2>
+  <p class="batchsub">Theme 7 pushed to a real object: Hammond-style enclosure with machined depth, recessed screen bay with mounting screws, curved-glass amber CRT (scanlines and glare live only inside the glass), tick-ringed machined knobs, jack furniture, and a proper footswitch with a hex collar. Shown twice — a workhorse effect, and OVERSEER Master where the terminal earns its keep.</p>
+
+  <div class="stage">
+
+    <div class="pedal2">
+      <span class="screw2" style="top:11px;left:11px"></span><span class="screw2" style="top:11px;right:11px"></span>
+      <span class="screw2" style="bottom:11px;left:11px"></span><span class="screw2" style="bottom:11px;right:11px"></span>
+      <div class="p2h">
+        <div><div class="brand2">QEYNOS AUDIO INDUSTRIES</div><div class="name2">GRIT</div></div>
+        <div class="ser">MODEL QA-01<br>SIDECHAIN DISTORTION</div>
+      </div>
+      <div class="crtshell">
+        <div class="crt2"><span class="dim">QEYNOS TERMLINK v2.1 — UNIT:GRIT</span><br>
+<span class="rule">──────────────────────────────────────────</span><br>
+SC&nbsp;&nbsp;: <span class="hot2">ACTIVE</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;MODE: ENV→DRIVE<br>
+THD : +12.4%&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;GR&nbsp;&nbsp;: −3.1 dB<br>
+ENV&nbsp;<span class="bar">▁▂▄▆█▆▄▂▁▂▄▆█▇▅▃▂▁▂▃▅▇█▆▄▂▁</span>&nbsp;<span class="hot2">64%</span><br>
+&gt; <span class="cursor"></span></div>
+      </div>
+      <div class="knobs2">
+        <div class="k2"><span class="dialwrap"><span class="tick"></span></span><span class="dial2" style="transform:rotate(40deg)"></span><label>DRIVE</label><output>8.2 dB</output></div>
+        <div class="k2"><span class="dialwrap"><span class="tick"></span></span><span class="dial2" style="transform:rotate(-60deg)"></span><label>DEPTH</label><output>64%</output></div>
+        <div class="k2"><span class="dialwrap"><span class="tick"></span></span><span class="dial2" style="transform:rotate(90deg)"></span><label>FOCUS</label><output>92 Hz</output></div>
+        <div class="k2"><span class="dialwrap"><span class="tick"></span></span><span class="dial2" style="transform:rotate(-15deg)"></span><label>ATTACK</label><output>4 ms</output></div>
+        <div class="k2"><span class="dialwrap"><span class="tick"></span></span><span class="dial2" style="transform:rotate(120deg)"></span><label>MIX</label><output>100%</output></div>
+      </div>
+      <div class="base2">
+        <div class="jack"><span>IN&nbsp;&nbsp;<i></i></span><span>SC&nbsp;&nbsp;<i></i></span></div>
+        <div class="fs2wrap"><span class="led2"></span><span class="fs2"></span></div>
+        <div class="jack" style="text-align:right;align-items:flex-end"><span><i></i>&nbsp;&nbsp;OUT L</span><span><i></i>&nbsp;&nbsp;OUT R</span></div>
+      </div>
+    </div>
+    <p class="cap">GRIT as hardware: the CRT shows live telemetry (sidechain state, THD, gain reduction, an envelope trace) — things the plugin already measures for its own tests.</p>
+
+    <div class="pedal2">
+      <span class="screw2" style="top:11px;left:11px"></span><span class="screw2" style="top:11px;right:11px"></span>
+      <span class="screw2" style="bottom:11px;left:11px"></span><span class="screw2" style="bottom:11px;right:11px"></span>
+      <div class="p2h">
+        <div><div class="brand2">QEYNOS AUDIO INDUSTRIES</div><div class="name2">OVERSEER</div></div>
+        <div class="ser">MODEL QA-05M<br>MASTER CONSOLE</div>
+      </div>
+      <div class="crtshell">
+        <div class="crt2"><span class="dim">QEYNOS TERMLINK v2.1 — UNIT:OVERSEER·MASTER</span><br>
+<span class="rule">──────────────────────────────────────────</span><br>
+LEARN COMPLETE — THEME: <span class="hot2">DARK TECHNO</span> (87%)<br>
+01 KICK&nbsp;<span class="bar">▮▮▮▮▮▮▮</span>&nbsp; 02 RUMBLE&nbsp;<span class="bar">▮▮▮▮▮</span>&nbsp; 03 BASS&nbsp;<span class="bar">▮▮▮▮</span><br>
+04 PERC&nbsp;<span class="bar">▮▮▮</span>&nbsp;&nbsp;&nbsp;&nbsp;05 VOX&nbsp;<span class="bar">▮▮▮▮▮▮</span>&nbsp;&nbsp; 06 PAD&nbsp;<span class="bar">▮▮</span><br>
+SUGGEST: KICK −2dB@250&nbsp;·&nbsp;PAD +WIDTH&nbsp;·&nbsp;BUS GLUE 2:1<br>
+−9.8 LUFS&nbsp;&nbsp;GR −2.4&nbsp;&nbsp;<span class="hot2">ASSIST 30%</span>&nbsp;&gt; <span class="cursor"></span></div>
+      </div>
+      <div class="knobs2">
+        <div class="k2"><span class="dialwrap"><span class="tick"></span></span><span class="dial2" style="transform:rotate(-30deg)"></span><label>EQ TILT</label><output>+0.5</output></div>
+        <div class="k2"><span class="dialwrap"><span class="tick"></span></span><span class="dial2" style="transform:rotate(20deg)"></span><label>GLUE</label><output>2.1:1</output></div>
+        <div class="k2"><span class="dialwrap"><span class="tick"></span></span><span class="dial2" style="transform:rotate(70deg)"></span><label>DRIVE</label><output>1.8 dB</output></div>
+        <div class="k2"><span class="dialwrap"><span class="tick"></span></span><span class="dial2" style="transform:rotate(-80deg)"></span><label>ASSIST</label><output>30%</output></div>
+        <div class="k2"><span class="dialwrap"><span class="tick"></span></span><span class="dial2" style="transform:rotate(105deg)"></span><label>CEILING</label><output>−1.0</output></div>
+      </div>
+      <div class="base2">
+        <div class="jack"><span>LEARN&nbsp;&nbsp;<i></i></span></div>
+        <div class="fs2wrap"><span class="led2"></span><span class="fs2"></span></div>
+        <div class="jack" style="text-align:right;align-items:flex-end"><span><i></i>&nbsp;&nbsp;BYPASS</span></div>
+      </div>
+    </div>
+    <p class="cap">OVERSEER Master: the terminal is the theme-inference readout — learned theme, per-node types with levels, the three biggest suggested moves, LUFS. The Learn button lives on the pedal face.</p>
+
+  </div>
+
+  <div class="pick">Final call: <b>CONSOLE v2</b> as shown, or tweaks (screen bigger/smaller, green phosphor option, more/less flicker)? Amber stays the identity; per-plugin accent tints ride on the panel, not the phosphor. PEDAL-UI stays endgame; the loop keeps shipping DSP meanwhile.</div>
+</div>

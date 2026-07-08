@@ -187,15 +187,16 @@ impl Plugin for Template {
                         } else {
                             String::from("-inf dBFS")
                         };
-                        // Map -60..0 dBFS to 0..1.
-                        let norm = ((peak_db + 60.0) / 60.0).clamp(0.0, 1.0);
-                        ui.label(
-                            egui::RichText::new("PEAK").color(suite_core::ui::TEXT_DIM).small(),
-                        );
-                        ui.add(
-                            egui::widgets::ProgressBar::new(norm)
-                                .fill(suite_core::ui::ACCENT)
-                                .text(peak_text),
+                        // CONSOLE v2 CRT telemetry bay (the reference crate demonstrates the
+                        // pattern): live peak + gain in amber terminal style. THEME-OFF ⇒ plain.
+                        suite_core::ui::crt_lines(
+                            ui,
+                            "template-crt",
+                            "TEMPLATE",
+                            &[
+                                ("PEAK", peak_text),
+                                ("GAIN", params.gain.to_string()),
+                            ],
                         );
                     });
             },

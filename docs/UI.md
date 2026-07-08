@@ -85,3 +85,52 @@ shared code — only the user's corner-drag changes the window size. So the size
 snaps the **zoom of the current window**; it cannot grow the OS window on its own. To get
 a larger physical window at a snapped zoom, drag the corner (it snaps to the stops). This
 is recorded in `DEFERRED.md`.
+
+## CONSOLE v2 theme (PEDAL-UI)
+
+The suite-wide skin is **CONSOLE v2** — a "console inside a pedal": a machined hardware-pedal
+enclosure wrapped around a recessed **amber-CRT telemetry bay**. It is **paint only**: every
+interaction above (knob drag / fine-drag / reset / scroll / click-to-type, uniform scaling,
+PresetBar, MOD section, the `?` manual) is byte-identical to the plain theme — CONSOLE re-skins
+the widgets, it never changes an interaction rule. All of it lives in `suite-core/src/ui.rs`
+as cheap egui vector painting (no image assets — the suite stays self-contained).
+
+**How it hooks in (why the retrofit is nearly zero-touch):** every editor already funnels
+through `ScaledWindow::show`, `apply_theme`, and the shared `labeled_slider`/toggle widgets.
+`ScaledWindow` derives the plugin **slug** from its window id (`qeynos-<slug>-window`), resolves
+that plugin's theme prefs, paints the enclosure behind the content, and publishes the effective
+`(console, crt_motion)` state on a per-frame egui-memory channel. The paint helpers
+(`knob_face`, `toggle_control`, `crt_frame`) read that channel, so a plugin that only calls
+`labeled_slider` is re-skinned with **no edits**. The only per-plugin addition is an optional
+`crt_lines`/`crt_frame` call to place that plugin's telemetry/visualization into the CRT bay.
+
+**Pieces:**
+- **Enclosure** — dark machined body, an amber brand strip, top-highlight/bottom-shadow bevel,
+  and four corner screws (`paint_enclosure`, ~14 primitives/frame).
+- **CRT bay** — `crt_frame(ui, id, height, add_contents)` gives a recessed bronze-black glass
+  panel with faint **static scanlines** and (motion on) a **blinking cursor**; the plugin paints
+  amber monospace text / meters / scopes inside. `crt_lines(ui, id, title, &[(label, value)])`
+  is the convenience for a titled terminal readout, used by every plugin without a dedicated
+  scope. The values shown are honest live state that ALSO appear on the knobs.
+- **Knobs** — a tick-ring collar + machined cap (paint only; the widget's hit-testing/value
+  logic is untouched). Values stay plain crisp text below the knob (no glow on digits).
+- **Toggles** — footswitch-style cap with an amber **LED** when engaged.
+
+**Usability guardrails (SPECS PEDAL-UI — these override aesthetics):**
+1. Values are always readable plain text on the knob; no glow blurs digits.
+2. **CRT motion (scanline drift / cursor blink) is toggleable and OFF-able**, persisted per
+   plugin. System/host reduced-motion is not reliably detectable under baseview, so this reduces
+   to the explicit per-plugin toggle.
+3. The CRT is **additive** — every value in it is also on a knob; nothing operable lives only in
+   the screen.
+4. UI-CORE-FIX interactions are untouchable (paint only).
+5. Contrast: phosphor `#ffb000` on the glass ≈ 13:1 (body ≥ 4.5:1); dim phosphor ≈ 5.4:1
+   (labels ≥ 3:1).
+6. Effects are cheap painter ops; the cursor requests only a slow (~8 fps) repaint, so idle GUIs
+   stay cheap.
+
+**Settings + THEME-OFF fallback:** the top-right **size menu** (the `NN%` button) gains a THEME
+section with **Console skin** and **CRT motion** checkboxes. Both persist per plugin in one
+suite-wide file `[MyDocuments]/Qeynos/ui_prefs.json` (keyed by slug — no plugin Params struct
+changes). Turning **Console skin** off reverts that plugin wholesale to the plain minimal-dark
+look (one code-path switch) for emergency legibility. Defaults: Console **on**, CRT motion **on**.

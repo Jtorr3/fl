@@ -388,6 +388,29 @@ impl Plugin for Grit {
                         );
                         ui.separator();
 
+                        // CONSOLE v2 CRT telemetry bay — honest live state (the same values
+                        // shown on the knobs below; GUI-thread reads only, process() untouched).
+                        // In THEME-OFF this degrades to a plain readout panel.
+                        suite_core::ui::crt_lines(
+                            ui,
+                            "grit-crt",
+                            "GRIT · SC DIST",
+                            &[
+                                ("MODE", format!("{} · {}", params.mode, params.shape)),
+                                ("DRIVE", format!("{} · depth {}", params.drive, params.depth)),
+                                (
+                                    "SC",
+                                    format!(
+                                        "{} · a-gain {}",
+                                        if params.sc_listen.value() { "LISTEN" } else { "mix" },
+                                        if params.auto_gain.value() { "on" } else { "off" },
+                                    ),
+                                ),
+                                ("OUT", format!("mix {} · {}", params.mix, params.out)),
+                            ],
+                        );
+                        ui.add_space(4.0);
+
                         egui::ScrollArea::vertical().show(ui, |ui| {
                             use suite_core::ui::labeled_slider as row;
                             egui::Grid::new("grit-params")
