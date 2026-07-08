@@ -69,7 +69,14 @@
       it phase-aligned with dry sibling tracks. Also sanity-check OVERSEER Node at partial
       MIX. (Latency/alignment is asserted offline; the FL listen is the human confirmation.)
 - [ ] FL Studio: Options → Manage plugins → "Find more plugins" after new installs
-      (FL never auto-detects new plugins).
+      (FL never auto-detects new plugins). NEW: **Qeynos SEANCE** (ethereal vocal machine).
+- [ ] SEANCE GUI/listen: add on a vocal/lead/pad; try presets (Grief Pad Vox, Drowned
+      Lead, Whisper Choir, Formant Ghost, Chopped Ether, Sunken Chorus); confirm Pitch/
+      Formant move independently, chopper locks to tempo, and the ducker swells between
+      phrases. Host should auto-comp +2048-sample latency. Renders in renders/SEANCE/.
+- [ ] Freeze Mix spot-check (EMBER / MURMUR / OUROBOROS / SWARM): engage FREEZE, then
+      pull the new FREEZE MIX slider below 100% — the live source should blend back in
+      under the frozen tail (100% = the previous instant-freeze behavior). GUI-only add.
 - [ ] Audition `renders/<plugin>/*.wav` — automated assertions check math, not taste.
 - [ ] Spot-check each plugin GUI inside FL (OpenGL/DPI quirks aren't machine-testable).
 - [ ] Delete the orphaned GitHub repo Jtorr3/qeynos-vst-suite (my token lacks
