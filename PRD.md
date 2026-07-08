@@ -372,7 +372,19 @@ forward to after HARD CHECKPOINT 2 — see above)
   `build.ps1 -All` GREEN 30/30, 0 gate failures. Suite complete — all §7 items ticked.
 
 POST-COMPLETION verification (user directive 2026-07-08 PM)
-- [ ] SOUND-PASS ("listen to all plugins and make improvements to the sound of each.
+- [x] SOUND-PASS (2026-07-08): all 27 audible plugins auditioned over musical sources +
+  improved; verdicts in docs/SOUND-PASS.md; before/after WAVs in renders/_audition/.
+  Real DSP fixes: FDN metallic-ringing (MURMUR −53%/CHAMBER −36%/SEANCE −30% via
+  fractional-delay modulation), high-f0 vocal formant combing (shift.rs adaptive lifter,
+  sewer_choir −1.2→−38.8 dB), IMPACT+SNAP full bank re-authoring (user "completely
+  useless" → archetype-driven, judged on output audio), OVERSEER deep-dive (limiter
+  true-peak, comp attack, classifier, ENRICH — judged as a paid Ozone competitor),
+  TRACER DC, WIRE re-entry click, HALT tape-stop DC, SHAPESHIFT Cheby-3 hole, DRIFT/
+  PATINA headroom+phasing, CLEAVE wrap/slice clicks + corrected its flawed test. The
+  consolidated final sweep caught a cross-agent SEANCE SIZE-sweep click (mod-depth
+  capped). NERVE + X-RAY excluded (passthrough utilities, no audio to judge). Final:
+  cargo test --workspace GREEN + build.ps1 -All GREEN 30/30, 0 gate failures.
+  ("listen to all plugins and make improvements to the sound of each.
   Ask yourself; does this warrant being used in an actual song? Is this good?").
   Method (no human ears in the loop — analysis stands in, user auditions last):
   (1) INFRA: tools/audition.py — producer-relevant analysis of WAVs (LUFS-I/true peak/
