@@ -329,7 +329,7 @@ is the shared core, built immediately before)
   rewritten to describe the real voxrip_separate.py + PEP 723 CPU-pin mechanism), 2 findings refuted.
 
 Pulled forward from POLISH (user priority 2026-07-07):
-- [ ] PRESET-SYSTEM (suite-wide user preset save/load + retrofit all plugins)
+- [x] PRESET-SYSTEM (suite-wide user preset save/load + retrofit all plugins)
 - [ ] OVERSEER-ENRICH (per-Node instrument type context + thematic preset banks)
 
 Phase 2b — remaining clones
