@@ -33,6 +33,12 @@ const WEIGHT_UPDATE: usize = 2048;
 
 const PI: f32 = std::f32::consts::PI;
 
+/// Glide time (ms) for a live retune of the loop length. When the target chord/scale/root (or
+/// a held MIDI chord) changes while a string is ringing, the delay-length target moves and the
+/// read length slews toward it over this time instead of jumping — a jump zips/clicks the tail.
+/// The FIRST tuning of each resonator snaps (no ringing to protect); only live retunes glide.
+const RETUNE_GLIDE_MS: f32 = 25.0;
+
 /// Lowest resonator's anchor MIDI note before the root offset / octave spread (C2 = 36).
 pub const BASE_MIDI: i32 = 36;
 /// The bank spreads across at most this many octaves; past it the pitches wrap back down and
@@ -228,7 +234,9 @@ struct Resonator {
     damp_z: f32,
     ap_x1: f32,
     ap_y1: f32,
-    delay_read: f32,
+    delay_read: f32,   // the length actually read (glides toward `delay_target`)
+    delay_target: f32, // the solved loop length for the current tuning (−1 = never tuned)
+    glide_coef: f32,   // one-pole slew coefficient for delay_read → delay_target
     s_damp: f32,
     c_ap: f32,
     feedback: f32,
@@ -244,6 +252,8 @@ impl Resonator {
             ap_x1: 0.0,
             ap_y1: 0.0,
             delay_read: 200.0,
+            delay_target: -1.0,
+            glide_coef: 1.0,
             s_damp: 0.2,
             c_ap: 0.0,
             feedback: 0.99,
@@ -258,6 +268,8 @@ impl Resonator {
         self.ap_x1 = 0.0;
         self.ap_y1 = 0.0;
         self.env = 0.0;
+        // The buffer is now silent (no ringing to protect) → let the next tuning snap.
+        self.delay_target = -1.0;
     }
     /// Solve the loop for `freq` (PLUCK's cent-accurate tuning: total loop delay == period).
     fn tune(&mut self, freq: f32, sr: f32, s_damp: f32, feedback: f32) {
@@ -267,11 +279,27 @@ impl Resonator {
         let p_ap = (1.0 - self.c_ap) / (1.0 + self.c_ap);
         let period = sr / freq.max(20.0);
         let p_damp = self.s_damp;
-        self.delay_read = (period - p_damp - p_ap).clamp(2.0, (MAX_DELAY - 4) as f32);
+        let target = (period - p_damp - p_ap).clamp(2.0, (MAX_DELAY - 4) as f32);
+        // First tuning snaps (nothing ringing yet); later live retunes glide via `process`.
+        if self.delay_target < 0.0 {
+            self.delay_read = target;
+        }
+        self.delay_target = target;
+        // One-pole slew coefficient for a ~RETUNE_GLIDE_MS glide, recomputed from sr.
+        self.glide_coef = 1.0 - (-1.0 / (RETUNE_GLIDE_MS * 0.001 * sr).max(1.0)).exp();
         self.feedback = feedback.clamp(0.0, 0.99995);
     }
     #[inline]
     fn process(&mut self, exc: f32) -> f32 {
+        // Glide the loop length toward its target (portamento) so a live retune of a ringing
+        // string does not snap the delay tap and zip/click the sustaining tail.
+        let dt = self.delay_target - self.delay_read;
+        if dt != 0.0 {
+            self.delay_read += self.glide_coef * dt;
+            if (self.delay_target - self.delay_read).abs() < 1.0e-3 {
+                self.delay_read = self.delay_target;
+            }
+        }
         let delayed = self.frac.read(self.delay_read);
         // One-pole (2-tap) damping low-pass in the loop.
         let lp = (1.0 - self.s_damp) * delayed + self.s_damp * self.damp_z;

@@ -481,8 +481,10 @@ mod render_tests {
             }
         }
         // Keep the summed dry kick well below 0 dBFS so dry + rumble stays inside the ceiling.
+        // (0.20, not 0.22: the DC-blocker fix now preserves the generated sub instead of
+        // shaving ~2 dB off it, so the rumble rides a touch hotter and needs the extra headroom.)
         for v in buf.iter_mut() {
-            *v = (*v * 0.22).clamp(-0.999, 0.999);
+            *v = (*v * 0.20).clamp(-0.999, 0.999);
         }
         buf
     }

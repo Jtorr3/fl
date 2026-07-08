@@ -1513,20 +1513,33 @@ impl Plugin for OverseerMaster {
         if self.lufs_reset.swap(false, Ordering::Relaxed) {
             self.core.reset_lufs();
         }
-        // Publish transport tempo for theme inference (GUI-thread consumer).
+        // Publish transport tempo for theme inference.
         let tempo = context.transport().tempo.unwrap_or(0.0) as f32;
         self.shared.set_tempo(tempo);
 
+        // OVERSEER-ENRICH: compute the assist targets HERE, on the audio thread, every block —
+        // so ASSIST works whether or not the Master editor is open (it was previously computed
+        // only in the editor tick, leaving the audio thread on stale/absent targets). The
+        // editor now only DISPLAYS these. `theme_lock` is read non-blockingly (try_read).
+        let locked = self
+            .params
+            .theme_lock
+            .try_read()
+            .ok()
+            .filter(|t| t.locked)
+            .map(|t| SessionTheme::from_index(t.theme));
+        self.core.update_assist(tempo, locked);
+
         let base = self.params.snapshot();
-        // OVERSEER-ENRICH assist: scale the theme-derived nudges by the assist strength (0 =
-        // display only; SUGGEST-ONLY forces 0). apply_assist is BIT-EXACT identity at 0, so
-        // assist=0 changes nothing in the audio path (the done-bar null test).
+        // Scale the theme-derived nudges by the assist strength (0 = display only; SUGGEST-ONLY
+        // forces 0). apply_assist is BIT-EXACT identity at 0, so assist=0 changes nothing in the
+        // audio path (the done-bar null test).
         let strength = if self.params.suggest_only.value() {
             0.0
         } else {
             self.params.assist.value()
         };
-        let s = apply_assist(&base, &self.shared.assist_targets(), strength);
+        let s = apply_assist(&base, &self.core.assist_targets(), strength);
         self.core.configure(&s);
         let main = buffer.as_slice();
         if main.len() >= 2 {
@@ -1793,6 +1806,83 @@ mod tests {
         let out: Vec<f32> = l[lat..].to_vec();
         let resid = null_residual_db(&delayed, &out);
         assert!(resid < -80.0, "node mix=0 residual {resid:.1} dB >= -80");
+    }
+
+    /// OVERSEER MINOR (node.rs): DRIVE at its floor (0 dB) must bypass the saturation stage
+    /// EXACTLY — a `tanh(x)/1` curve at 0 dB still colors, so the strip could never run clean.
+    /// With a neutral strip (flat EQ, inactive comp, unity width/trim, full wet) the output at
+    /// the DRIVE floor equals the input through the same latency path; with DRIVE up it colors.
+    #[test]
+    fn node_drive_floor_bypasses_saturation_exactly() {
+        let meters = Arc::new(NodeMeters::default());
+        let slot = bus::bus().register("SATBYP");
+        let mut node = NodeCore::new(SR, slot, meters);
+
+        let mut s = NodeSettings::default();
+        s.eq = EqSettings::default(); // flat → identity
+        s.comp_threshold = 60.0; // far above any signal → comp inactive (g = 1)
+        s.comp_ratio = 1.0;
+        s.comp_makeup = 0.0;
+        s.drive_db = 0.0; // FLOOR → exact bypass
+        s.width = 1.0;
+        s.trim_db = 0.0;
+        s.mix = 1.0;
+
+        // A hot kick: the sat coloration (~2 dB peak compression) would show plainly if present.
+        let dry = testsig::synth_kick_stub((SR * 1.0) as usize, SR);
+        let mut l = dry.clone();
+        let mut r = dry.clone();
+        node.configure(&s);
+        let lat = node.latency_samples() as usize;
+        node.process_block(&mut l, &mut r);
+
+        let m = dry.len() - lat;
+        let delayed: Vec<f32> = dry[..m].to_vec();
+        let out: Vec<f32> = l[lat..].to_vec();
+        let resid = null_residual_db(&delayed, &out);
+        // The sat bypass is bit-exact (a latency-matched DelayLine tap); the residual floor
+        // here (~-98 dB) is the flat 4-biquad EQ's own ~ULP identity error on the wet path,
+        // NOT the saturation stage. Either way it sits ~40 dB below any sat coloration.
+        assert!(
+            resid < -96.0,
+            "DRIVE floor did not bypass saturation exactly: residual {resid:.1} dB (want < -96)"
+        );
+
+        // Sanity: DRIVE up DOES color (the stage is real, not disabled).
+        let meters2 = Arc::new(NodeMeters::default());
+        let slot2 = bus::bus().register("SATON");
+        let mut node2 = NodeCore::new(SR, slot2, meters2);
+        s.drive_db = 12.0;
+        let mut l2 = dry.clone();
+        let mut r2 = dry.clone();
+        node2.configure(&s);
+        node2.process_block(&mut l2, &mut r2);
+        let out2: Vec<f32> = l2[lat..].to_vec();
+        let resid2 = null_residual_db(&delayed, &out2);
+        assert!(
+            resid2 > -60.0,
+            "DRIVE=12 dB should color vs the dry input (residual {resid2:.1} dB)"
+        );
+    }
+
+    /// OVERSEER MINOR (lib.rs/master.rs): the Master computes ENRICH assist targets on the
+    /// AUDIO thread — with NO editor open — so ASSIST is not silently dependent on the GUI. A
+    /// locked theme resolves to its full-strength targets straight from `update_assist`.
+    #[test]
+    fn master_assist_targets_computed_on_audio_thread() {
+        let mut core = new_master();
+        // Default (no update yet) → neutral targets.
+        assert_eq!(core.assist_targets(), crate::enrich::AssistTargets::default());
+        // Audio-thread update with a locked theme (the editor never opened).
+        core.update_assist(128.0, Some(SessionTheme::DarkTechno));
+        assert_eq!(
+            core.assist_targets(),
+            theme_assist_targets(SessionTheme::DarkTechno),
+            "audio-thread update_assist did not produce the locked theme's targets"
+        );
+        // And it published them to the shared state the editor reads for display.
+        let (t, _c) = core.shared().theme();
+        assert_eq!(t, SessionTheme::DarkTechno);
     }
 
     /// MAJOR 3 done-bar: a mid-buffer step change in trim / mix / EQ gain must be smoothed

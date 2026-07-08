@@ -23,6 +23,11 @@ const CTRL_CHUNK: usize = 32;
 /// intent of the params' `SmoothingStyle::Linear(20.0)`.
 const SMOOTH_MS: f32 = 20.0;
 
+/// DRIVE floor (dB) — the param's minimum. At exactly this value the saturation stage is
+/// bypassed bit-exactly (a `tanh(x)/1` curve at drive=0 dB still colors; the strip must be
+/// runnable perfectly clean).
+const DRIVE_FLOOR_DB: f32 = 0.0;
+
 #[inline]
 fn db_to_lin(db: f32) -> f32 {
     10f32.powf(db / 20.0)
@@ -128,6 +133,9 @@ pub struct NodeCore {
     // Dry-path latency compensation for the oversampled saturation stage (keeps partial
     // mix free of comb filtering); reported to the host as latency.
     dry_delay: [DelayLine; 2],
+    // Latency-matched tap of the pre-saturation signal, used to bypass the sat stage exactly
+    // at the DRIVE floor (aligned with the oversampler group delay so nothing shifts).
+    sat_bypass: [DelayLine; 2],
     latency: usize,
 
     // --- Param smoothing (MAJOR 3) --------------------------------------------------
@@ -144,6 +152,9 @@ pub struct NodeCore {
     sm_high_gain: OnePole,
     sm_threshold: OnePole,
     sm_makeup: OnePole,
+    /// Saturation engage amount (0 at the DRIVE floor → exact bypass, 1 above). Smoothed so a
+    /// live drive sweep across the floor crossfades instead of stepping.
+    sm_sat: OnePole,
     /// Resolved (post-override) target settings for this block.
     tgt: NodeSettings,
     /// Snap smoothers to their targets on the first configure after (re)construction/reset.
@@ -170,6 +181,7 @@ impl NodeCore {
             meters,
             extractor: FeatureExtractor::new(fs),
             dry_delay: [DelayLine::new(latency), DelayLine::new(latency)],
+            sat_bypass: [DelayLine::new(latency), DelayLine::new(latency)],
             latency,
             sm_drive: sm(),
             sm_width: sm(),
@@ -181,6 +193,7 @@ impl NodeCore {
             sm_high_gain: sm(),
             sm_threshold: sm(),
             sm_makeup: sm(),
+            sm_sat: sm(),
             tgt: NodeSettings::default(),
             primed: false,
         }
@@ -206,6 +219,9 @@ impl NodeCore {
         for d in self.dry_delay.iter_mut() {
             d.reset();
         }
+        for d in self.sat_bypass.iter_mut() {
+            d.reset();
+        }
         self.lufs.reset();
         self.extractor.reset();
         self.primed = false;
@@ -222,6 +238,8 @@ impl NodeCore {
         self.sm_high_gain.reset(self.tgt.eq.high_gain);
         self.sm_threshold.reset(self.tgt.comp_threshold);
         self.sm_makeup.reset(self.tgt.comp_makeup);
+        self.sm_sat
+            .reset(if self.tgt.drive_db > DRIVE_FLOOR_DB { 1.0 } else { 0.0 });
     }
 
     /// Resolve overrides, latch the per-block targets, and mirror the effective key params
@@ -323,6 +341,10 @@ impl NodeCore {
                 let width = self.sm_width.process(self.tgt.width);
                 let trim = db_to_lin(self.sm_trim.process(self.tgt.trim_db));
                 let mix = self.sm_mix.process(self.tgt.mix).clamp(0.0, 1.0);
+                // Saturation engage amount: 0 at the DRIVE floor (exact bypass), 1 above.
+                let sat_amt = self
+                    .sm_sat
+                    .process(if self.tgt.drive_db > DRIVE_FLOOR_DB { 1.0 } else { 0.0 });
                 // Advance the coefficient smoothers per sample so the next chunk's recompute
                 // sees continuous progress (32-sample-granular EQ/comp smoothing).
                 self.sm_low_gain.process(self.tgt.eq.low_gain);
@@ -352,9 +374,17 @@ impl NodeCore {
                 wr *= g;
                 gr_min = gr_min.min(self.comp.gain_reduction_db());
 
-                // Saturation — 2x oversampled, level-preserving tanh (drive smoothed).
-                wl = self.sat_os[0].process(wl, |x| (x * drive).tanh() / drive);
-                wr = self.sat_os[1].process(wr, |x| (x * drive).tanh() / drive);
+                // Saturation — 2x oversampled, level-preserving tanh (drive smoothed). At the
+                // DRIVE floor the stage is bypassed EXACTLY: crossfade against a latency-matched
+                // tap of the pre-sat signal, so drive=0 dB colors nothing (and a live drive
+                // sweep across the floor still transitions without a step). The oversampler runs
+                // regardless so its state stays warm for re-engagement.
+                let sat_l = self.sat_os[0].process(wl, |x| (x * drive).tanh() / drive);
+                let sat_r = self.sat_os[1].process(wr, |x| (x * drive).tanh() / drive);
+                let byp_l = self.sat_bypass[0].process(wl);
+                let byp_r = self.sat_bypass[1].process(wr);
+                wl = byp_l + sat_amt * (sat_l - byp_l);
+                wr = byp_r + sat_amt * (sat_r - byp_r);
 
                 // M/S width.
                 let mid = (wl + wr) * 0.5;

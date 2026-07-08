@@ -19,7 +19,7 @@
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use suite_core::classify::{classify, FeatureSummary, InstrumentType};
+use suite_core::classify::{classify, FeatureSummary, InstrumentType, NodeReport};
 
 /// Number of published feature scalars ([`FeatureSummary::NFIELDS`]).
 pub const NUM_FEAT: usize = 12;
@@ -367,6 +367,31 @@ impl Bus {
     /// Number of currently-registered (pre-GC) slots — test/introspection helper.
     pub fn slot_count(&self) -> usize {
         self.slots.lock().map(|s| s.len()).unwrap_or(0)
+    }
+
+    /// RT-safe theme-inference feed for the Master **audio thread**: fold the live Node reports
+    /// into `out` WITHOUT allocating, cloning the slot vec, or GC'ing (which could drop/free an
+    /// `Arc<Slot>` on the audio thread). Uses `try_lock`, so it never blocks — returns `None`
+    /// when the structural lock is momentarily held (register/GC), letting the caller keep its
+    /// last computed targets. On success returns the number of reports written (≤ `out.len()`).
+    pub fn try_node_reports(&self, out: &mut [NodeReport]) -> Option<usize> {
+        let slots = self.slots.try_lock().ok()?;
+        let mut n = 0;
+        for s in slots.iter() {
+            if n >= out.len() {
+                break;
+            }
+            // Only slots a Node still references are live; skip dead ones without GC'ing.
+            if Arc::strong_count(s) > 1 {
+                let (ty, _c) = s.resolved_type();
+                out[n] = NodeReport {
+                    ty,
+                    features: s.features(),
+                };
+                n += 1;
+            }
+        }
+        Some(n)
     }
 }
 

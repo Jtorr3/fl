@@ -57,6 +57,12 @@ const CLIP_KNEE: f32 = 0.9;
 /// Smoothing time (ms) for the audible scalar params inside the core.
 const SMOOTH_MS: f32 = 12.0;
 
+/// DC-blocker corner frequency (Hz). Recomputed from the sample rate so it stays fixed
+/// regardless of `sr` — well BELOW the generated sub band (30–60 Hz) so the rumble the
+/// plugin exists to produce is not shaved off. A fixed coefficient would place the corner
+/// at ~38 Hz @ 48 k (and ~76 Hz @ 96 k), eating the very sub it generates.
+const DC_BLOCK_HZ: f32 = 15.0;
+
 // ---------------------------------------------------------------------------
 // Settings snapshot
 // ---------------------------------------------------------------------------
@@ -220,17 +226,25 @@ impl Ducker {
 // Small helpers
 // ---------------------------------------------------------------------------
 
-/// First-order DC blocker (`y = x − x₋₁ + R·y₋₁`) for the rumble path.
-#[derive(Clone, Copy, Default)]
+/// First-order DC blocker (`y = x − x₋₁ + R·y₋₁`) for the rumble path. `R` is derived from
+/// the sample rate for a fixed [`DC_BLOCK_HZ`] corner (matching the one-pole coefficient form
+/// used elsewhere in the suite), so it never scales up into the sub band with the sample rate.
+#[derive(Clone, Copy)]
 struct DcBlock {
     x1: f32,
     y1: f32,
+    r: f32,
 }
 
 impl DcBlock {
+    fn new(sr: f32) -> Self {
+        // R = 1 − 2π·fc/sr → a ~15 Hz corner at any sample rate (was a fixed 0.995 ≈ 38 Hz @ 48 k).
+        let r = 1.0 - (2.0 * std::f32::consts::PI * DC_BLOCK_HZ / sr.max(1.0));
+        Self { x1: 0.0, y1: 0.0, r: r.clamp(0.9, 0.99999) }
+    }
     #[inline]
     fn process(&mut self, x: f32) -> f32 {
-        let y = x - self.x1 + 0.995 * self.y1;
+        let y = x - self.x1 + self.r * self.y1;
         self.x1 = x;
         self.y1 = y;
         y
@@ -367,7 +381,7 @@ impl UndertowCore {
             strip: TransientStrip::new(sr),
             os: Oversampler2x::new(),
             fdn: Fdn8::new(max_delay, sr),
-            dc: DcBlock::default(),
+            dc: DcBlock::new(sr),
             lp,
             tune,
             side_hp,
@@ -547,6 +561,73 @@ mod tests {
                 assert_ne!(d[i], d[j], "delays {i},{j} collided");
             }
         }
+    }
+
+    /// Steady-state amplitude ratio (out/in) of the DC blocker at `freq`, measured after the
+    /// filter settles.
+    fn dc_gain(sr: f32, freq: f32) -> f32 {
+        let mut dc = DcBlock::new(sr);
+        let n = sr as usize; // 1 second
+        let w = 2.0 * std::f32::consts::PI * freq / sr;
+        let (mut si, mut so) = (0.0f64, 0.0f64);
+        for i in 0..n {
+            let x = (w * i as f32).sin();
+            let y = dc.process(x);
+            if (i as f32) > sr * 0.25 {
+                si += (x as f64) * (x as f64);
+                so += (y as f64) * (y as f64);
+            }
+        }
+        (so / si).sqrt() as f32
+    }
+
+    /// The −3 dB corner (Hz): the lowest frequency whose gain reaches 1/√2.
+    fn corner_hz(sr: f32) -> f32 {
+        let mut f = 1.0f32;
+        let mut prev = (f, dc_gain(sr, f));
+        while f < 200.0 {
+            f += 0.25;
+            let g = dc_gain(sr, f);
+            if g >= std::f32::consts::FRAC_1_SQRT_2 {
+                // Linear-interpolate the crossing between prev and this sample.
+                let (pf, pg) = prev;
+                let t = (std::f32::consts::FRAC_1_SQRT_2 - pg) / (g - pg);
+                return pf + t * (f - pf);
+            }
+            prev = (f, g);
+        }
+        f
+    }
+
+    #[test]
+    fn dc_blocker_passes_sub_and_kills_dc() {
+        let sr = 48_000.0f32;
+        // The generated sub survives: a 40 Hz tone keeps the great majority of its amplitude
+        // (the fixed-0.995/~38 Hz corner shaved it to ~0.73; the 15 Hz corner keeps ~0.94).
+        let g40 = dc_gain(sr, 40.0);
+        assert!(g40 > 0.93, "40 Hz sub attenuated to {g40:.3} (want > 0.93)");
+        // A 50 Hz rumble fundamental is essentially untouched.
+        assert!(dc_gain(sr, 50.0) > 0.95, "50 Hz rumble attenuated");
+
+        // True DC decays to ~0.
+        let mut dc = DcBlock::new(sr);
+        let mut last = 0.0f32;
+        for _ in 0..(sr as usize) {
+            last = dc.process(1.0);
+        }
+        assert!(last.abs() < 0.02, "DC not blocked: settled at {last:.4}");
+
+        // Corner sits near 15 Hz (measured at −3 dB).
+        let c = corner_hz(sr);
+        assert!((c - DC_BLOCK_HZ).abs() < 3.0, "corner {c:.2} Hz, want ≈ {DC_BLOCK_HZ}");
+
+        // Sample-rate independence: the corner barely moves between 44.1 k and 96 k.
+        let c441 = corner_hz(44_100.0);
+        let c96 = corner_hz(96_000.0);
+        assert!(
+            (c441 - c96).abs() < 3.0,
+            "corner drifts with sample rate: 44.1k={c441:.2} Hz, 96k={c96:.2} Hz"
+        );
     }
 
     #[test]

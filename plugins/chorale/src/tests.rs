@@ -269,6 +269,88 @@ fn mix_zero_nulls_and_wet_solo_is_pure_wet() {
 }
 
 // --------------------------------------------------------------------------
+// Live retune glides: changing the target pitch while a string rings must not zip/click the
+// sustaining tail, yet the pitch must still land on the new target.
+// --------------------------------------------------------------------------
+
+#[test]
+fn live_retune_glides_without_click() {
+    let mut core = ChoraleCore::new(SR);
+    // Ring a C-minor bank up with a short noise burst.
+    let s1 = Settings {
+        source: TuningSource::Scale,
+        root_pc: 0, // C
+        scale: Scale::MinorTriad,
+        count: 12,
+        decay: 0.97,
+        damp: 0.25,
+        spread_cents: 0.0,
+        sympathetic: 0.0,
+        excite: 1.5,
+        stereo: 0.0,
+        mix: 1.0,
+        ..Settings::default()
+    };
+    core.configure(&s1);
+    let burst = testsig::white_noise(0.5, (0.2 * SR) as usize, 0xCAFE);
+    for &x in &burst {
+        let _ = core.process_sample(x, x, &s1);
+    }
+
+    // Sustain in silence; measure the worst adjacent-sample jump in the smooth tail (baseline).
+    let mut prev = 0.0f32;
+    let mut base_jump = 0.0f32;
+    for _ in 0..(0.1 * SR) as usize {
+        let (l, _) = core.process_sample(0.0, 0.0, &s1);
+        base_jump = base_jump.max((l - prev).abs());
+        prev = l;
+    }
+
+    // Live retune up a fifth (C → G) while the bank is still ringing.
+    let s2 = Settings { root_pc: 7, ..s1 };
+    core.configure(&s2);
+    let target = core.tuned_freqs();
+    let active = core.active();
+
+    // Continue in silence across the retune boundary; the glide must keep the tail continuous.
+    let mut retune_jump = 0.0f32;
+    for _ in 0..(0.2 * SR) as usize {
+        let (l, _) = core.process_sample(0.0, 0.0, &s2);
+        retune_jump = retune_jump.max((l - prev).abs());
+        prev = l;
+    }
+    // No click: the retune tail's worst discontinuity stays on the order of the smooth
+    // baseline (a hard delay-tap jump would spike far above it).
+    assert!(
+        retune_jump < base_jump * 4.0 + 1e-4,
+        "live retune produced a discontinuity: {retune_jump:.5} vs baseline {base_jump:.5}"
+    );
+
+    // The pitch still lands: after the glide settles, re-excite and confirm the strongest
+    // resonators peak at their NEW target pitches.
+    let reburst = testsig::white_noise(0.5, (1.5 * SR) as usize, 0xBEEF);
+    let mut out = Vec::with_capacity(reburst.len());
+    for &x in &reburst {
+        let (l, _) = core.process_sample(x, x, &s2);
+        out.push(l);
+    }
+    let a = (0.6 * SR) as usize;
+    let tail = &out[a..];
+    let mut ranked: Vec<(usize, f64)> = (0..active)
+        .map(|i| (i, mag_at(tail, target[i], SR)))
+        .collect();
+    ranked.sort_by(|x, y| y.1.partial_cmp(&x.1).unwrap());
+    for &(i, _m) in ranked.iter().take(4) {
+        let err = peak_cents_error(tail, target[i], SR, 35.0);
+        assert!(
+            err.abs() <= 12.0,
+            "resonator {i} (f={:.2}) landed {err:.1} cents off the retuned pitch",
+            target[i]
+        );
+    }
+}
+
+// --------------------------------------------------------------------------
 // Sympathetic weighting: amount=1 drives only the resonators whose band matches the input.
 // --------------------------------------------------------------------------
 

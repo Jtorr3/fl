@@ -8,12 +8,15 @@
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 
-use suite_core::classify::{FeatureExtractor, FeatureSummary, SessionTheme};
+use suite_core::classify::{
+    infer_theme, FeatureExtractor, FeatureSummary, InstrumentType, MixAnalysis, NodeReport,
+    SessionTheme,
+};
 use suite_core::dsp::{OnePole, Oversampler4x};
 use suite_core::loudness::LoudnessMeter;
 
 use crate::dynamics::{Limiter, MultibandComp};
-use crate::enrich::AssistTargets;
+use crate::enrich::{theme_assist_targets, AssistTargets};
 use crate::eq::{EqSettings, FourBandEq};
 use crate::node::load_f32;
 
@@ -262,6 +265,9 @@ pub struct MasterCore {
     // the audio. Publishes features to `shared` for the GUI's theme inference.
     extractor: FeatureExtractor,
     shared: Arc<MasterShared>,
+    // OVERSEER-ENRICH: assist targets computed on the AUDIO thread each block (so ASSIST works
+    // with the editor closed). The editor only DISPLAYS them.
+    assist: AssistTargets,
 
     // --- Param smoothing (MAJOR 3) --------------------------------------------------
     sm_mix: OnePole,      // per sample
@@ -300,6 +306,7 @@ impl MasterCore {
             meters,
             extractor: FeatureExtractor::new(fs),
             shared,
+            assist: AssistTargets::default(),
             sm_mix: sm(),
             sm_ceiling: sm(),
             sm_low_gain: sm(),
@@ -343,6 +350,54 @@ impl MasterCore {
     /// Access the shared theme/assist state (GUI wiring).
     pub fn shared(&self) -> &Arc<MasterShared> {
         &self.shared
+    }
+
+    /// OVERSEER-ENRICH: recompute the assist targets on the AUDIO thread (block rate, cheap
+    /// math, allocation-free) so ASSIST keeps working with the Master GUI closed — previously
+    /// this ran only inside the editor tick, so the audio thread applied stale/absent targets.
+    /// `locked` is the persisted theme lock resolved by the caller; the editor only DISPLAYS
+    /// the result. Reuses the already-computed master mix features + the Nodes' published
+    /// reports off the bus. On a momentary structural-lock contention the last targets are kept.
+    pub fn update_assist(&mut self, tempo: f32, locked: Option<SessionTheme>) {
+        let theme = match locked {
+            Some(t) => {
+                self.shared.set_theme(t, 1.0);
+                t
+            }
+            None => {
+                let mut reports = [NodeReport {
+                    ty: InstrumentType::Generic,
+                    features: FeatureSummary::default(),
+                }; 32];
+                let n = match crate::bus::bus().try_node_reports(&mut reports) {
+                    Some(n) => n,
+                    // Bus structurally locked this instant → keep the last targets.
+                    None => return,
+                };
+                let mfeat = self.extractor.summary();
+                let mut onset = mfeat.onset_rate;
+                for r in reports[..n].iter() {
+                    onset = onset.max(r.features.onset_rate);
+                }
+                let mix = MixAnalysis {
+                    tempo_bpm: tempo,
+                    tilt: mfeat.tilt,
+                    onset_density: onset,
+                    dynamic_range_db: 20.0 * mfeat.crest.max(1.0).log10(),
+                };
+                let (theme, conf) = infer_theme(&reports[..n], &mix);
+                self.shared.set_theme(theme, conf);
+                theme
+            }
+        };
+        let targets = theme_assist_targets(theme);
+        self.assist = targets;
+        self.shared.set_assist(&targets);
+    }
+
+    /// The assist targets computed by the last [`update_assist`](Self::update_assist).
+    pub fn assist_targets(&self) -> AssistTargets {
+        self.assist
     }
 
     fn snap_smoothers(&mut self) {
