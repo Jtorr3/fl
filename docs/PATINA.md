@@ -119,8 +119,17 @@ crackle are decorrelated per channel; hum is correlated (shared phase).
 
 ## Presets
 
-Worn Cassette · Dusty Vinyl · Old Console Hum · Broadcast Ghost · Gentle Glue Age ·
-Destroyed Tape.
+A deep factory bank grouped into six preset-bar sections:
+
+- **Cassette** — Bedroom Dub Deck · Ferric Memory · Walkman Flutter
+- **Vinyl** — Sunday Dust · Locked Groove Rain · Warped 78
+- **Broadcast** — Numbers Station · Shortwave Ghost · Pirate Transmission
+- **Console** — Tube Console Glue · Studio B Hum · Iron Oxide Bus
+- **Subtle Glue** — Worn-In Glue · Analog Sheen · Master Patina
+- **Destroyed** — Sewer Transmission · Melted Reel · Total Decay
+
+Hot presets are trimmed with a negative **Out** so even the drum-bus / breakbeat sources stay
+under 0 dBFS true-peak (no clipping when printed).
 
 ## Done-bars (PRD §4)
 

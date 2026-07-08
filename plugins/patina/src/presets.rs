@@ -22,7 +22,7 @@ pub const PRESET_JSON: &[&str] = &[
     r#"{ "name": "Bedroom Dub Deck", "category": "Cassette",
          "wow": 0.3, "wowrate": 1.0, "flut": 0.35, "sat": 0.35, "bump": 0.4, "bumpf": 90.0,
          "azim": 0.3, "droprate": 0.15, "dropdep": 0.3, "hiss": 0.3, "hum": 0.05, "crackle": 0.15,
-         "hum60": 1.0, "key": 0.6, "age": 0.25, "mix": 1.0, "out": -0.5 }"#,
+         "hum60": 1.0, "key": 0.6, "age": 0.25, "mix": 1.0, "out": -1.0 }"#,
     r#"{ "name": "Ferric Memory", "category": "Cassette",
          "wow": 0.45, "wowrate": 0.7, "flut": 0.25, "sat": 0.45, "bump": 0.5, "bumpf": 85.0,
          "azim": 0.35, "droprate": 0.2, "dropdep": 0.35, "hiss": 0.35, "hum": 0.1, "crackle": 0.2,
@@ -65,16 +65,20 @@ pub const PRESET_JSON: &[&str] = &[
     r#"{ "name": "Studio B Hum", "category": "Console",
          "wow": 0.08, "wowrate": 1.0, "flut": 0.06, "sat": 0.3, "bump": 0.4, "bumpf": 110.0,
          "azim": 0.12, "droprate": 0.0, "dropdep": 0.0, "hiss": 0.2, "hum": 0.55, "crackle": 0.02,
-         "hum60": 1.0, "key": 0.0, "age": 0.1, "mix": 1.0, "out": -0.5 }"#,
+         "hum60": 1.0, "key": 0.0, "age": 0.1, "mix": 1.0, "out": -1.7 }"#,
     r#"{ "name": "Iron Oxide Bus", "category": "Console",
          "wow": 0.12, "wowrate": 1.0, "flut": 0.1, "sat": 0.45, "bump": 0.5, "bumpf": 90.0,
          "azim": 0.15, "droprate": 0.05, "dropdep": 0.2, "hiss": 0.2, "hum": 0.15, "crackle": 0.05,
          "hum60": 1.0, "key": 0.4, "age": 0.2, "mix": 0.9, "out": -1.0 }"#,
     // ---- Subtle Glue ------------------------------------------------------
-    r#"{ "name": "Barely There", "category": "Subtle Glue",
-         "wow": 0.08, "wowrate": 1.0, "flut": 0.06, "sat": 0.18, "bump": 0.2, "bumpf": 85.0,
-         "azim": 0.08, "droprate": 0.0, "dropdep": 0.0, "hiss": 0.06, "hum": 0.0, "crackle": 0.0,
-         "hum60": 1.0, "key": 0.8, "age": 0.12, "mix": 0.5, "out": 0.0 }"#,
+    // "Worn-In Glue" replaces the old "Barely There" — that preset sat only 0.17 (param-space)
+    // from "Master Patina", a near-duplicate whisper. This one keeps a subtle Mix but adds gentle
+    // tape LIFE (slow wow + occasional shallow dropout + a hint of crackle) so the Subtle-Glue
+    // trio spans static→living instead of three identical whispers. Cynthoni-flavoured movement.
+    r#"{ "name": "Worn-In Glue", "category": "Subtle Glue",
+         "wow": 0.22, "wowrate": 0.7, "flut": 0.15, "sat": 0.22, "bump": 0.18, "bumpf": 88.0,
+         "azim": 0.2, "droprate": 0.12, "dropdep": 0.25, "hiss": 0.09, "hum": 0.0, "crackle": 0.08,
+         "hum60": 1.0, "key": 0.6, "age": 0.18, "mix": 0.65, "out": 0.0 }"#,
     r#"{ "name": "Analog Sheen", "category": "Subtle Glue",
          "wow": 0.1, "wowrate": 1.0, "flut": 0.08, "sat": 0.25, "bump": 0.28, "bumpf": 95.0,
          "azim": 0.12, "droprate": 0.0, "dropdep": 0.0, "hiss": 0.1, "hum": 0.02, "crackle": 0.03,
@@ -87,15 +91,15 @@ pub const PRESET_JSON: &[&str] = &[
     r#"{ "name": "Sewer Transmission", "category": "Destroyed",
          "wow": 0.75, "wowrate": 1.6, "flut": 0.8, "sat": 0.65, "bump": 0.5, "bumpf": 95.0,
          "azim": 0.8, "droprate": 0.7, "dropdep": 0.75, "hiss": 0.6, "hum": 0.4, "crackle": 0.65,
-         "hum60": 1.0, "key": 0.25, "age": 0.85, "mix": 1.0, "out": -2.0 }"#,
+         "hum60": 1.0, "key": 0.25, "age": 0.85, "mix": 1.0, "out": -3.3 }"#,
     r#"{ "name": "Melted Reel", "category": "Destroyed",
          "wow": 0.95, "wowrate": 2.2, "flut": 0.7, "sat": 0.7, "bump": 0.55, "bumpf": 100.0,
          "azim": 0.7, "droprate": 0.6, "dropdep": 0.7, "hiss": 0.55, "hum": 0.35, "crackle": 0.5,
-         "hum60": 1.0, "key": 0.2, "age": 0.9, "mix": 1.0, "out": -2.0 }"#,
+         "hum60": 1.0, "key": 0.2, "age": 0.9, "mix": 1.0, "out": -3.5 }"#,
     r#"{ "name": "Total Decay", "category": "Destroyed",
          "wow": 0.9, "wowrate": 1.8, "flut": 0.9, "sat": 0.8, "bump": 0.6, "bumpf": 90.0,
          "azim": 0.9, "droprate": 0.85, "dropdep": 0.85, "hiss": 0.7, "hum": 0.5, "crackle": 0.75,
-         "hum60": 1.0, "key": 0.15, "age": 1.0, "mix": 1.0, "out": -3.0 }"#,
+         "hum60": 1.0, "key": 0.15, "age": 1.0, "mix": 1.0, "out": -4.0 }"#,
 ];
 
 /// Build the DSP [`Settings`] from a parsed preset, falling back to defaults for missing keys.

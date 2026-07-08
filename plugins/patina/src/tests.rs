@@ -436,6 +436,41 @@ fn presets_pass_universal_assertions() {
 }
 
 // ---------------------------------------------------------------------------
+// SOUND-PASS audition renders (ignored; driven by tools/audition.py)
+// ---------------------------------------------------------------------------
+
+/// Render every factory preset + the default state over two genre-right musical sources
+/// (a sustained minor pad + an amen-ish breakbeat) for offline audition. Writes to
+/// `renders/_audition/PATINA/<QVS_AUDITION_DIR>/<preset>__{pad,break}.wav` (subdir defaults
+/// to "before"). `#[ignore]` — not part of the normal gate; run explicitly with `--ignored`.
+#[test]
+#[ignore]
+fn audition_render_presets() {
+    let subdir = std::env::var("QVS_AUDITION_DIR").unwrap_or_else(|_| "before".to_string());
+    let pad = testsig::synth_pad(110.0, 4.0, SR); // ~4 s sustained minor pad (texture)
+    let brk = testsig::synth_break(140.0, 2, SR); // ~3.4 s dnb-ish break (transients + gaps)
+
+    let mut render_pair = |label: &str, s: &Settings| {
+        let safe = label.replace(' ', "_").replace('/', "-");
+        for (src, tag) in [(&pad, "pad"), (&brk, "break")] {
+            let mut core = PatinaCore::new(SR);
+            core.configure(s);
+            let name = format!("{subdir}/{safe}__{tag}");
+            let out = render_and_write("_audition/PATINA", &name, core, src, 512, SR as u32);
+            let peak = out.iter().fold(0.0f32, |m, &v| m.max(v.abs()));
+            eprintln!("[audition] {name}: {} samples, peak {peak:.4}", out.len());
+        }
+    };
+
+    render_pair("default", &Settings::default());
+    let presets = suite_core::presets::load_all(crate::presets::PRESET_JSON);
+    for p in &presets {
+        let s = crate::presets::settings_from_preset(p);
+        render_pair(&p.name, &s);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Fuzz / robustness: extreme + degenerate settings stay finite and bounded
 // ---------------------------------------------------------------------------
 
