@@ -153,6 +153,11 @@ pub struct SnapVoice {
     // resolved config (from Settings each block)
     f_start: f32,
     f_end: f32,
+    // Last Tune snapshot value `configure` saw (design (b) key-track guard, mirrors the
+    // existing `tone` change-detect below). `note_on` may override the body fundamental from
+    // the played key; `configure` must not clobber that override every block unless the user
+    // actually moved the Tune knob. NAN = no snapshot yet.
+    last_tune_snap: f32,
     inv_tau_p: f32, // 1 / pitch-env tau (samples)
     snare_w: f32,   // engine crossfade weights (equal-power)
     clap_w: f32,
@@ -196,6 +201,8 @@ pub struct SnapVoice {
     rng_diff_l: Rng,
     rng_diff_r: Rng,
     rng_clap: Rng, // humanize jitter (reseeded per note-on for determinism)
+    hit_counter: u32, // increments each note_on; XORed into the humanize seed so consecutive
+                      // hits differ while renders stay deterministic run-to-run (reset by reset()).
 
     active: bool,
 }
@@ -207,6 +214,7 @@ impl SnapVoice {
             sr,
             f_start: 360.0,
             f_end: 190.0,
+            last_tune_snap: f32::NAN,
             inv_tau_p: 1.0 / (0.008 * sr),
             snare_w: 1.0,
             clap_w: 0.0,
@@ -242,6 +250,7 @@ impl SnapVoice {
             rng_diff_l: Rng::new(0x11AA_3C57),
             rng_diff_r: Rng::new(0x77BB_91DF),
             rng_clap: Rng::new(0x0C1A_9B33),
+            hit_counter: 0,
             active: false,
         };
         v.attack_len = ((DECLICK_MS * 0.001) * sr).round().max(1.0) as u32;
@@ -274,6 +283,7 @@ impl SnapVoice {
         self.rattle_env = 0.0;
         self.click_env = 0.0;
         self.num_bursts = 0;
+        self.hit_counter = 0;
         for ch in self.chan.iter_mut() {
             ch.reset();
         }
@@ -285,8 +295,16 @@ impl SnapVoice {
         let sr = self.sr;
         let len = (s.decay_ms.max(1.0) / DECAY_REF_MS).clamp(0.05, 20.0);
 
-        self.f_end = s.tune.clamp(30.0, 2000.0);
-        self.f_start = (self.f_end * SHELL_RATIO).min(0.45 * sr);
+        // Design (b) — reapply-on-change: only write the body fundamental from the Tune knob
+        // when the snapshot value genuinely moved. A note-on key-track override
+        // (`note_on(_, Some(key_hz), _)`) then survives block-rate reconfigure with unchanged
+        // settings, while a live Tune tweak still applies immediately. (Same pattern the `tone`
+        // filter update already uses below.)
+        if self.last_tune_snap.is_nan() || (s.tune - self.last_tune_snap).abs() > 1.0e-4 {
+            self.f_end = s.tune.clamp(30.0, 2000.0);
+            self.f_start = (self.f_end * SHELL_RATIO).min(0.45 * sr);
+        }
+        self.last_tune_snap = s.tune;
         let tau_p = (0.008 * len * sr).max(1.0);
         self.inv_tau_p = 1.0 / tau_p;
 
@@ -335,7 +353,11 @@ impl SnapVoice {
     /// is deterministic (SPECS — deterministic per seed for tests); humanize = 0 ⇒ no jitter ⇒
     /// exactly `taps` evenly-spaced bursts + 1 tail = `taps + 1` onsets.
     fn schedule_clap(&mut self, len: f32) {
-        self.rng_clap = Rng::new(0x0C1A_9B33);
+        // Derive the humanize seed from a per-hit counter so consecutive claps get DIFFERENT
+        // jitter (fixing the "every hit identical" dead-control bug) while a given sequence from
+        // a fresh/reset core still reproduces the same jitter run-to-run (determinism).
+        self.rng_clap = Rng::new(0x0C1A_9B33 ^ self.hit_counter);
+        self.hit_counter = self.hit_counter.wrapping_add(1);
         let sr = self.sr;
         let spread = (self.spread_ms * 0.001 * sr).max(1.0);
         let jitter_max = JITTER_MAX_MS * 0.001 * sr;
@@ -555,5 +577,75 @@ mod tests {
         for i in 0..l.len() {
             assert!((l[i] - r[i]).abs() < 1.0e-6, "width=0 not mono at {i}");
         }
+    }
+
+    fn clap_starts(v: &SnapVoice) -> Vec<u32> {
+        v.bursts[..v.num_bursts].iter().map(|b| b.start).collect()
+    }
+
+    /// Design (b) regression: a key-track note_on override survives block-rate reconfigure
+    /// with the SAME settings. Without the guard, `configure` snaps the body fundamental back
+    /// to the Tune knob (190 Hz) on the very next block.
+    #[test]
+    fn keytrack_survives_reconfigure_same_settings() {
+        let sr = 48_000.0;
+        let s = Settings::default(); // Tune knob = 190 Hz
+        let mut v = SnapVoice::new(sr);
+        v.configure(&s);
+        v.note_on(1.0, Some(110.0), 1.0); // key-track to 110 Hz
+        assert!((v.f_end - 110.0).abs() < 1e-3, "note_on did not set override");
+        for _ in 0..8 {
+            v.configure(&s); // reconfigure every block with unchanged knobs
+            for _ in 0..256 {
+                let _ = v.process_sample();
+            }
+        }
+        assert!(
+            (v.f_end - 110.0).abs() < 1e-3,
+            "key-track override clobbered by configure: f_end = {} (expected 110)",
+            v.f_end
+        );
+    }
+
+    /// Design (b) regression: turning the Tune knob mid-note DOES take effect (override released
+    /// when the user genuinely moves the knob).
+    #[test]
+    fn knob_change_overrides_keytrack_midnote() {
+        let sr = 48_000.0;
+        let mut s = Settings::default();
+        let mut v = SnapVoice::new(sr);
+        v.configure(&s);
+        v.note_on(1.0, Some(110.0), 1.0);
+        assert!((v.f_end - 110.0).abs() < 1e-3);
+        s.tune = 250.0; // user drags Tune up
+        v.configure(&s);
+        assert!(
+            (v.f_end - 250.0).abs() < 1e-3,
+            "Tune knob change ignored mid-note: f_end = {} (expected 250)",
+            v.f_end
+        );
+    }
+
+    /// P1 regression: humanize now varies hit-to-hit (per-hit counter seed) yet stays
+    /// deterministic run-to-run from a fresh core.
+    #[test]
+    fn humanize_varies_hit_to_hit_but_is_deterministic() {
+        let sr = 48_000.0;
+        let mut s = Settings::default();
+        s.humanize = 0.8;
+        let render_pair = || {
+            let mut v = SnapVoice::new(sr);
+            v.configure(&s);
+            v.note_on(1.0, None, 1.0);
+            let a = clap_starts(&v);
+            v.note_on(1.0, None, 1.0);
+            let b = clap_starts(&v);
+            (a, b)
+        };
+        let (a1, b1) = render_pair();
+        assert_ne!(a1, b1, "consecutive hits have identical jitter (humanize is a dead control)");
+        let (a2, b2) = render_pair();
+        assert_eq!(a1, a2, "hit 1 jitter not reproducible run-to-run (nondeterministic)");
+        assert_eq!(b1, b2, "hit 2 jitter not reproducible run-to-run (nondeterministic)");
     }
 }

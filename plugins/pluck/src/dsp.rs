@@ -575,6 +575,10 @@ pub struct PluckCore {
     mix_s: f32,
     out_s: f32,
     primed: bool,
+    // Last DAMP snapshot value `configure` saw (design (b) Vel->Bright guard). `fire_strum`
+    // retunes the strings with velocity-brightened damping; `configure` must not clobber that
+    // every block unless the user actually moved the DAMP knob. NAN = no snapshot yet.
+    last_damp_snap: f32,
     // Per-string tuned freqs (published for tests/GUI).
     freqs: [f32; MAX_STRINGS],
     // Last strum's per-string onset offsets (samples) + order — for the done-bar test.
@@ -608,6 +612,7 @@ impl PluckCore {
             mix_s: 1.0,
             out_s: 1.0,
             primed: false,
+            last_damp_snap: f32::NAN,
             freqs: [110.0; MAX_STRINGS],
             last_onsets: [0; MAX_STRINGS],
             pan_l: [0.70710677; MAX_STRINGS],
@@ -735,9 +740,19 @@ impl PluckCore {
         }
         let freqs = self.compute_freqs(s);
         self.freqs = freqs;
-        let s_damp = Self::damp_coeff(s.damp, 0.0, 0.0);
+        // Design (b) — reapply-on-change: the base (unbrightened) damping is only written back
+        // to the strings when the DAMP knob genuinely moved since the last snapshot. Otherwise
+        // each string keeps its current `s_damp`, so a velocity-brightened value set by
+        // `fire_strum` survives block-rate reconfigure (fixing the dead Vel->Bright knob) — yet
+        // a live DAMP tweak still applies immediately. Freq/feedback are always recomputed so
+        // decay/tuning changes are unaffected.
+        let damp_changed =
+            self.last_damp_snap.is_nan() || (s.damp - self.last_damp_snap).abs() > 1.0e-6;
+        self.last_damp_snap = s.damp;
+        let base_damp = Self::damp_coeff(s.damp, 0.0, 0.0);
         for i in 0..MAX_STRINGS {
             let fb = self.feedback_for(s.decay, freqs[i]);
+            let s_damp = if damp_changed { base_damp } else { self.strings[i].s_damp };
             self.strings[i].tune(freqs[i], self.sr, s_damp, fb);
         }
         // Stereo-alternate pans: even strings left, odd strings right, by amount.
@@ -905,4 +920,63 @@ pub fn bench_body_rt_percent(sr: f32, seconds: f32) -> f32 {
     let elapsed = t0.elapsed().as_secs_f32();
     std::hint::black_box(acc);
     100.0 * elapsed / seconds
+}
+
+#[cfg(test)]
+mod keytrack_tests {
+    use super::*;
+
+    /// Design (b) regression: a velocity-brightened strum damping (set by `fire_strum`)
+    /// survives block-rate `configure()` calls with the SAME settings snapshot — the
+    /// Vel->Bright control is no longer clobbered within one block.
+    #[test]
+    fn vel_bright_survives_reconfigure_same_settings() {
+        let sr = 48_000.0;
+        let mut s = Settings::default();
+        s.damp = 0.4;
+        s.vel_bright = 0.8;
+        let mut core = PluckCore::new(sr);
+        core.configure(&s);
+        let base_damp = PluckCore::damp_coeff(s.damp, 0.0, 0.0);
+        // Fire a max-velocity strum → damping brightened (lower s_damp than the base).
+        core.fire_strum(1.0, &s);
+        let brightened = core.strings[0].s_damp;
+        assert!(
+            brightened < base_damp - 1.0e-4,
+            "fire_strum did not brighten damping (bright {brightened} vs base {base_damp})"
+        );
+        // Block-rate reconfigure with unchanged settings must NOT restore the base damping.
+        for _ in 0..8 {
+            core.configure(&s);
+        }
+        assert!(
+            (core.strings[0].s_damp - brightened).abs() < 1.0e-6,
+            "Vel->Bright damping clobbered by configure: {} (expected {})",
+            core.strings[0].s_damp,
+            brightened
+        );
+    }
+
+    /// Design (b) regression: moving the DAMP knob mid-note DOES take effect (the velocity
+    /// override is released and the new base damping applies).
+    #[test]
+    fn damp_knob_change_takes_effect_midnote() {
+        let sr = 48_000.0;
+        let mut s = Settings::default();
+        s.damp = 0.4;
+        s.vel_bright = 0.8;
+        let mut core = PluckCore::new(sr);
+        core.configure(&s);
+        core.fire_strum(1.0, &s);
+        let brightened = core.strings[0].s_damp;
+        // User drags DAMP up to 0.9.
+        s.damp = 0.9;
+        core.configure(&s);
+        let new_base = PluckCore::damp_coeff(0.9, 0.0, 0.0);
+        assert!(
+            (core.strings[0].s_damp - new_base).abs() < 1.0e-6,
+            "DAMP knob change ignored mid-note: {} (expected new base {new_base}, was {brightened})",
+            core.strings[0].s_damp
+        );
+    }
 }

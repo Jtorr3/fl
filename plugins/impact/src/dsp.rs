@@ -123,6 +123,10 @@ pub struct KickVoice {
     // config (resolved from Settings each block)
     f_start: f32,
     f_end: f32,
+    // Last Pitch-End snapshot value `configure` saw (design (b) key-track guard). `note_on`
+    // may override `f_end` from the played key; `configure` must not clobber that override on
+    // the next block unless the user actually moved the Pitch-End knob. NAN = no snapshot yet.
+    last_f_end_snap: f32,
     tau_p: f32,   // seconds
     curve_p: f32, // pitch shaping exponent
     tau_a: f32,   // seconds
@@ -174,6 +178,7 @@ impl KickVoice {
             sr: sample_rate.max(1.0),
             f_start: 220.0,
             f_end: 55.0,
+            last_f_end_snap: f32::NAN,
             tau_p: 0.045,
             curve_p: 1.0,
             tau_a: 0.4,
@@ -231,7 +236,14 @@ impl KickVoice {
     pub fn configure(&mut self, s: &Settings) {
         let len = s.length.max(0.01);
         self.f_start = s.f_start.max(1.0);
-        self.f_end = s.f_end.max(1.0);
+        // Design (b) — reapply-on-change: only write `f_end` from the Pitch-End knob when the
+        // incoming snapshot value genuinely differs from the last one we saw. A note-on
+        // key-track override (`note_on(_, Some(key_hz))`) therefore survives block-rate
+        // reconfigure with unchanged settings, yet a live knob tweak still applies immediately.
+        if self.last_f_end_snap.is_nan() || (s.f_end - self.last_f_end_snap).abs() > 1.0e-6 {
+            self.f_end = s.f_end.max(1.0);
+        }
+        self.last_f_end_snap = s.f_end;
         self.tau_p = (s.pitch_decay_ms * len * 0.001).max(1.0e-5);
         self.curve_p = curve_exp(s.pitch_curve);
         self.tau_a = (s.amp_decay_ms * len * 0.001).max(1.0e-4);
@@ -433,5 +445,72 @@ mod tests {
         let early: f32 = out[..win].iter().map(|v| v * v).sum::<f32>() / win as f32;
         let late: f32 = out[n - win..].iter().map(|v| v * v).sum::<f32>() / win as f32;
         assert!(late < early * 0.25, "voice did not decay (early {early} late {late})");
+    }
+
+    /// Measure the dominant body frequency over a short window by counting positive-going
+    /// zero crossings of the pitch env's target (we estimate from the produced signal's
+    /// crossing rate, which tracks `f` once the fast pitch env has settled).
+    fn est_freq(out: &[f32], sr: f32) -> f32 {
+        let mut crossings = 0usize;
+        for w in out.windows(2) {
+            if w[0] <= 0.0 && w[1] > 0.0 {
+                crossings += 1;
+            }
+        }
+        crossings as f32 * sr / out.len() as f32
+    }
+
+    /// Design (b) regression: a key-track note_on override survives a same-settings
+    /// reconfigure. Without the guard, `configure` would snap `f_end` back to the knob (55 Hz)
+    /// on the very next block and the rendered pitch would collapse to the knob value.
+    #[test]
+    fn keytrack_survives_reconfigure_same_settings() {
+        let sr = 48_000.0;
+        let s = Settings::default(); // f_end knob = 55 Hz
+        let mut v = KickVoice::new(sr);
+        v.configure(&s);
+        // Play a much higher key (220 Hz) — key-track override.
+        v.note_on(1.0, Some(220.0));
+        // Simulate several block boundaries re-applying the SAME settings snapshot.
+        let block = 256usize;
+        let mut out = Vec::new();
+        for _ in 0..8 {
+            v.configure(&s); // block-rate reconfigure with unchanged knobs
+            for _ in 0..block {
+                out.push(v.process_sample());
+            }
+        }
+        // The pitch env decays toward f_end; after the env settles the body should sit near
+        // the key-tracked 220 Hz, NOT the 55 Hz knob value. Measure the tail.
+        let tail = &out[out.len() / 2..];
+        let f = est_freq(tail, sr);
+        assert!(f > 140.0, "key-track override was clobbered: tail freq ≈ {f} Hz (expected ~220)");
+    }
+
+    /// Design (b) regression: turning the Pitch-End knob mid-note DOES take effect (the
+    /// override is intentionally released when the user changes the snapshot value).
+    #[test]
+    fn knob_change_overrides_keytrack_midnote() {
+        let sr = 48_000.0;
+        let mut s = Settings::default();
+        let mut v = KickVoice::new(sr);
+        v.configure(&s);
+        v.note_on(1.0, Some(220.0)); // key-track to 220 Hz
+        // A block at 220 Hz, then the user drags Pitch-End up to 330 Hz.
+        for _ in 0..256 {
+            let _ = v.process_sample();
+        }
+        s.f_end = 330.0;
+        // Long slow envelope so the note is still live; also lengthen so pitch env has settled.
+        let mut out = Vec::new();
+        for _ in 0..16 {
+            v.configure(&s);
+            for _ in 0..256 {
+                out.push(v.process_sample());
+            }
+        }
+        let tail = &out[out.len() / 2..];
+        let f = est_freq(tail, sr);
+        assert!(f > 250.0, "knob change did not take effect mid-note: tail freq ≈ {f} Hz (expected ~330)");
     }
 }
