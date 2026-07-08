@@ -289,6 +289,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "carve"
+version = "0.1.0"
+dependencies = [
+ "nih_plug",
+ "nih_plug_egui",
+ "suite-core",
+]
+
+[[package]]
 name = "cc"
 version = "1.2.66"
 source = "registry+https://github.com/rust-lang/crates.io-index"

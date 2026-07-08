@@ -344,7 +344,7 @@ Phase 2b — remaining clones
   4 refuted. `cargo test -p suite-core --release` + `build.ps1 -All` green.
 
 Phase 3 — remainder
-- [ ] CARVE - [ ] NERVE - [ ] HALT - [ ] BANDAID - [ ] PATINA - [ ] X-RAY - [ ] CHORALE
+- [x] CARVE - [ ] NERVE - [ ] HALT - [ ] BANDAID - [ ] PATINA - [ ] X-RAY - [ ] CHORALE
 
 Phase 4 — remaining automations
 - [ ] W5-PROJECT-JANITOR - [ ] W6-SAMPLE-LIBRARIAN - [ ] W7-REFERENCE-GAP
