@@ -474,3 +474,48 @@ fn stopped_transport_still_nulls_at_mix_zero() {
     }
     assert!(null_residual_db(&out, &input) < -120.0);
 }
+
+// --------------------------------------------------------------------------
+// Regression (HARD CHECKPOINT 3, BLOCKER): the Transient slicer must never index past its
+// slice_starts array on a busy snapshot. A dense onset train (≥128 onsets at the 30 ms
+// min-gap resolution — reachable at slow tempo with busy percussion) used to drive
+// `count` to MAX_SLICES+1 and panic on the audio thread at the post-loop sentinel write.
+// --------------------------------------------------------------------------
+
+#[test]
+fn transient_slicer_clamps_dense_onset_train_without_panic() {
+    let gap = (0.030 * SR) as usize; // 30 ms == the detector's minimum onset gap
+    let n_onsets = 360usize; // ~11 s of 2-bar snapshot at a slow tempo — well past MAX_SLICES
+    let len = gap * (n_onsets + 2);
+    let mut mono = vec![0.0f32; len];
+    // Each onset: a sharp two-sample bipolar transient (broadband → strong spectral flux).
+    for k in 0..n_onsets {
+        let p = k * gap + gap / 2;
+        if p + 1 < len {
+            mono[p] = 0.9;
+            mono[p + 1] = -0.7;
+        }
+    }
+
+    let mut core = CleaveCore::new(SR);
+    // Max sensitivity → lowest threshold → the most onsets picked (worst case for the bound).
+    // The assertion is that this does NOT panic (it did before the off-by-one fix).
+    let (count, sentinel) = core.test_slice_snapshot(&mono, SliceMode::Transient, 1.0);
+
+    assert!(
+        count <= crate::dsp::MAX_SLICES,
+        "slice_count {count} exceeds MAX_SLICES {}",
+        crate::dsp::MAX_SLICES
+    );
+    assert_eq!(
+        count,
+        crate::dsp::MAX_SLICES,
+        "a ≥128-onset train must saturate the slice pool (clamped to MAX_SLICES)"
+    );
+    // The sentinel `slice_starts[count]` must be a valid, in-bounds end marker == snapshot length.
+    assert_eq!(
+        sentinel,
+        core.test_pb_len(),
+        "sentinel slice_starts[count] must equal pb_len (valid end marker)"
+    );
+}

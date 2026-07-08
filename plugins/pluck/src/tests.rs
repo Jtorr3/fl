@@ -327,3 +327,107 @@ fn mix_zero_nulls_against_dry() {
     assert!(res_l < -80.0, "L mix=0 residual {res_l:.1} dB (want < -80)");
     assert!(res_r < -80.0, "R mix=0 residual {res_r:.1} dB (want < -80)");
 }
+
+// --------------------------------------------------------------------------
+// (5) Alloc-guard (HARD CHECKPOINT 3, MAJOR): the per-block RT path must not allocate. The
+// MIDI-with-held-notes branch of `compute_freqs` (reached from the block-rate `configure()`)
+// used to `collect()` + stable-`sort_by` a `Vec<f32>` every block — a heap alloc on the audio
+// thread. A thread-local counting global allocator counts allocations only while ARMED on THIS
+// thread, so parallel test threads don't perturb the count; const-initialised thread-locals
+// never allocate, so the allocator hook is re-entrancy-safe.
+// --------------------------------------------------------------------------
+
+mod alloc_guard {
+    use std::alloc::{GlobalAlloc, Layout, System};
+    use std::cell::Cell;
+
+    thread_local! {
+        pub static ARMED: Cell<bool> = const { Cell::new(false) };
+        pub static COUNT: Cell<usize> = const { Cell::new(0) };
+    }
+
+    #[inline]
+    fn bump() {
+        let _ = ARMED.try_with(|a| {
+            if a.get() {
+                let _ = COUNT.try_with(|c| c.set(c.get() + 1));
+            }
+        });
+    }
+
+    pub struct Counting;
+    unsafe impl GlobalAlloc for Counting {
+        unsafe fn alloc(&self, l: Layout) -> *mut u8 {
+            bump();
+            System.alloc(l)
+        }
+        unsafe fn dealloc(&self, p: *mut u8, l: Layout) {
+            System.dealloc(p, l)
+        }
+        unsafe fn realloc(&self, p: *mut u8, l: Layout, new: usize) -> *mut u8 {
+            bump();
+            System.realloc(p, l, new)
+        }
+    }
+}
+
+#[global_allocator]
+static GLOBAL: alloc_guard::Counting = alloc_guard::Counting;
+
+#[test]
+fn midi_held_process_block_is_alloc_free() {
+    let mut core = PluckCore::new(SR);
+    let mut held = [f32::NAN; MAX_STRINGS];
+    held[0] = midi_to_freq(40.0); // E2
+    held[1] = midi_to_freq(43.0); // G2
+    held[2] = midi_to_freq(47.0); // B2
+    let s = Settings {
+        source: TuningSource::Midi,
+        held,
+        held_count: 3,
+        mix: 1.0,
+        ..Settings::default()
+    };
+
+    // Warm up OUTSIDE the guard — first-block smoother priming may legitimately allocate.
+    core.configure(&s);
+    for _ in 0..256 {
+        let _ = core.process_sample(0.01, -0.01, &s);
+    }
+
+    // Measure one full block on the RT path: block-rate configure() (the MIDI branch that used
+    // to collect+sort a Vec of held notes) + a 512-sample process loop. Must not allocate.
+    alloc_guard::COUNT.with(|c| c.set(0));
+    alloc_guard::ARMED.with(|a| a.set(true));
+    core.configure(&s);
+    for _ in 0..512 {
+        let _ = core.process_sample(0.02, 0.015, &s);
+    }
+    alloc_guard::ARMED.with(|a| a.set(false));
+
+    let n = alloc_guard::COUNT.with(|c| c.get());
+    assert_eq!(n, 0, "MIDI-mode block allocated {n} time(s) on the RT thread (must be 0)");
+}
+
+// --------------------------------------------------------------------------
+// (6) BODY_LEN spec compliance (HARD CHECKPOINT 3, MINOR): SPECS "PLUCK" mandates a 2048-tap
+// body IR. Confirm the direct-FIR body convolution at that length stays within the RT budget.
+// The printed figure is the number recorded in the checkpoint decision.
+// --------------------------------------------------------------------------
+
+#[test]
+fn body_conv_within_rt_budget() {
+    assert_eq!(crate::dsp::BODY_LEN, 2048, "SPECS mandates a 2048-tap body IR");
+    // Take the best of a few samples (least scheduler noise).
+    let mut best = f32::INFINITY;
+    for _ in 0..5 {
+        let p = crate::dsp::bench_body_rt_percent(48_000.0, 2.0);
+        if p < best {
+            best = p;
+        }
+    }
+    println!("PLUCK body IR ({} taps) direct-FIR conv = {best:.2}% RT @48k stereo", crate::dsp::BODY_LEN);
+    // Expected < 5% RT for the body conv on the build machine; a generous 25% ceiling guards
+    // against a gross regression without being flaky on a loaded CI box.
+    assert!(best < 25.0, "body conv {best:.2}% RT exceeds the sanity ceiling");
+}

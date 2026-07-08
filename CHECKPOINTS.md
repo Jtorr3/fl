@@ -183,3 +183,16 @@
       reopen the project — the chosen size should be restored. NOTE: the menu snaps the
       current window's zoom; to enlarge the OS window use the corner drag (DEFERRED.md
       documents the missing host-resize API).
+
+## HARD CHECKPOINT 3 — Phase 2b re-validation (2026-07-08)
+- [ ] **Rescan FL for the Phase 2b clones.** All five rebuilt + reinstalled by the checkpoint
+      sweep: Options → Manage plugins → Find more plugins → verify **Qeynos FLYBY / CLEAVE /
+      PLUCK / SHAPESHIFT / CHAMBER** load. (CLEAVE got an audio-thread crash fix — the transient
+      slicer could panic on ≥128 detected onsets; PLUCK's body IR is now the full 2048-tap spec
+      body and its MIDI tuning path no longer allocates on the audio thread.)
+- [ ] **CLEAVE stress spot-check (the fixed blocker).** On a busy percussion loop at a slow
+      tempo (e.g. 60–70 BPM), set Slice Mode = **Transient** and Sensitivity to max — the old
+      build could hard-crash FL's audio thread here; the fixed build must keep chopping (slices
+      cap at 128).
+- [ ] **Preset names.** Saving a preset named `NUL`, `CON`, `COM5` etc. now lands on disk as
+      `NUL_` / `CON_` / `COM5_` instead of silently vanishing into a Windows device name.

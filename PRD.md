@@ -334,7 +334,14 @@ Pulled forward from POLISH (user priority 2026-07-07):
 
 Phase 2b — remaining clones
 - [x] FLYBY - [x] CLEAVE - [x] PLUCK - [x] SHAPESHIFT - [x] CHAMBER
-**HARD CHECKPOINT**
+- [x] **HARD CHECKPOINT 3** (2026-07-08): full Phase 2b re-validation — all gates GREEN;
+  4 confirmed adversarial-review findings fixed (CLEAVE slice_transients RT panic off-by-one
+  [blocker: write-guard `< MAX_SLICES` + clamp before sentinel write, ≥300-onset regression test];
+  PLUCK compute_freqs MIDI-branch RT heap alloc [major: fixed `[f32; MAX_STRINGS]` scratch +
+  in-place sort_unstable; thread-local alloc-guard test over a MIDI 3-held-note block];
+  PLUCK body IR spec compliance [BODY_LEN 1024→2048 per SPECS; benched 4.84% RT @48k < 5% → kept];
+  suite-core presets reserved-name preset loss [CON/PRN/AUX/NUL/COM1-9/LPT1-9 stem escaped]),
+  4 refuted. `cargo test -p suite-core --release` + `build.ps1 -All` green.
 
 Phase 3 — remainder
 - [ ] CARVE - [ ] NERVE - [ ] HALT - [ ] BANDAID - [ ] PATINA - [ ] X-RAY - [ ] CHORALE

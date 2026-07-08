@@ -11,7 +11,7 @@ body IR** colors the wet path. Zero reported latency; `mix = 0` nulls against dr
                                                                  ▼  (staggered per string)
    held MIDI / chord table / key-detect ─► tune 6 strings ─► KS loops ─► pan ─► Σ
                                                                                  │
-                                          body IR (modal, 1024-tap) convolve ◄───┤
+                                          body IR (modal, 2048-tap) convolve ◄───┤
                                                                                  ▼
                                                           (1-body)·dry_wet + body·conv
                                                                                  ▼
@@ -66,7 +66,7 @@ strings do).
 
 ## Body
 
-A small **modal body IR** (1024 taps) is generated at init as a sum of a few decaying modal
+A small **modal body IR** (2048 taps, per SPECS) is generated at init as a sum of a few decaying modal
 resonances (≈98/196/392/740/1300/2600 Hz) plus a direct impulse, L2-normalized. It is
 convolved into the wet path by direct FIR (cheap at this length) and blended by **Body**
 (`(1-body)·wet + body·conv`), adding a woody/plausible instrument-body resonance. It is

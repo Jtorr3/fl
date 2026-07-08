@@ -624,12 +624,15 @@ impl CleaveCore {
                 if s == 0 {
                     continue;
                 }
-                if count <= MAX_SLICES {
+                // Write-guard `< MAX_SLICES`: index `count` must stay ≤ MAX_SLICES-1 here so
+                // that after `count += 1` it is ≤ MAX_SLICES, leaving `slice_starts[count]` (the
+                // sentinel below) a valid index into the [usize; MAX_SLICES + 1] array.
+                if count < MAX_SLICES {
                     self.slice_starts[count] = s;
                     count += 1;
                     last_sample = s as i64;
                 }
-                if count > MAX_SLICES {
+                if count >= MAX_SLICES {
                     break;
                 }
             }
@@ -638,6 +641,11 @@ impl CleaveCore {
             self.grid_fallback();
             return;
         }
+        // Clamp before the sentinel write: `slice_starts` has MAX_SLICES + 1 slots (indices
+        // 0..=MAX_SLICES), so the sentinel index must never exceed MAX_SLICES. The write-guard
+        // above already bounds `count`, but clamp defensively so a busy snapshot with ≥128 onsets
+        // can never index slice_starts[MAX_SLICES + 1] and panic on the audio thread.
+        let count = count.min(MAX_SLICES);
         self.slice_starts[count] = n;
         self.slice_count = count;
     }
@@ -778,6 +786,35 @@ impl CleaveCore {
             fade,
             level,
         };
+    }
+}
+
+#[cfg(test)]
+impl CleaveCore {
+    /// Test hook: load `mono` as the playback snapshot, run the slicer in `mode`, and return
+    /// `(slice_count, sentinel)` where `sentinel == slice_starts[slice_count]`. Drives
+    /// `slice_transients` directly with a controlled onset density (the RT panic regression).
+    pub fn test_slice_snapshot(
+        &mut self,
+        mono: &[f32],
+        mode: SliceMode,
+        sensitivity: f32,
+    ) -> (usize, usize) {
+        let n = mono.len().min(self.ring_cap);
+        self.pb_len = n;
+        for i in 0..n {
+            self.play_l[i] = mono[i];
+            self.play_r[i] = mono[i];
+        }
+        self.s.slice_mode = mode;
+        self.s.sensitivity = sensitivity;
+        self.slice_buffer();
+        (self.slice_count, self.slice_starts[self.slice_count])
+    }
+
+    /// The playback-snapshot length the slicer operated on (== clamped `mono.len()`).
+    pub fn test_pb_len(&self) -> usize {
+        self.pb_len
     }
 }
 

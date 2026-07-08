@@ -74,6 +74,24 @@ fn is_illegal_name_char(c: char) -> bool {
     matches!(c, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*') || c.is_control()
 }
 
+/// Windows reserved device basenames (case-insensitive): `CON PRN AUX NUL`, `COM1..COM9`,
+/// `LPT1..LPT9`. Windows treats a file whose base name (the part before the FIRST dot) matches
+/// one of these as the *device*, even with an extension — so `NUL`, `nul.json`, and `COM5.foo`
+/// all resolve to a device. Writing a preset to such a name silently targets the device: the
+/// write "succeeds", the file never exists, and the preset is lost on the next listing. We
+/// detect the reserved stem and suffix it so it lands on disk as an ordinary file.
+fn is_reserved_stem(stem: &str) -> bool {
+    let up = stem.to_ascii_uppercase();
+    if matches!(up.as_str(), "CON" | "PRN" | "AUX" | "NUL") {
+        return true;
+    }
+    // COM1..9 / LPT1..9 — a 3-letter prefix plus a single 1..9 digit (COM0/LPT0 and COM10+
+    // are NOT reserved).
+    (up.starts_with("COM") || up.starts_with("LPT"))
+        && up.len() == 4
+        && matches!(up.as_bytes()[3], b'1'..=b'9')
+}
+
 /// Sanitize a user-supplied preset name into a safe file stem: drop illegal path
 /// characters and control chars, collapse internal whitespace runs to single spaces,
 /// trim surrounding whitespace and dots (Windows rejects trailing dots/spaces). The
@@ -98,7 +116,22 @@ pub fn sanitize_name(name: &str) -> String {
             prev_space = false;
         }
     }
-    out.trim().trim_matches('.').trim().to_string()
+    let cleaned = out.trim().trim_matches('.').trim().to_string();
+    if cleaned.is_empty() {
+        return cleaned;
+    }
+    // Escape Windows reserved device basenames so the preset writes to a real file, not a device.
+    let stem = cleaned.split('.').next().unwrap_or(cleaned.as_str());
+    if is_reserved_stem(stem) {
+        // Suffix the STEM with '_' (before any extension) so the base name is no longer a device:
+        // "NUL" → "NUL_", "nul.json" → "nul_.json". Idempotent: "NUL_" is not reserved.
+        let mut escaped = String::with_capacity(cleaned.len() + 1);
+        escaped.push_str(stem);
+        escaped.push('_');
+        escaped.push_str(&cleaned[stem.len()..]); // remainder incl. the leading '.', if any
+        return escaped;
+    }
+    cleaned
 }
 
 /// `[MyDocuments]` via the known-folder API. `None` if the shell can't resolve it.
@@ -294,10 +327,77 @@ mod tests {
 
     #[test]
     fn sanitize_is_idempotent() {
-        for s in ["  Foo/Bar  ", "亡霊", "...x...", "a\tb\nc"] {
+        for s in [
+            "  Foo/Bar  ",
+            "亡霊",
+            "...x...",
+            "a\tb\nc",
+            "NUL",
+            "com5",
+            "nul.json",
+            "Con.Preset",
+        ] {
             let once = sanitize_name(s);
             assert_eq!(sanitize_name(&once), once, "not idempotent for {s:?}");
         }
+    }
+
+    // --- Windows reserved device basenames -----------------------------------
+
+    #[test]
+    fn sanitize_escapes_reserved_device_names() {
+        // Bare reserved stems, all cases → suffixed so they are no longer devices.
+        assert_eq!(sanitize_name("NUL"), "NUL_");
+        assert_eq!(sanitize_name("nul"), "nul_");
+        assert_eq!(sanitize_name("NuL"), "NuL_");
+        assert_eq!(sanitize_name("CON"), "CON_");
+        assert_eq!(sanitize_name("prn"), "prn_");
+        assert_eq!(sanitize_name("Aux"), "Aux_");
+        assert_eq!(sanitize_name("COM5"), "COM5_");
+        assert_eq!(sanitize_name("lpt9"), "lpt9_");
+
+        // A reserved stem with an extension is STILL the device on Windows → the STEM is escaped
+        // (not the whole filename), keeping the base name safe: "nul.json" → "nul_.json".
+        assert_eq!(sanitize_name("nul.json"), "nul_.json");
+        assert_eq!(sanitize_name("Con.Preset"), "Con_.Preset");
+        assert_eq!(sanitize_name("COM1.bank.json"), "COM1_.bank.json");
+    }
+
+    #[test]
+    fn sanitize_leaves_non_reserved_lookalikes() {
+        // Not devices: COM0/LPT0, COM10+, and names that merely start with a reserved word.
+        for s in ["COM0", "LPT0", "COM10", "COM12", "CONSOLE", "Nullify", "Auxiliary", "Prne"] {
+            assert_eq!(sanitize_name(s), s, "{s:?} must not be escaped");
+        }
+    }
+
+    #[test]
+    fn reserved_name_round_trips_save_list_load() {
+        // A user naming a preset "NUL" used to silently vanish (write hit the null device).
+        // After escaping, it must save, appear in the listing, and load back.
+        let plugin = "test-reserved";
+        let path = save_user(plugin, "NUL", &vals(&[("x", 1.0), ("y", 2.0)])).expect("save NUL");
+        assert!(path.exists(), "escaped reserved-name preset must exist on disk");
+        assert!(
+            path.file_name().unwrap().to_string_lossy().starts_with("NUL_"),
+            "file stem must be escaped: {}",
+            path.display()
+        );
+
+        let names: Vec<_> = list_user(plugin)
+            .expect("list")
+            .iter()
+            .map(|p| p.name.clone())
+            .collect();
+        assert!(names.contains(&"NUL_".to_string()), "listing must include NUL_: {names:?}");
+
+        let loaded = load_user(plugin, "NUL").expect("load by original name");
+        assert_eq!(loaded.name, "NUL_");
+        assert_eq!(loaded.get("y"), Some(2.0));
+
+        delete_user(plugin, "NUL").expect("delete");
+        assert!(load_user(plugin, "NUL").is_err(), "deleted reserved-name preset must not load");
+        let _ = std::fs::remove_dir(user_plugin_dir(plugin).unwrap());
     }
 
     // --- Disk-tier round trips (GUI-less). These use the SAME code path the preset

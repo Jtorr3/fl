@@ -19,7 +19,8 @@
 //! the pluck). A **continuous-drive** mode feeds the input into the strings at low gain.
 //!
 //! A small embedded **body IR** (a sum of decaying modal resonances, generated at init)
-//! is convolved into the wet path (direct FIR at 1024 taps — cheap at this length).
+//! is convolved into the wet path (direct FIR at the SPECS-mandated 2048 taps — benched in the
+//! tests and comfortably under real-time at this length).
 //!
 //! Everything is preallocated; `process_sample` never allocates. Denormals are handled
 //! by the caller's `ScopedFtz`.
@@ -31,8 +32,10 @@ pub const MAX_STRINGS: usize = 6;
 pub const MAX_DELAY: usize = 4096;
 /// Windowed exciter-burst length grabbed at each onset (~500 samples ≈ 10 ms @ 48 k).
 pub const BURST: usize = 500;
-/// Embedded body impulse response length (taps). 1024 is a small, cheap body (SPECS: 1024–2048).
-pub const BODY_LEN: usize = 1024;
+/// Embedded body impulse response length (taps). SPECS "PLUCK" mandates a **2048-tap body IR**;
+/// the direct-FIR body convolution is benched in the tests (`body_conv_within_rt_budget`) and
+/// stays well under real-time at this length on the build machine.
+pub const BODY_LEN: usize = 2048;
 
 const PI: f32 = std::f32::consts::PI;
 
@@ -673,15 +676,21 @@ impl PluckCore {
         };
         match s.source {
             TuningSource::Midi if s.held_count > 0 => {
-                // Voice-assign held notes low→high; extra strings octave-double.
-                let mut notes: Vec<f32> = s
-                    .held
-                    .iter()
-                    .copied()
-                    .filter(|v| v.is_finite())
-                    .collect();
-                notes.sort_by(|a, b| a.partial_cmp(b).unwrap());
-                let n = notes.len().max(1);
+                // Voice-assign held notes low→high; extra strings octave-double. `configure()`
+                // runs once PER BLOCK on the RT thread, so this must not allocate: a fixed
+                // `[f32; MAX_STRINGS]` scratch + in-place `sort_unstable_by` (non-allocating;
+                // stable `sort_by` heap-allocates a scratch buffer) replaces the old
+                // `Vec` collect+sort. Held notes are bounded at MAX_STRINGS.
+                let mut notes = [0.0f32; MAX_STRINGS];
+                let mut nf = 0usize;
+                for &v in s.held.iter() {
+                    if v.is_finite() && nf < MAX_STRINGS {
+                        notes[nf] = v;
+                        nf += 1;
+                    }
+                }
+                notes[..nf].sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
+                let n = nf.max(1);
                 for i in 0..MAX_STRINGS {
                     let base = notes[i % n];
                     let oct = (i / n) as f32; // stack octaves for extra strings
@@ -876,4 +885,24 @@ impl PluckCore {
 #[inline]
 pub fn db_to_lin(db: f32) -> f32 {
     10.0f32.powf(db / 20.0)
+}
+
+/// Test-only microbench: run the stereo body convolution over `seconds` of audio at `sr` and
+/// return its cost as a percentage of real time (compute_time / audio_duration × 100). Used by
+/// the BODY_LEN spec-compliance test to confirm the 2048-tap direct FIR stays within budget.
+#[cfg(test)]
+pub fn bench_body_rt_percent(sr: f32, seconds: f32) -> f32 {
+    use std::time::Instant;
+    let mut body = Body::new(sr);
+    let n = (sr * seconds) as usize;
+    let mut acc = 0.0f32;
+    let t0 = Instant::now();
+    for i in 0..n {
+        let x = (i as f32 * 0.001).sin();
+        let (l, r) = body.process(x, x * 0.5);
+        acc += l + r;
+    }
+    let elapsed = t0.elapsed().as_secs_f32();
+    std::hint::black_box(acc);
+    100.0 * elapsed / seconds
 }
