@@ -514,3 +514,37 @@ fn extremes_stay_finite_and_bounded() {
     let mpeak = out.iter().fold(0.0f32, |m, &v| m.max(v.abs()));
     assert!(mpeak <= 8.001, "mono peak exceeds the +18 dBFS safety guard: {mpeak}");
 }
+
+/// Regression — user SOUND-PASS report: "adds heavy phasing when mix is turned down".
+/// Blending the wow/flutter-modulated wet against the static latency-matched dry comb-filters
+/// at partial mix. We scale the wow/flutter delay offset by `mix`, so as the effect is dialled
+/// back the wet/dry time-detune shrinks and a steady tone keeps a near-constant envelope
+/// instead of deep periodic flange notches.
+#[test]
+fn partial_mix_does_not_heavily_phase() {
+    let dur = secs(8.0);
+    let sig = testsig::sine(1000.0, 0.5, dur, SR);
+    let mut s = base();
+    s.wow_depth = 0.7;
+    s.flutter = 0.5;
+    s.age = 0.4;
+    s.mix = 0.3; // "turned down" — a subtle tape colour
+    let out = render_with(s, &sig);
+    // Short-time RMS envelope over ~10 ms windows across the steady body (skip 1 s settle).
+    let win = (SR * 0.010) as usize;
+    let body = &out[secs(1.0)..];
+    let mut env: Vec<f32> = Vec::new();
+    let mut i = 0;
+    while i + win <= body.len() {
+        env.push(rms(&body[i..i + win]));
+        i += win;
+    }
+    let emax = env.iter().cloned().fold(0.0f32, f32::max);
+    let emin = env.iter().cloned().fold(f32::INFINITY, f32::min);
+    let ratio_db = 20.0 * (emax / emin.max(1e-9)).log10();
+    // A deep flange notch swings the envelope many dB; the mix-scaled offset keeps it shallow.
+    assert!(
+        ratio_db < 3.0,
+        "partial-mix envelope swing {ratio_db:.2} dB — wow/dry comb is flanging at low mix"
+    );
+}

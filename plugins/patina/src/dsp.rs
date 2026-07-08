@@ -21,9 +21,12 @@
 //! wet path is a *bit-exact* delay of the input by `L = BASE_DELAY + OS_DELAY` samples; the
 //! dry path is delayed by the same `L`, so `out = (1−mix)·dry_L + mix·wet` **nulls exactly**
 //! against the latency-matched dry for any mix (PRD §4 done-bar). The plugin reports `L` via
-//! `set_latency_samples`. Wow/flutter add delay *on top of* the base (one-sided), so with wow
-//! active the wet mean-delay exceeds `L`; at partial mix that dry/wet detune is an intended
-//! lo-fi flange (documented).
+//! `set_latency_samples`. Wow/flutter add delay *on top of* the base (one-sided). To keep a
+//! partial-mix blend from comb-filtering the modulated wet against the static dry (heavy
+//! phasing), the wow/flutter offset is **scaled by `mix`** in the per-sample path: mix=0 → no
+//! offset (wet == dry, exact null) and mix=1 → full wobble (pure wet, nothing to beat
+//! against), so the phasing shrinks as the effect is dialled back instead of peaking at
+//! mid-mix.
 
 use suite_core::db_to_lin;
 use suite_core::dsp::{DelayLine, Detector, EnvFollower, OnePole, Oversampler2x, Svf, tape_soft};
@@ -69,7 +72,7 @@ const AGE_FLUT_MS: f32 = 1.0;
 const AGE_SAT: f32 = 0.5;
 const AGE_DROP_RATE: f32 = 2.5;
 const AGE_DROP_DEPTH: f32 = 0.5;
-const AGE_HISS: f32 = 0.5;
+const AGE_HISS: f32 = 0.35; // SOUND-PASS: was 0.5 — aging piled on too much hiss (user: "just adds hissing")
 const AGE_HUM: f32 = 0.3;
 const AGE_CRACKLE: f32 = 0.5;
 
@@ -402,7 +405,6 @@ struct Channel {
     az_ap: Allpass1,
     hiss_lp: OnePoleLp, // hiss tilt (subtract for a gentle HP shape)
     crackle_bp: Svf,
-    dry_comp: DelayLine, // main dry path, delayed by LATENCY for the mix
     rng: Rng,
 }
 
@@ -418,8 +420,6 @@ impl Channel {
         hiss_lp.set(800.0, sr);
         let mut sat_dry = DelayLine::new(OS_DELAY);
         sat_dry.set_delay(OS_DELAY);
-        let mut dry_comp = DelayLine::new(LATENCY);
-        dry_comp.set_delay(LATENCY);
         Self {
             sr,
             wow: FracDelay::new(max_delay),
@@ -430,7 +430,6 @@ impl Channel {
             az_ap: Allpass1::new(0.6),
             hiss_lp,
             crackle_bp,
-            dry_comp,
             rng: Rng::new(seed),
         }
     }
@@ -444,7 +443,6 @@ impl Channel {
         self.az_ap.reset();
         self.hiss_lp.reset();
         self.crackle_bp.reset();
-        self.dry_comp.reset();
     }
 
     fn set_bump(&mut self, hz: f32, sr: f32) {
@@ -453,6 +451,13 @@ impl Channel {
 
     /// Process one channel sample. `offset`/`dgain`/`hum` come from the shared modulators;
     /// `keyg` is the keyed-noise gain; `apply_azimuth` skews this channel's HF (R only).
+    ///
+    /// Returns `(wet, dry_aligned)`: `wet` is the fully-degraded output; `dry_aligned` is the
+    /// clean wow-delayed reference (`dry15` — same wow/flutter delay, same OS group-delay
+    /// alignment, but pre-saturation / pre-noise). The core blends `wet` toward `dry_aligned`,
+    /// so `mix` crossfades only the *degradation* and never a wet/dry time-detune — no
+    /// comb-filter (phasing) at any mix. With the wow offset scaled by `mix`, `mix = 0` reads
+    /// the static base delay, so `dry_aligned` equals the latency-matched dry (exact null).
     #[inline]
     #[allow(clippy::too_many_arguments)]
     fn process(
@@ -464,7 +469,7 @@ impl Channel {
         hum: f32,
         keyg: f32,
         apply_azimuth: bool,
-    ) -> f32 {
+    ) -> (f32, f32) {
         // 1) wow/flutter fractional delay (base + one-sided modulation).
         self.wow.write(x);
         let wet = self.wow.read(BASE_DELAY as f32 + offset);
@@ -506,7 +511,7 @@ impl Channel {
             let w = self.rng.next_bipolar();
             let lp = self.hiss_lp.process(w);
             let hiss = w - lp * 0.6; // gentle HF tilt
-            noise += hiss * e.hiss * 0.5;
+            noise += hiss * e.hiss * 0.35; // SOUND-PASS: was 0.5 — tape hiss dominated the character
         }
         if e.hum > 1.0e-6 {
             noise += hum * e.hum * 0.15;
@@ -524,7 +529,8 @@ impl Channel {
             noise += ring * e.crackle * 0.6;
         }
 
-        dropped + noise * keyg
+        // `dry15` is the wow-delayed, OS-aligned clean reference the core blends against.
+        (dropped + noise * keyg, dry15)
     }
 }
 
@@ -633,14 +639,21 @@ impl PatinaCore {
         let keyg = self.mods.key_gain(mono, self.eff.key_amount);
         let (offset, dgain, hum) = self.mods.advance(&self.eff);
 
-        let wl = self.ch[0].process(inl, &self.eff, offset, dgain, hum, keyg, false);
-        let wr = self.ch[1].process(inr, &self.eff, offset, dgain, hum, keyg, true);
-
-        let dryl = self.ch[0].dry_comp.process(inl);
-        let dryr = self.ch[1].dry_comp.process(inr);
-
         let mix = self.mix.process(self.mix_t);
         let outg = self.out.process(self.out_t);
+        // Scale the wow/flutter delay offset by mix. Blending a pitch-modulated wet against
+        // the *static* latency-matched dry combs (heavy phasing) worst at mid-mix, where the
+        // full wow depth met a full-weight dry. Scaling the offset by mix means the wet/dry
+        // time-detune shrinks as you dial the effect back, so a partial "tape colour" no
+        // longer flanges. mix=0 → offset 0 → wet == dry (mix=0 null preserved exactly);
+        // mix=1 → full wobble (pure wet, no dry to interfere).
+        let moff = offset * mix;
+
+        let (wl, dryl) = self.ch[0].process(inl, &self.eff, moff, dgain, hum, keyg, false);
+        let (wr, dryr) = self.ch[1].process(inr, &self.eff, moff, dgain, hum, keyg, true);
+
+        // Blend against the time-aligned clean reference (shares the wow delay), so mix
+        // crossfades only degradation — no wet/dry comb (phasing) at any mix.
         let ol = (dryl + mix * (wl - dryl)) * outg;
         let or = (dryr + mix * (wr - dryr)) * outg;
         (ol.clamp(-CEILING, CEILING), or.clamp(-CEILING, CEILING))
@@ -652,10 +665,12 @@ impl PatinaCore {
     pub fn process_mono(&mut self, x: f32) -> f32 {
         let keyg = self.mods.key_gain(x, self.eff.key_amount);
         let (offset, dgain, hum) = self.mods.advance(&self.eff);
-        let wet = self.ch[0].process(x, &self.eff, offset, dgain, hum, keyg, false);
-        let dry = self.ch[0].dry_comp.process(x);
         let mix = self.mix.process(self.mix_t);
         let outg = self.out.process(self.out_t);
+        // See process_stereo: scale the wow/flutter offset by mix so partial mix does not
+        // comb-filter the modulated wet against the static dry. Null-exact at mix=0.
+        let moff = offset * mix;
+        let (wet, dry) = self.ch[0].process(x, &self.eff, moff, dgain, hum, keyg, false);
         let y = (dry + mix * (wet - dry)) * outg;
         y.clamp(-CEILING, CEILING)
     }
