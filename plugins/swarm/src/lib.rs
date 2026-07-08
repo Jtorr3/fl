@@ -585,6 +585,39 @@ mod render_tests {
         suite_core::manual::assert_manual_covers_params(crate::MANUAL_DOC, &crate::SwarmParams::default());
     }
 
+    /// SOUND-PASS audition (permanent infra, `#[ignore]`d). Every preset + default over a
+    /// minor-triad pad and formant vocal (2.5 s + 4 s silence tail) as STEREO WAVs →
+    /// renders/_audition/SWARM/<QVS_AUDITION_DIR|before>/ for cloud density / ringing analysis.
+    #[test]
+    #[ignore]
+    fn audition_render_musical_sources() {
+        use crate::dsp::Settings;
+        use suite_core::harness::write_wav_stereo;
+        let sr = 48_000.0f32;
+        let subdir = std::env::var("QVS_AUDITION_DIR").unwrap_or_else(|_| "before".into());
+        let tail = (sr * 4.0) as usize;
+        let mut pad = testsig::synth_pad(110.0, 2.5, sr);
+        pad.extend(std::iter::repeat(0.0).take(tail));
+        let mut vocal = testsig::synth_vocal(220.0, (sr * 2.5) as usize, sr);
+        vocal.extend(std::iter::repeat(0.0).take(tail));
+        let presets = load_all(PRESET_JSON);
+        let mut jobs: Vec<(String, Settings)> = presets
+            .iter()
+            .map(|p| {
+                (p.name.to_lowercase().replace([' ', '·', '-', '/'], "_"), settings_from_preset(p))
+            })
+            .collect();
+        jobs.push(("default".into(), Settings::default()));
+        for (fname, s) in &jobs {
+            for (tag, src) in [("pad", &pad), ("vocal", &vocal)] {
+                let mut core = SwarmCore::new(sr);
+                let (l, r) = core.process_stereo(src, s);
+                let path = render_path("_audition/SWARM", &format!("{subdir}/{fname}__{tag}"));
+                write_wav_stereo(&path, &l, &r, sr as u32).expect("write audition");
+            }
+        }
+    }
+
     /// Render each factory preset over pink noise and a full-band chirp, write the WAVs into
     /// renders/SWARM/, and assert the universal properties.
     #[test]
