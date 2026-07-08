@@ -119,6 +119,21 @@
       If the script doesn't appear in the menu, FL may need a rescan / restart, or the
       Documents redirect (OneDrive) may point elsewhere than FL's configured user data
       folder — check FL's *File settings → user data folder* and copy it there.
+- [ ] **W2-BREAK-CHOP (shipped 2026-07-07): run the piano-roll script in FL.**
+      Copied to `Documents\Image-Line\FL Studio\Settings\Piano roll scripts\BreakChop.pyscript`
+      (alongside RumbleBassline + ComposeWithLLM; byte-for-byte copy verified). Offline
+      gate passes 16/16 via the shared mock `flpianoroll`, but FL can't run piano-roll
+      scripts headless — so verify live: open the Piano roll on a channel with a sliced
+      break (Fruity Slicer slice-notes) or any note run, **select** the notes to chop
+      (Ctrl+A = all), **Tools → Scripting → Break Chop**, confirm the dialog shows all
+      inputs (intensity / permute / roll chance-count-decay / stutter chance-gate /
+      reverse chance / keep-first-beat / humanize / seed), click OK. Check: only the
+      SELECTED notes are rewritten (unselected untouched); the chop re-fills the SAME
+      span (loop point intact); the downbeat stays put with Keep-first-beat on; rolls
+      are rapid decaying retriggers; reverse renders as a fast double-time repeat (FL's
+      note API has no reverse flag — documented). Same Seed → identical result. If the
+      script isn't in the menu, rescan/restart FL or check FL's *File settings → user
+      data folder* matches the OneDrive-redirected Documents path.
 
 ## Toolchain note (informational — the loop handles it, but a fresh clone won't)
 - `tools/bin/` is gitignored, including `tools/bin/mingw64` (portable MinGW-w64

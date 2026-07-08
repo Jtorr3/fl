@@ -1,0 +1,403 @@
+"""BreakChop - FL Studio Piano Roll script (Qeynos W2).
+
+Rewrites the SELECTED notes in the piano roll into jungle / drum-and-bass CHOP
+patterns. Point it at a sliced break (Fruity Slicer slice-notes, or ANY selected
+note sequence - each note is treated as one "slice"), select the notes you want
+to mangle, and run: the script permutes, rolls, stutter-gates and reverses those
+slices in place, re-filling the SAME total span so the loop point is intact.
+
+Operations (each gated by its own probability, all inside the master INTENSITY
+gate that decides how much of the sequence is touched at all):
+
+  * Permute       - reorder which slice's pitch/velocity plays in each slot (the
+                    classic amen-break shuffle). The time-grid of the selection
+                    is preserved; only the CONTENT assigned to each slot moves.
+  * Roll          - subdivide a slot into `roll_count` (2/3/4) rapid retriggers
+                    of its slice, velocity decaying by `roll_decay` each hit.
+  * Stutter-gate  - shorten + repeat: split the slot in two and gate each repeat
+                    to `gate_pct` of its sub-slot (silence in the gaps).
+  * Reverse       - FL's piano-roll `flpianoroll.Note` has NO reverse/porta
+                    property that flips slice playback (reverse is a Fruity
+                    Slicer / audio-clip property, not a MIDI-note property), so
+                    per the work order this is EMULATED as a "double-time repeat"
+                    (two full-length retriggers = a fast roll into the next
+                    slice). Documented; set REVERSE_AVAILABLE True if a future FL
+                    exposes a real note-reverse flag.
+
+Rules (per the work order):
+  * Operate ONLY on the SELECTED notes. Fallback: if nothing is selected, the
+    WHOLE score is treated as the selection (matches FL script conventions -
+    ComposeWithLLM et al. operate on the whole score) - DOCUMENTED.
+  * PRESERVE the total span: every slot's output tiles exactly [slot_start,
+    slot_end], and the LAST slot always sustains to the original end (even under
+    stutter-gate), so the break's last-note end is preserved.
+  * DETERMINISTIC per seed: same inputs + seed -> identical output.
+  * Velocities scaled sensibly (roll decay, gentle stutter drop) + optional
+    seeded humanize, clamped to a musical floor.
+  * KEEP-FIRST-BEAT protects the downbeat slice (the earliest selected note, or
+    the earliest one that lands on a bar line) - it is emitted byte-for-byte
+    unchanged so the "one" of the break never wanders.
+
+------------------------------------------------------------------------------
+Design choices (same shape as W1 RumbleBassline, documented per the work order):
+
+* SELF-CONTAINED single file. FL's piano-roll script sandbox blocks file access,
+  so an adjacent shared `.py` helper can't be imported - all logic lives here.
+
+* The chop logic is the PURE function `chop_notes(...)`, which has NO dependency
+  on `flpianoroll` and takes/returns plain dicts. FL only calls `createDialog()`
+  / `apply(form)`. This split lets the offline gate (pyscripts/tests/
+  test_breakchop.py) exercise the generator with the shared mock `flpianoroll`
+  (pyscripts/tests/mock_fl.py, factored out of W1's test), since FL cannot run
+  headless. The `import flpianoroll` is guarded so the module imports cleanly
+  outside FL.
+
+* REWRITE-in-place semantics (unlike W1's append): `apply()` deletes ONLY the
+  selected notes and re-adds the chopped output; every UNSELECTED note is left
+  untouched byte-for-byte.
+------------------------------------------------------------------------------
+"""
+
+import random
+
+# FL injects `flpianoroll` at runtime; guard the import so the module can also be
+# imported by the offline test harness (and by the shared mock) outside FL.
+try:
+    import flpianoroll as flp
+except ImportError:  # running under the offline test gate / mock
+    flp = None
+
+
+# FL's piano-roll Note API exposes no reverse/porta flag that flips slice
+# playback, so reverse is emulated as a double-time repeat (see module docstring).
+# Flip this to True only if a future FL build exposes a real note-reverse.
+REVERSE_AVAILABLE = False
+
+ROLL_COUNT_LABELS = ("2", "3", "4")
+ROLL_COUNT_VALUES = (2, 3, 4)
+
+
+# --------------------------------------------------------------------------- #
+# Small deterministic helpers
+# --------------------------------------------------------------------------- #
+
+def _clampv(v):
+    """Clamp a velocity to a musical, non-zero range (0..1)."""
+    return max(0.02, min(1.0, float(v)))
+
+
+def _tile(start, length, count):
+    """Split [start, start+length] into `count` integer-tick sub-spans that tile
+    it EXACTLY (no gaps, no overhang). Returns a list of (sub_start, sub_len)."""
+    count = max(1, int(count))
+    spans = []
+    for j in range(count):
+        a = start + int(round(j * length / count))
+        b = start + int(round((j + 1) * length / count))
+        spans.append((a, max(1, b - a)))
+    return spans
+
+
+# --------------------------------------------------------------------------- #
+# Per-slot emitters (each returns a list of note dicts covering the slot)
+# --------------------------------------------------------------------------- #
+
+def _emit_single(slot, pitch, vel, role, reversed_flag=False):
+    a, ln = slot["start"], slot["len"]
+    return [{
+        "number": int(pitch), "time": int(a), "length": int(max(1, ln)),
+        "velocity": _clampv(vel), "role": role, "slot": slot["idx"],
+        "source_slot": slot["source"], "reversed": bool(reversed_flag),
+    }]
+
+
+def _emit_roll(slot, pitch, vel, count, decay):
+    """Subdivide the slot into `count` retriggers with decaying velocity."""
+    count = max(2, min(4, int(count)))
+    d = max(0.0, min(0.95, float(decay) / 100.0))
+    out = []
+    for j, (a, ln) in enumerate(_tile(slot["start"], slot["len"], count)):
+        out.append({
+            "number": int(pitch), "time": int(a), "length": int(ln),
+            "velocity": _clampv(vel * ((1.0 - d) ** j)),
+            "role": "roll", "slot": slot["idx"], "source_slot": slot["source"],
+            "reversed": False,
+        })
+    return out
+
+
+def _emit_stutter(slot, pitch, vel, gate_pct, fill_end, reps=2):
+    """Shorten + repeat: `reps` sub-slots, each note gated to gate_pct of its
+    sub-slot. When `fill_end` (the LAST slot of the whole selection), the final
+    repeat sustains to the slot end so the break's total span is preserved."""
+    g = max(0.05, min(1.0, float(gate_pct) / 100.0))
+    spans = _tile(slot["start"], slot["len"], reps)
+    out = []
+    for j, (a, ln) in enumerate(spans):
+        last = (j == len(spans) - 1)
+        gated = ln if (last and fill_end) else max(1, int(round(ln * g)))
+        # slight velocity lift on the first hit, gentle drop after (gate feel)
+        v = vel if j == 0 else vel * 0.85
+        out.append({
+            "number": int(pitch), "time": int(a), "length": int(gated),
+            "velocity": _clampv(v), "role": "stutter", "slot": slot["idx"],
+            "source_slot": slot["source"], "reversed": False,
+        })
+    return out
+
+
+def _emit_reverse(slot, pitch, vel, available):
+    """Real reverse if the API exposes it, else emulate a double-time repeat
+    (two full-length retriggers = a fast roll into the next slice)."""
+    if available:
+        n = _emit_single(slot, pitch, vel, "reverse", reversed_flag=True)
+        return n
+    out = []
+    for j, (a, ln) in enumerate(_tile(slot["start"], slot["len"], 2)):
+        out.append({
+            "number": int(pitch), "time": int(a), "length": int(ln),
+            "velocity": _clampv(vel if j == 0 else vel * 0.9),
+            "role": "reverse_dt", "slot": slot["idx"],
+            "source_slot": slot["source"], "reversed": False,
+        })
+    return out
+
+
+# --------------------------------------------------------------------------- #
+# The pure chopper (importable & fully deterministic per seed)
+# --------------------------------------------------------------------------- #
+
+def chop_notes(
+    notes,
+    ppq,
+    intensity=100.0,
+    permute_amount=50.0,
+    roll_chance=30.0,
+    roll_count=3,
+    roll_decay=30.0,
+    stutter_chance=20.0,
+    gate_pct=50.0,
+    reverse_chance=15.0,
+    keep_first_beat=True,
+    humanize_vel=0.0,
+    seed=1,
+    reverse_available=REVERSE_AVAILABLE,
+):
+    """Rewrite a list of selected notes into a jungle/dnb chop pattern.
+
+    Parameters
+    ----------
+    notes : list of dict   each {number, time, length, velocity}; the SELECTED
+                           notes (or the whole score, per the fallback).
+    ppq : int              ticks per quarter note (from flp.score.PPQ); used only
+                           to locate bar lines for the keep-first-beat downbeat.
+    intensity : float      0..100 - probability EACH slot is touched at all; 0 =
+                           no changes (output == input, byte-for-byte).
+    permute_amount : float 0..100 - fraction of the touched slots whose slice
+                           content is shuffled among themselves.
+    roll_chance : float    0..100 - per touched slot, chance of a roll.
+    roll_count : int       2/3/4 - retriggers per roll.
+    roll_decay : float     0..95 - % velocity drop per roll hit.
+    stutter_chance : float 0..100 - per touched slot (after roll), chance of a
+                           stutter-gate.
+    gate_pct : float       5..100 - note length kept per stutter sub-slot.
+    reverse_chance : float 0..100 - per touched slot (after roll/stutter), chance
+                           of a reverse (emulated as double-time when the API has
+                           no reverse flag).
+    keep_first_beat : bool protect the downbeat slice (emit it unchanged).
+    humanize_vel : float   0..40 - seeded +/- velocity jitter (%) on TOUCHED
+                           notes only (untouched/protected stay byte-for-byte).
+    seed : int             RNG seed -> fully deterministic output.
+    reverse_available : bool whether a real note-reverse flag exists (default
+                           False on current FL -> reverse is emulated).
+
+    Returns
+    -------
+    list of dict, each with:
+        number, time, length, velocity  - the written note (velocity 0..1)
+        role     : "passthrough"|"permute"|"roll"|"stutter"|"reverse"|"reverse_dt"
+        slot     : index of the time-slot it fills (in time-sorted order)
+        source_slot : index of the slice whose pitch/velocity it carries
+        reversed : bool (only ever True when a real reverse flag is available)
+    """
+    # Order slices by time (stable), remembering nothing else - the caller maps
+    # our output back onto the score.
+    src_notes = [dict(number=int(n["number"]), time=int(n["time"]),
+                      length=max(1, int(n["length"])),
+                      velocity=float(n["velocity"])) for n in notes]
+    order = sorted(range(len(src_notes)), key=lambda i: (src_notes[i]["time"],
+                                                         src_notes[i]["number"]))
+    seq = [src_notes[i] for i in order]
+    n = len(seq)
+    if n == 0:
+        return []
+
+    intensity = max(0.0, min(100.0, float(intensity)))
+    permute_amount = max(0.0, min(100.0, float(permute_amount)))
+    hv = max(0.0, float(humanize_vel)) / 100.0
+    bar_ticks = int(ppq) * 4
+
+    rng = random.Random(int(seed))
+
+    # --- downbeat (protected when keep_first_beat) --------------------------- #
+    protected = -1
+    if keep_first_beat:
+        on_bar = [i for i in range(n) if seq[i]["time"] % bar_ticks == 0]
+        protected = on_bar[0] if on_bar else 0   # earliest bar-aligned, else 1st
+
+    # --- pass 1: which slots are touched (master intensity gate) ------------- #
+    touched = [False] * n
+    for i in range(n):
+        if i == protected:
+            continue
+        touched[i] = (rng.random() * 100.0) < intensity
+
+    # --- pass 2: permutation among the touched slots ------------------------- #
+    source = list(range(n))
+    touched_idx = [i for i in range(n) if touched[i]]
+    k = int(round(permute_amount / 100.0 * len(touched_idx)))
+    if k >= 2:
+        chosen = sorted(rng.sample(touched_idx, k))
+        perm = chosen[:]
+        rng.shuffle(perm)
+        for dst, s in zip(chosen, perm):
+            source[dst] = s
+
+    # --- pass 3: per-slot emit ---------------------------------------------- #
+    # The slot with the maximum end is the one whose note-end defines the total
+    # span; it always sustains to its end (even under stutter-gate) so the span
+    # is preserved exactly.
+    max_end_idx = max(range(n), key=lambda i: seq[i]["time"] + seq[i]["length"])
+    out = []
+    for i in range(n):
+        orig = seq[i]
+        slot = {"idx": i, "start": orig["time"], "len": orig["length"],
+                "source": source[i]}
+
+        # protected downbeat or untouched slot -> byte-for-byte passthrough.
+        if i == protected or not touched[i]:
+            out.append({
+                "number": orig["number"], "time": orig["time"],
+                "length": orig["length"], "velocity": _clampv(orig["velocity"]),
+                "role": "passthrough", "slot": i, "source_slot": i,
+                "reversed": False,
+            })
+            continue
+
+        s = seq[source[i]]
+        pitch, base_vel = s["number"], s["velocity"]
+
+        # fixed draw order (roll, stutter, reverse) keeps output deterministic
+        # regardless of which branch is taken.
+        r_roll = rng.random() * 100.0
+        r_stut = rng.random() * 100.0
+        r_rev = rng.random() * 100.0
+
+        if r_roll < roll_chance:
+            emitted = _emit_roll(slot, pitch, base_vel, roll_count, roll_decay)
+        elif r_stut < stutter_chance:
+            emitted = _emit_stutter(slot, pitch, base_vel, gate_pct,
+                                    fill_end=(i == max_end_idx))
+        elif r_rev < reverse_chance:
+            emitted = _emit_reverse(slot, pitch, base_vel, reverse_available)
+        else:
+            role = "permute" if source[i] != i else "passthrough"
+            emitted = _emit_single(slot, pitch, base_vel, role)
+
+        # seeded velocity humanize on touched notes only.
+        if hv > 0.0:
+            for e in emitted:
+                e["velocity"] = _clampv(e["velocity"] + rng.uniform(-hv, hv))
+
+        out.extend(emitted)
+
+    out.sort(key=lambda e: (e["time"], e["number"]))
+    return out
+
+
+# --------------------------------------------------------------------------- #
+# FL Studio dialog + apply glue (only runs inside FL)
+# --------------------------------------------------------------------------- #
+
+def createDialog():
+    """Build the ScriptDialog FL shows before running the script."""
+    form = flp.ScriptDialog(
+        "Break Chop",
+        "Rewrite the SELECTED notes into jungle / dnb chop patterns "
+        "(permute / roll / stutter-gate / reverse). Operates in place on the "
+        "selection, preserving its total span. If nothing is selected the whole "
+        "score is chopped. Reverse is emulated as a double-time repeat (FL's "
+        "note API has no reverse flag).",
+    )
+    form.AddInputKnobInt("Intensity %", 80, 0, 100)
+    form.AddInputKnobInt("Permute amount %", 50, 0, 100)
+    form.AddInputKnobInt("Roll chance %", 30, 0, 100)
+    form.AddInputCombo("Roll count", ",".join(ROLL_COUNT_LABELS), 1)   # default 3
+    form.AddInputKnobInt("Roll decay %", 30, 0, 95)
+    form.AddInputKnobInt("Stutter chance %", 20, 0, 100)
+    form.AddInputKnobInt("Stutter gate %", 50, 5, 100)
+    form.AddInputKnobInt("Reverse chance %", 15, 0, 100)
+    form.AddInputCheckbox("Keep first beat", True)
+    form.AddInputKnobInt("Humanize velocity +/-", 6, 0, 40)
+    form.AddInputKnobInt("Seed", 1, 0, 9999)
+    return form
+
+
+def apply(form):
+    """FL calls this with the filled-in dialog; rewrite the SELECTED notes.
+
+    Only the selected notes are deleted + rewritten; unselected notes are left
+    untouched. Fallback: if nothing is selected, the whole score is chopped.
+    """
+    score = flp.score
+    count = score.noteCount
+
+    sel_idx = [i for i in range(count) if getattr(score.getNote(i), "selected", False)]
+    if not sel_idx:
+        sel_idx = list(range(count))     # fallback: whole score
+    if not sel_idx:
+        return
+
+    in_notes = []
+    for i in sel_idx:
+        nt = score.getNote(i)
+        in_notes.append({
+            "number": nt.number, "time": nt.time,
+            "length": nt.length, "velocity": nt.velocity,
+        })
+
+    roll_count = ROLL_COUNT_VALUES[int(form.GetInputValue("Roll count"))]
+
+    out = chop_notes(
+        in_notes,
+        ppq=int(flp.score.PPQ),
+        intensity=float(form.GetInputValue("Intensity %")),
+        permute_amount=float(form.GetInputValue("Permute amount %")),
+        roll_chance=float(form.GetInputValue("Roll chance %")),
+        roll_count=roll_count,
+        roll_decay=float(form.GetInputValue("Roll decay %")),
+        stutter_chance=float(form.GetInputValue("Stutter chance %")),
+        gate_pct=float(form.GetInputValue("Stutter gate %")),
+        reverse_chance=float(form.GetInputValue("Reverse chance %")),
+        keep_first_beat=bool(form.GetInputValue("Keep first beat")),
+        humanize_vel=float(form.GetInputValue("Humanize velocity +/-")),
+        seed=int(form.GetInputValue("Seed")),
+    )
+
+    # Delete the selected notes (descending index so earlier indices stay valid),
+    # then add the chopped output. Unselected notes are never touched.
+    for i in sorted(sel_idx, reverse=True):
+        score.deleteNote(i)
+
+    for nd in out:
+        nt = flp.Note()
+        nt.number = int(nd["number"])
+        nt.time = int(nd["time"])
+        nt.length = int(max(1, nd["length"]))
+        nt.velocity = float(nd["velocity"])
+        if nd.get("reversed") and hasattr(nt, "reverse"):
+            try:
+                nt.reverse = True
+            except Exception:
+                pass
+        score.addNote(nt)

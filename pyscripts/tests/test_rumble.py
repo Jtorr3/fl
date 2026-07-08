@@ -30,110 +30,18 @@ The mock `flpianoroll` module here is intended to be REUSED by W2-BREAK-CHOP.
 """
 from __future__ import annotations
 
-import importlib.util
 import sys
-import types
-from importlib.machinery import SourceFileLoader
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from mock_fl import load_pyscript  # noqa: E402  (shared mock, factored out for W2)
 
 PYSCRIPT = Path(__file__).resolve().parent.parent / "RumbleBassline.pyscript"
 
 
-# --------------------------------------------------------------------------- #
-# Mock `flpianoroll` (reusable by W2-BREAK-CHOP)
-# --------------------------------------------------------------------------- #
-
-class MockNote:
-    """Mirror of FL's flpianoroll.Note (the properties we touch)."""
-
-    def __init__(self):
-        self.number = 0
-        self.time = 0
-        self.length = 0
-        self.velocity = 0.8
-        self.pan = 0.5
-        self.selected = False
-        self.muted = False
-
-
-class MockScore:
-    """Mirror of flpianoroll.score: an indexable note list + PPQ + selection."""
-
-    def __init__(self, ppq=96):
-        self.PPQ = ppq
-        self._notes = []
-        self._selection = (0, -1)   # (start, end); end<=start means "no selection"
-
-    def addNote(self, note):
-        self._notes.append(note)
-
-    def getNote(self, i):
-        return self._notes[i]
-
-    def deleteNote(self, i):
-        del self._notes[i]
-
-    def clearNotes(self, all=True):
-        self._notes = []
-
-    @property
-    def noteCount(self):
-        return len(self._notes)
-
-    def getTimelineSelection(self):
-        return self._selection
-
-
-class MockDialog:
-    """Mirror of flpianoroll.ScriptDialog: collects inputs, serves defaults."""
-
-    def __init__(self, title="", description=""):
-        self.title = title
-        self.description = description
-        self._values = {}
-
-    def AddInputCombo(self, name, options, default_index):
-        self._values[name] = int(default_index)
-
-    def AddInputKnob(self, name, value, vmin, vmax):
-        self._values[name] = float(value)
-
-    def AddInputKnobInt(self, name, value, vmin, vmax):
-        self._values[name] = int(value)
-
-    def AddInputCheckbox(self, name, value):
-        self._values[name] = bool(value)
-
-    def AddInputText(self, name, value):
-        self._values[name] = value
-
-    def SetValue(self, name, value):
-        self._values[name] = value
-
-    def GetInputValue(self, name):
-        return self._values[name]
-
-    def Execute(self):
-        return True
-
-
-def make_mock_flp(ppq=96):
-    mod = types.ModuleType("flpianoroll")
-    mod.Note = MockNote
-    mod.score = MockScore(ppq)
-    mod.ScriptDialog = MockDialog
-    return mod
-
-
 def load_module(ppq=96):
     """Load the .pyscript with a fresh mock flpianoroll injected."""
-    sys.modules["flpianoroll"] = make_mock_flp(ppq)
-    # `.pyscript` isn't a recognized source suffix, so load via an explicit loader.
-    loader = SourceFileLoader("rumble_bassline", str(PYSCRIPT))
-    spec = importlib.util.spec_from_loader("rumble_bassline", loader)
-    mod = importlib.util.module_from_spec(spec)
-    loader.exec_module(mod)
-    return mod
+    return load_pyscript(PYSCRIPT, "rumble_bassline", ppq)
 
 
 RB = load_module()
