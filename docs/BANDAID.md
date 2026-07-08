@@ -23,7 +23,7 @@ hats, add snap to a drum bus, or let a pad bloom.
       │                                                     │
  dry ─┴────────────────────────────────────────────────────┴─► out = x + mix · Σ_b (g_b − 1)·band_b
                                                                  (solo: out = Σ_soloed g_b·band_b)
-                                                        · Out trim · ±0.999 ceiling
+                                                        · Out trim · ±8.0 runaway/NaN guard
 ```
 
 ### Why it nulls at neutral

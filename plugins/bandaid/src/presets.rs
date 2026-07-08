@@ -31,6 +31,13 @@ pub const PRESET_JSON: &[&str] = &[
          "xlow": 150.0, "xhigh": 3200.0,
          "latk": 3.0, "lsus": -3.0, "matk": 5.0, "msus": -4.0, "hatk": 4.0, "hsus": -2.0,
          "det": 0.7, "mix": 1.0, "out": -0.5 }"#,
+    // Hardest attack-boost preset — a tight, hot slam kick that pushes the onset well over
+    // 0 dBFS float on a real bus to prove the boosted transient PUNCHES (crest up) instead of
+    // digitally clipping. Tight low (lsus −4, no boom) + present top (hatk +5) keep it clean.
+    r#"{ "name": "Peak Slam Kick", "category": "Drums/Kick",
+         "xlow": 95.0, "xhigh": 2600.0,
+         "latk": 8.0, "lsus": -4.0, "matk": 5.0, "msus": -2.0, "hatk": 5.0, "hsus": -1.0,
+         "det": 0.65, "mix": 1.0, "out": -1.5 }"#,
     // ---- Bus-Snap ---------------------------------------------------------
     r#"{ "name": "Drum Bus Snap", "category": "Bus-Snap",
          "xlow": 140.0, "xhigh": 3000.0,
@@ -71,10 +78,9 @@ pub const PRESET_JSON: &[&str] = &[
          "latk": -3.0, "lsus": 5.0, "matk": -4.0, "msus": 7.0, "hatk": -1.0, "hsus": 4.0,
          "det": 2.5, "mix": 1.0, "out": -2.0 }"#,
     // ---- Extreme ----------------------------------------------------------
-    r#"{ "name": "Full Squash-Reverse", "category": "Extreme",
-         "xlow": 160.0, "xhigh": 2600.0,
-         "latk": -9.0, "lsus": 9.0, "matk": -9.0, "msus": 9.0, "hatk": -9.0, "hsus": 9.0,
-         "det": 1.0, "mix": 1.0, "out": -2.0 }"#,
+    // (Pruned "Full Squash-Reverse" — its all-band attack-down/sustain-up squash was a
+    // near-duplicate of "Inverted Timestretch" and rendered muddy with crest *below* the dry;
+    // the reference bar wants tight punchy transients, so the redundant softener was cut.)
     r#"{ "name": "Gated Void Slam", "category": "Extreme",
          "xlow": 130.0, "xhigh": 2900.0,
          "latk": 9.0, "lsus": -12.0, "matk": 8.0, "msus": -12.0, "hatk": 7.0, "hsus": -11.0,
@@ -137,8 +143,9 @@ mod tests {
     #[test]
     fn bank_meets_expansion_quality_gate() {
         let presets = load_all(PRESET_JSON);
-        // Expanded bank: SPECS target for this simpler utility FX.
-        assert!(presets.len() >= 12, "BANDAID bank too small: {}", presets.len());
+        // Curated bank (SOUND-PASS): 15 presets across 5 categories after pruning one
+        // redundant Extreme softener and adding a hard-punch "Peak Slam Kick".
+        assert!(presets.len() >= 14, "BANDAID bank too small: {}", presets.len());
 
         let d = Settings::default();
         let settings: Vec<Settings> = presets.iter().map(settings_from_preset).collect();

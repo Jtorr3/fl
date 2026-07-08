@@ -349,6 +349,118 @@ fn presets_pass_universal_assertions() {
 }
 
 // ---------------------------------------------------------------------------
+// SOUND-PASS regression: a hard attack boost PUNCHES (crest up) without clipping
+// ---------------------------------------------------------------------------
+
+/// A hot four-on-the-floor kick with all-band Attack +12 dB must drive the onset transient
+/// *above unity* with a *higher* crest than the dry — proving the final clamp is the ±8.0
+/// runaway guard, not the old ±0.999 ceiling (which would flat-top the transient at ~0 dBFS
+/// and collapse the crest). Guards the CEILING policy in dsp.rs against regressions.
+#[test]
+fn boosted_transient_not_clipped() {
+    let kick = testsig::synth_kick_loop(140.0, 2, SR);
+    let neutral = render_with(base(), &kick);
+
+    let mut s = base();
+    s.attack_db = [12.0, 12.0, 12.0]; // hard attack boost, out 0 dB, mix 100 %
+    let boosted = render_with(s, &kick);
+
+    let peak = |b: &[f32]| b.iter().fold(0.0f32, |m, &v| m.max(v.abs()));
+    let crest = |b: &[f32]| suite_core::harness::peak_dbfs(b) - rms_dbfs(b);
+    let pk_n = peak(&neutral);
+    let pk_b = peak(&boosted);
+
+    // Attack boost lifts the transient peak clearly above the dry.
+    assert!(pk_b > pk_n + 0.1, "attack boost should raise the peak: {pk_n:.3} -> {pk_b:.3}");
+    // ...and above unity — impossible under a ±0.999 clamp in the mixed output path.
+    assert!(pk_b > 1.05, "boosted transient peak {pk_b:.3} pinned near unity — clamp clipping?");
+    // Finite and under the ±8.0 safety guard.
+    assert!(!suite_core::harness::has_nan_or_inf(&boosted), "boosted output has NaN/inf");
+    assert!(pk_b <= 8.001, "boosted peak {pk_b:.3} exceeds the ±8.0 safety guard");
+    // Crest (punch) rises — the transient designer is adding attack, not squashing it.
+    assert!(
+        crest(&boosted) > crest(&neutral) + 1.0,
+        "attack boost should increase crest: {:.2} -> {:.2} dB",
+        crest(&neutral),
+        crest(&boosted)
+    );
+}
+
+// ---------------------------------------------------------------------------
+// SOUND-PASS regression: stereo transient image stays put (normalized detector)
+// ---------------------------------------------------------------------------
+
+/// A level-panned kick (L, R = 0.7·L) run through the two independent per-channel cores with
+/// a hard attack boost must keep its input L/R ratio at the output — the transient image must
+/// not pump or drift. The detector's attack weight is the *normalized* overshoot
+/// `(fast−slow)/slow`, which is scale-invariant, so both channels apply the SAME gain even
+/// though they are unlinked; the image is preserved without needing an explicit stereo-link.
+#[test]
+fn stereo_transient_image_stable() {
+    let left = testsig::synth_kick_loop(140.0, 2, SR);
+    let right: Vec<f32> = left.iter().map(|&v| 0.7 * v).collect();
+
+    let mut s = base();
+    s.attack_db = [12.0, 12.0, 12.0];
+    let mut cl = BandaidCore::new(SR);
+    let mut cr = BandaidCore::new(SR);
+    cl.configure(&s);
+    cr.configure(&s);
+    let ol: Vec<f32> = left.iter().map(|&x| cl.process_sample(x)).collect();
+    let or_: Vec<f32> = right.iter().map(|&x| cr.process_sample(x)).collect();
+
+    let rms = |b: &[f32]| (b.iter().map(|&v| (v * v) as f64).sum::<f64>() / b.len() as f64).sqrt();
+    let ratio = (rms(&or_) / rms(&ol)) as f32;
+    // Output ratio must track the 0.70 input pan within a tight tolerance (no image drift).
+    assert!(
+        (ratio - 0.70).abs() < 0.02,
+        "stereo transient image drifted: out R/L {ratio:.4} (input 0.70)"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// SOUND-PASS audition render (permanent infra, `#[ignore]`d in normal runs)
+// ---------------------------------------------------------------------------
+
+/// Render every factory preset AND `Settings::default()` over TWO genre-right transient
+/// sources — an atmospheric-dnb break and a four-on-the-floor kick loop (140 BPM) — into
+/// renders/_audition/BANDAID/<QVS_AUDITION_DIR or "before">/<preset>_{break,kick}.wav.
+/// The kick loop is the real transient-punch test: it proves an attack-boosted onset
+/// PUNCHES (higher crest, clean peak) instead of digitally clipping. Analyzed offline by
+/// tools/audition.py; `Peak Slam Kick` deliberately exercises the safety clamp.
+#[test]
+#[ignore]
+fn audition_render_musical_sources() {
+    use suite_core::harness::{render_offline, render_path, write_wav};
+
+    let sr = 48_000.0f32;
+    let subdir = std::env::var("QVS_AUDITION_DIR").unwrap_or_else(|_| "before".into());
+
+    let brk = testsig::synth_break(140.0, 4, sr);
+    let kick = testsig::synth_kick_loop(140.0, 4, sr);
+
+    let presets = suite_core::presets::load_all(crate::presets::PRESET_JSON);
+    let mut jobs: Vec<(String, Settings)> = presets
+        .iter()
+        .map(|p| {
+            let fname = p.name.to_lowercase().replace([' ', '·', '-', '/'], "_");
+            (fname, crate::presets::settings_from_preset(p))
+        })
+        .collect();
+    jobs.push(("default".into(), Settings::default()));
+
+    for (fname, s) in &jobs {
+        for (src, tag) in [(&brk, "break"), (&kick, "kick")] {
+            let mut core = BandaidCore::new(sr);
+            core.configure(s);
+            let out = render_offline(core, src, 512);
+            let path = render_path("_audition/BANDAID", &format!("{subdir}/{fname}_{tag}"));
+            write_wav(&path, &out, sr as u32).expect("write audition render");
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Fuzz / robustness: extreme + degenerate settings stay finite and bounded
 // ---------------------------------------------------------------------------
 
