@@ -243,7 +243,9 @@ impl FrameState {
         // Seed the running synthesis phase from the true analysis phase on the first frame.
         if first {
             for k in 0..nbins {
-                self.sum_phase[k] = self.phase_buf[k];
+                // phase_buf is arg() ∈ [-π,π] already; wrap defensively so every write to
+                // the synthesis accumulator goes through the same bounded path.
+                self.sum_phase[k] = wrap_pi(self.phase_buf[k]);
             }
             self.primed = true;
         }
@@ -262,10 +264,22 @@ impl FrameState {
             tmp /= self.freq_per_bin;
             tmp = two_pi * tmp / self.osamp;
             tmp += k as f32 * self.expct;
-            self.sum_phase[k] += tmp;
+            // Bound the running phase accumulator to (-π, π]. `from_polar` is 2π-periodic, so
+            // this leaves the audio identical bar float rounding while preventing the
+            // accumulator from growing without limit over long sessions (which erodes sin/cos
+            // precision on the wet path — the SEANCE/VOXKEY/VOXFIT long-session degradation).
+            self.sum_phase[k] = wrap_pi(self.sum_phase[k] + tmp);
             spec[k] = Complex::from_polar(mag, self.sum_phase[k]);
         }
     }
+}
+
+/// Wrap a phase angle into (-π, π] without changing what it represents modulo 2π.
+/// Keeps the synthesis phase accumulator bounded over arbitrarily long runs.
+#[inline]
+fn wrap_pi(x: f32) -> f32 {
+    use std::f32::consts::TAU;
+    x - TAU * (x / TAU).round()
 }
 
 /// Linear interpolation into `arr` at fractional index `pos` (clamped to the ends).
@@ -585,6 +599,29 @@ mod tests {
         assert!(
             residual_db < -12.0,
             "PV identity residual {residual_db:.1} dB worse than −12 dB bound"
+        );
+    }
+
+    /// (4) The synthesis phase accumulator stays bounded over a long run. Without the
+    /// mod-2π wrap, `sum_phase[k]` grows ≈ `k·expct` radians per hop (thousands of radians
+    /// per hop for high bins), reaching ~1e5+ within a second and eroding sin/cos precision
+    /// on the wet path over a session. With the wrap every entry stays in (-π, π].
+    #[test]
+    fn synthesis_phase_stays_bounded() {
+        // ~1 s of audio ≈ 93 hops at 2048/512 — plenty for unbounded growth to blow past π.
+        let dry = steady_tone(160.0, SR as usize, SR);
+        let mut eng = ShiftEngine::default_geometry(SR);
+        eng.set_pitch_ratio(2.0f32.powf(4.0 / 12.0));
+        eng.set_envelope_preserve(true);
+        let _ = run(&mut eng, &dry);
+        let max_abs = eng
+            .st
+            .sum_phase
+            .iter()
+            .fold(0.0f32, |m, &p| m.max(p.abs()));
+        assert!(
+            max_abs.is_finite() && max_abs <= std::f32::consts::PI + 1e-4,
+            "synthesis phase accumulator unbounded: max |sum_phase| = {max_abs:.1} rad (want ≤ π)"
         );
     }
 

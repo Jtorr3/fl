@@ -303,7 +303,9 @@ fn all_slot_types_finite_and_bounded() {
             "slot {kind:?} produced NaN/inf"
         );
         let pk = peak(&out);
-        assert!(pk <= 1.0, "slot {kind:?} peak {pk} exceeded 0 dBFS");
+        // Clamp policy (TRIAGE 2026-07-08): final clamp is a ±8.0 runaway/NaN guard
+        // (≈ +18 dBFS), not a 0 dBFS ceiling — extreme fuzz asserts finite && ≤ the guard.
+        assert!(pk <= 8.001, "slot {kind:?} peak {pk} exceeded the +18 dBFS safety guard");
     }
 }
 

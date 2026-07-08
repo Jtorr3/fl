@@ -48,7 +48,8 @@ use memmap2::{MmapMut, MmapOptions};
 /// File magic: "QVSB" (Qeynos suite bus).
 const MAGIC: u32 = 0x5156_5342;
 /// Layout version — bump on any field/size change so old files are recreated.
-const VERSION: u32 = 1;
+/// v2: added `next_instance_id` to the header (bus-file-global instance-id allocator).
+const VERSION: u32 = 2;
 /// Fixed number of slots. Every plugin instance in the whole session claims one.
 pub const NUM_SLOTS: usize = 64;
 /// Modulation streams per slot (the NERVE outputs).
@@ -59,6 +60,11 @@ pub const NUM_SPECTRUM: usize = 32;
 pub const LABEL_CAP: usize = 32;
 /// A slot unbeaten for longer than this (wall-clock) is reclaimable by GC.
 pub const STALE_MS: u64 = 3_000;
+/// Bounded seqlock reader spin: after this many failed attempts (odd generation or a torn
+/// read) a reader gives up and returns no snapshot instead of livelocking. A live writer
+/// holds the lock for only a handful of stores, so this is never hit in normal operation;
+/// it is a guard against a writer that crashed mid-write (leaving `seq` permanently odd).
+const SEQ_SPIN_LIMIT: u32 = 64;
 /// Free-slot sentinel for `instance_id`.
 const FREE: u64 = 0;
 
@@ -107,6 +113,11 @@ struct RawHeader {
     version: AtomicU32,
     num_slots: AtomicU32,
     _reserved: AtomicU32,
+    /// Bus-file-global monotonic instance-id allocator. Every instance in every DLL/process
+    /// mapping this file draws its id from here, so ids are unique across DLLs and processes
+    /// for the life of the bus file (session-scoped: reset to 1 whenever the file is
+    /// recreated). Offset 16 (8-aligned) — keeps every slot after the header 8-aligned.
+    next_instance_id: AtomicU64,
 }
 
 #[repr(C)]
@@ -214,6 +225,8 @@ impl Bus {
             hdr.magic.store(MAGIC, Ordering::Relaxed);
             hdr.version.store(VERSION, Ordering::Relaxed);
             hdr.num_slots.store(NUM_SLOTS as u32, Ordering::Relaxed);
+            // Start the instance-id allocator at 1 (0 is the FREE sentinel).
+            hdr.next_instance_id.store(1, Ordering::Relaxed);
         }
         Ok(bus)
     }
@@ -381,7 +394,15 @@ impl Bus {
         }
         let s = self.slot(idx);
         let now = now_ms();
+        let mut attempts = 0u32;
         loop {
+            if attempts >= SEQ_SPIN_LIMIT {
+                // Writer appears wedged mid-write (permanently-odd seq) or is thrashing far
+                // faster than we can read; give up rather than livelock. Caller treats this
+                // as "no snapshot this block" and retries next block.
+                return None;
+            }
+            attempts += 1;
             let s1 = s.seq.load(Ordering::Acquire);
             if s1 & 1 != 0 {
                 std::hint::spin_loop();
@@ -465,7 +486,14 @@ impl Bus {
         }
         let s = self.slot(idx);
         let now = now_ms();
+        let mut attempts = 0u32;
         loop {
+            if attempts >= SEQ_SPIN_LIMIT {
+                // Bounded spin (see read_slot): a wedged/odd writer must not livelock the RT
+                // listen path. Returning None means "hold last value / use base" upstream.
+                return None;
+            }
+            attempts += 1;
             let s1 = s.seq.load(Ordering::Acquire);
             if s1 & 1 != 0 {
                 std::hint::spin_loop();
@@ -528,6 +556,22 @@ impl Bus {
         }
     }
 
+    /// Allocate a fresh, bus-unique instance id from the file-global counter in the header.
+    /// Unique across every DLL and process mapping this file (the whole point: a per-DLL
+    /// static counter collides the first instance of every plugin when FL loads them all
+    /// un-bridged into one address space). Session-scoped: resets to 1 when the file is
+    /// recreated. Never returns the FREE sentinel (0).
+    pub fn alloc_instance_id(&self) -> u64 {
+        let v = self.header().next_instance_id.fetch_add(1, Ordering::Relaxed);
+        if v == FREE {
+            // Only possible on a pre-v2 zeroed file (which the version bump recreates) or a
+            // full 2^64 wrap; take the next one, which is guaranteed non-zero.
+            self.header().next_instance_id.fetch_add(1, Ordering::Relaxed)
+        } else {
+            v
+        }
+    }
+
     /// Number of currently-claimed (non-stale) slots — test/introspection helper.
     pub fn live_count(&self) -> usize {
         self.snapshot_live().len()
@@ -540,15 +584,23 @@ pub fn bus() -> Option<&'static Bus> {
     BUS.get_or_init(Bus::open_default).as_ref()
 }
 
-/// A small, non-zero, process-unique-ish instance id source for slot ownership. Combines
-/// the process id with a monotonic counter so ids don't collide within or across processes
-/// for the life of a session.
+/// A non-zero instance id for slot ownership, unique across DLLs and processes.
+///
+/// Draws from the bus-file-global counter ([`Bus::alloc_instance_id`]) so that the first
+/// instance of every plugin does NOT collide when FL loads them all un-bridged into one
+/// process (a per-DLL static counter gave them all id `(pid<<32)|1`). Only when the bus
+/// file cannot be mapped at all do we fall back to a per-DLL pid+counter id (best-effort;
+/// cross-plugin routing is already unavailable in that degraded case).
 pub fn new_instance_id() -> u64 {
+    if let Some(b) = bus() {
+        return b.alloc_instance_id();
+    }
+    // Fallback: no shared bus available. pid<<32 | monotonic counter is unique within this
+    // DLL and (via pid) across processes; the residual first-instance-per-DLL collision only
+    // matters for cross-plugin routing, which is itself unavailable without the bus.
     static COUNTER: AtomicU64 = AtomicU64::new(1);
     let pid = std::process::id() as u64;
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-    // High 32 bits = pid (>=1 for any real process), low 32 = a distinct counter. Do NOT
-    // fold in a `| 1` — that would collapse consecutive counter values onto one id.
     let v = (pid << 32) | (n & 0xFFFF_FFFF);
     if v == 0 {
         n.max(1)
@@ -686,6 +738,64 @@ mod tests {
         assert_eq!(bus.header().magic.load(Ordering::Relaxed), MAGIC);
         assert_eq!(bus.header().version.load(Ordering::Relaxed), VERSION);
         assert_eq!(bus.live_count(), 0, "recreated bus must start empty");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// Two handles onto one file simulate two DLLs (each with its own private static state)
+    /// drawing instance ids: because the allocator lives in the shared file, every id is
+    /// unique across both handles — in particular the FIRST id each handle allocates differs
+    /// (the pre-v2 per-DLL counter gave both `(pid<<32)|1`, colliding NERVE routes onto the
+    /// wrong plugin).
+    #[test]
+    fn instance_ids_unique_across_two_dlls() {
+        let path = temp_bus_path("idalloc");
+        let dll_a = Bus::open_or_create(&path).unwrap();
+        let dll_b = Bus::open_or_create(&path).unwrap();
+
+        let a_first = dll_a.alloc_instance_id();
+        let b_first = dll_b.alloc_instance_id();
+        assert_ne!(
+            a_first, b_first,
+            "two DLLs' first instance ids collided ({a_first} == {b_first}) — the bug"
+        );
+
+        let mut seen = std::collections::HashSet::new();
+        assert!(seen.insert(a_first));
+        assert!(seen.insert(b_first));
+        for _ in 0..1000 {
+            let ida = dll_a.alloc_instance_id();
+            let idb = dll_b.alloc_instance_id();
+            assert_ne!(ida, FREE, "allocator must never yield the FREE sentinel");
+            assert_ne!(idb, FREE, "allocator must never yield the FREE sentinel");
+            assert!(seen.insert(ida), "duplicate id {ida} from DLL A");
+            assert!(seen.insert(idb), "duplicate id {idb} from DLL B");
+        }
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// A slot whose writer crashed mid-write (seq stuck odd) must NOT livelock a reader:
+    /// the bounded spin returns after `SEQ_SPIN_LIMIT` attempts. If this test hangs, the
+    /// bound regressed.
+    #[test]
+    fn permanently_odd_seq_does_not_livelock() {
+        let path = temp_bus_path("oddseq");
+        let bus = Bus::open_or_create(&path).unwrap();
+        let id = bus.alloc_instance_id();
+        let idx = bus.claim(id, PluginKind::Nerve, "wedged").unwrap();
+        bus.publish_mods(idx, &[0.5; NUM_MOD_SIGNALS]);
+        bus.beat(idx);
+
+        // Simulate a writer that bumped seq to odd and then died before bumping to even.
+        let s = bus.slot(idx);
+        s.seq.fetch_add(1, Ordering::Release); // -> odd, never completed
+        assert_eq!(s.seq.load(Ordering::Relaxed) & 1, 1, "seq must be odd for the test");
+
+        // Both readers must return (None) rather than spin forever.
+        assert!(bus.read_slot(idx).is_none(), "read_slot livelocked on a wedged writer");
+        assert!(
+            bus.read_mod_fast(idx, 0).is_none(),
+            "read_mod_fast livelocked on a wedged writer"
+        );
         let _ = std::fs::remove_file(&path);
     }
 

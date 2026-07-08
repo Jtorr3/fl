@@ -404,8 +404,11 @@ impl DriftCore {
             self.phase -= self.phase.floor();
         }
 
-        let out_l = ((l_in * (1.0 - mix) + wet_l * mix) * out_lin).clamp(-0.999, 0.999);
-        let out_r = ((r_in * (1.0 - mix) + wet_r * mix) * out_lin).clamp(-0.999, 0.999);
+        // Final safety clamp is a pure runaway/NaN guard (±8.0 ≈ +18 dBFS), NOT a level
+        // ceiling: clamping to ±0.999 here digitally clipped legitimate >0 dBFS float
+        // headroom on hot FL buses even at mix=0, breaking the "mix=0 nulls" contract.
+        let out_l = ((l_in * (1.0 - mix) + wet_l * mix) * out_lin).clamp(-8.0, 8.0);
+        let out_r = ((r_in * (1.0 - mix) + wet_r * mix) * out_lin).clamp(-8.0, 8.0);
         (out_l, out_r)
     }
 
@@ -724,7 +727,9 @@ mod tests {
         core.process_mono(&mut out, &s);
         assert!(out.iter().all(|v| v.is_finite()));
         let peak = out.iter().fold(0.0f32, |m, &v| m.max(v.abs()));
-        assert!(peak <= 1.0, "peak {peak} exceeded 0 dBFS");
+        // Clamp policy (TRIAGE 2026-07-08): final clamp is a ±8.0 runaway/NaN guard
+        // (≈ +18 dBFS), not a 0 dBFS ceiling — extreme fuzz asserts finite && ≤ the guard.
+        assert!(peak <= 8.001, "peak {peak} exceeded the +18 dBFS safety guard");
     }
 
     #[test]

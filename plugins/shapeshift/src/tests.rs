@@ -168,7 +168,11 @@ fn center_morph_differs_from_every_corner() {
     };
 
     let center = render(0.5, 0.5);
-    assert_universal(&center);
+    // Clamp policy (TRIAGE 2026-07-08): this hard-driven render may legitimately exceed
+    // 0 dBFS now that the final clamp is a ±8.0 guard; assert finite/non-silent/≤ guard.
+    assert!(!suite_core::harness::has_nan_or_inf(&center), "center render NaN/inf");
+    assert!(suite_core::harness::peak_dbfs(&center) <= 18.1, "center render exceeds +18 dBFS guard");
+    assert!(suite_core::harness::rms_dbfs(&center) > -60.0, "center render silent");
 
     // Skip the first 10 ms (smoother settle) when correlating.
     let skip = (SR * 0.01) as usize;
@@ -216,7 +220,10 @@ fn orbit_modulates_thd_periodically() {
 
     let mut out = input.clone();
     ShapeshiftCore::new(SR).process_mono(&mut out, &s);
-    assert_universal(&out);
+    // Clamp policy (TRIAGE 2026-07-08): hard-driven render; finite/non-silent/≤ +18 dBFS guard.
+    assert!(!suite_core::harness::has_nan_or_inf(&out), "orbit render NaN/inf");
+    assert!(suite_core::harness::peak_dbfs(&out) <= 18.1, "orbit render exceeds +18 dBFS guard");
+    assert!(suite_core::harness::rms_dbfs(&out) > -60.0, "orbit render silent");
 
     // THD-vs-time: a 40 ms window every 40 ms.
     let win = (SR * 0.04) as usize;
@@ -343,7 +350,9 @@ fn extreme_settings_stay_bounded() {
     s.auto_gain = true;
     let mut out = input.clone();
     ShapeshiftCore::new(SR).process_mono(&mut out, &s);
+    // Clamp policy (TRIAGE 2026-07-08): final clamp is a ±8.0 runaway/NaN guard
+    // (≈ +18 dBFS), not a 0 dBFS ceiling — extreme fuzz asserts finite && ≤ the guard.
     for &v in &out {
-        assert!(v.is_finite() && v.abs() <= 1.0, "extreme render out of range: {v}");
+        assert!(v.is_finite() && v.abs() <= 8.001, "extreme render out of range: {v}");
     }
 }

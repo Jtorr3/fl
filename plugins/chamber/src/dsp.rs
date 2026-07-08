@@ -724,7 +724,7 @@ impl ChamberCore {
         let out_lin = db_to_lin(self.out_s.process(s.out_db));
         let ol = (l * (1.0 - mix) + wet_l * mix) * out_lin;
         let or = (r * (1.0 - mix) + wet_r * mix) * out_lin;
-        (ol.clamp(-0.999, 0.999), or.clamp(-0.999, 0.999))
+        (ol.clamp(-8.0, 8.0), or.clamp(-8.0, 8.0))
     }
 
     /// Offline stereo render from a mono input (fed to both channels of the source).

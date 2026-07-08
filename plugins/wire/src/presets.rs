@@ -39,7 +39,7 @@ pub const PRESET_JSON: &[&str] = &[
     // Crunchy, glitchy low-bitrate voice with intermittent dropouts — a VoIP ghost.
     r#"{ "name": "Discord Ghost", "category": "Codec-Crunch", "bitrate": 16.0, "mode": 0, "bandwidth": 2, "fec": 1,
          "loss": 12.0, "crunch": 0.15, "regen_delay": 60.0, "regen_amount": 0.0,
-         "width": 1.0, "mix": 1.0, "out": 0.0 }"#,
+         "width": 1.0, "mix": 1.0, "out": -0.5 }"#,
     // Tape-style generation loss: re-encoding feedback compounds the artifacts each pass.
     r#"{ "name": "Generation Loss", "category": "Codec-Crunch", "bitrate": 24.0, "mode": 1, "bandwidth": 3, "fec": 0,
          "loss": 3.0, "crunch": 0.2, "regen_delay": 180.0, "regen_amount": 0.7,
@@ -47,7 +47,7 @@ pub const PRESET_JSON: &[&str] = &[
     // Full-wet mid-bitrate mush with a fine crust of packet dropouts — the sound of a leak.
     r#"{ "name": "Sewer Codec", "category": "Codec-Crunch", "bitrate": 14.0, "mode": 1, "bandwidth": 2, "fec": 0,
          "loss": 8.0, "crunch": 0.3, "regen_delay": 120.0, "regen_amount": 0.0,
-         "width": 1.2, "mix": 1.0, "out": 0.0 }"#,
+         "width": 1.2, "mix": 1.0, "out": -0.5 }"#,
     // A sample that came back wrong — heavier loss, a short regen tail smearing the seams.
     r#"{ "name": "Corrupted Sample", "category": "Codec-Crunch", "bitrate": 20.0, "mode": 1, "bandwidth": 2, "fec": 0,
          "loss": 15.0, "crunch": 0.35, "regen_delay": 110.0, "regen_amount": 0.3,
@@ -55,7 +55,7 @@ pub const PRESET_JSON: &[&str] = &[
     // Pairing dropped mid-word: narrowed VoIP profile, FEC clawing at the gaps.
     r#"{ "name": "Broken Bluetooth", "category": "Codec-Crunch", "bitrate": 18.0, "mode": 0, "bandwidth": 1, "fec": 1,
          "loss": 22.0, "crunch": 0.2, "regen_delay": 120.0, "regen_amount": 0.0,
-         "width": 0.7, "mix": 1.0, "out": 0.0 }"#,
+         "width": 0.7, "mix": 1.0, "out": -0.5 }"#,
     // ---- Bitcrush ---------------------------------------------------------
     // Sample-rate reduction front and centre, mourning in 8-bit — parallel-leaning.
     r#"{ "name": "8-Bit Grief", "category": "Bitcrush", "bitrate": 40.0, "mode": 1, "bandwidth": 3, "fec": 0,
@@ -73,11 +73,11 @@ pub const PRESET_JSON: &[&str] = &[
     // Muffled telephone hold-music: narrowband, low bitrate, no loss, collapsed width.
     r#"{ "name": "Hold Music", "category": "Telephone-Radio", "bitrate": 12.0, "mode": 0, "bandwidth": 0, "fec": 0,
          "loss": 0.0, "crunch": 0.1, "regen_delay": 40.0, "regen_amount": 0.0,
-         "width": 0.4, "mix": 1.0, "out": 2.0 }"#,
+         "width": 0.4, "mix": 1.0, "out": -0.5 }"#,
     // The last announcement before the doors close — narrowband voice, FEC, faint dropouts.
     r#"{ "name": "Last Train Transmission", "category": "Telephone-Radio", "bitrate": 12.0, "mode": 0, "bandwidth": 0, "fec": 1,
          "loss": 5.0, "crunch": 0.15, "regen_delay": 120.0, "regen_amount": 0.0,
-         "width": 0.5, "mix": 1.0, "out": 1.0 }"#,
+         "width": 0.5, "mix": 1.0, "out": -0.5 }"#,
     // A modem handshake haunting the line: heavy loss, a short howling regen, mono-ish.
     r#"{ "name": "Dial-Up Ghost", "category": "Telephone-Radio", "bitrate": 10.0, "mode": 0, "bandwidth": 0, "fec": 0,
          "loss": 18.0, "crunch": 0.4, "regen_delay": 70.0, "regen_amount": 0.25,
@@ -85,7 +85,7 @@ pub const PRESET_JSON: &[&str] = &[
     // Squeezed through a handset: medium band, FEC, choppy loss, pushed hot.
     r#"{ "name": "Walkie-Talkie Prayer", "category": "Telephone-Radio", "bitrate": 14.0, "mode": 0, "bandwidth": 1, "fec": 1,
          "loss": 10.0, "crunch": 0.2, "regen_delay": 120.0, "regen_amount": 0.0,
-         "width": 0.4, "mix": 1.0, "out": 2.0 }"#,
+         "width": 0.4, "mix": 1.0, "out": -0.7 }"#,
     // Voices bleeding through static bands — long regen ghosting, parallel-blended.
     r#"{ "name": "AM Radio Séance", "category": "Telephone-Radio", "bitrate": 16.0, "mode": 0, "bandwidth": 0, "fec": 0,
          "loss": 6.0, "crunch": 0.25, "regen_delay": 200.0, "regen_amount": 0.4,
@@ -94,11 +94,11 @@ pub const PRESET_JSON: &[&str] = &[
     // A buffering, falling-apart stream: very low bitrate, heavy packet loss, FEC fighting it.
     r#"{ "name": "Dying Stream", "category": "Destroyed", "bitrate": 8.0, "mode": 0, "bandwidth": 1, "fec": 1,
          "loss": 35.0, "crunch": 0.25, "regen_delay": 100.0, "regen_amount": 0.0,
-         "width": 0.8, "mix": 1.0, "out": 1.0 }"#,
+         "width": 0.8, "mix": 1.0, "out": -0.7 }"#,
     // Everything at once — bitcrushed, starved, feeding back into the void.
     r#"{ "name": "Bitcrushed Void", "category": "Destroyed", "bitrate": 6.0, "mode": 1, "bandwidth": 1, "fec": 0,
          "loss": 20.0, "crunch": 0.75, "regen_delay": 90.0, "regen_amount": 0.6,
-         "width": 1.4, "mix": 1.0, "out": 0.0 }"#,
+         "width": 1.4, "mix": 1.0, "out": -0.6 }"#,
     // Wall-of-static breakcore texture: 6 kbps voice, drowned in loss, spraying wide.
     r#"{ "name": "Sewerslvt Static", "category": "Destroyed", "bitrate": 6.0, "mode": 0, "bandwidth": 1, "fec": 0,
          "loss": 30.0, "crunch": 0.8, "regen_delay": 80.0, "regen_amount": 0.5,

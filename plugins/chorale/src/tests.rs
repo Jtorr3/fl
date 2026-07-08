@@ -387,7 +387,9 @@ fn extremes_stay_finite() {
         for sig in [&l, &r] {
             assert!(!suite_core::harness::has_nan_or_inf(sig), "NaN/inf in extremes");
             let peak = suite_core::harness::peak_dbfs(sig);
-            assert!(peak <= 0.05, "extremes peak {peak:.2} dBFS > 0");
+            // Clamp policy (TRIAGE 2026-07-08): final clamp is a ±8.0 runaway/NaN guard
+            // (≈ +18 dBFS), not a 0 dBFS ceiling — extreme fuzz asserts finite && ≤ the guard.
+            assert!(peak <= 18.1, "extremes peak {peak:.2} dBFS > +18 dBFS safety guard");
         }
     }
 }

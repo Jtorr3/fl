@@ -600,8 +600,8 @@ impl SwarmCore {
         } else {
             (base_l, base_r)
         };
-        let ol = base_l.clamp(-0.999, 0.999);
-        let or = base_r.clamp(-0.999, 0.999);
+        let ol = base_l.clamp(-8.0, 8.0);
+        let or = base_r.clamp(-8.0, 8.0);
         (ol, or)
     }
 

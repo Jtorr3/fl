@@ -596,7 +596,7 @@ impl FlybyCore {
         ol = (l_in * (1.0 - mix) + ol * mix) * out_lin;
         or = (r_in * (1.0 - mix) + or * mix) * out_lin;
 
-        (ol.clamp(-0.999, 0.999), or.clamp(-0.999, 0.999))
+        (ol.clamp(-8.0, 8.0), or.clamp(-8.0, 8.0))
     }
 
     /// Stereo render from a mono input (each input sample fed to both channels of the source).

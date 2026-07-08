@@ -204,7 +204,9 @@ fn extremes_stay_bounded() {
         let (l, r) = core.process_stereo(&input, s);
         assert!(l.iter().chain(r.iter()).all(|v| v.is_finite()), "cfg {i} not finite");
         let peak = l.iter().chain(r.iter()).fold(0.0f32, |m, &v| m.max(v.abs()));
-        assert!(peak <= 1.0, "cfg {i} peak {peak} exceeds 0 dBFS");
+        // Clamp policy (TRIAGE 2026-07-08): final clamp is a ±8.0 runaway/NaN guard
+        // (≈ +18 dBFS), not a 0 dBFS ceiling — extreme fuzz asserts finite && ≤ the guard.
+        assert!(peak <= 8.001, "cfg {i} peak {peak} exceeds the +18 dBFS safety guard");
     }
 }
 

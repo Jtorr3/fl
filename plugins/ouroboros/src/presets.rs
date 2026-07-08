@@ -11,8 +11,8 @@
 //! Texture & Drone / Mangled. Names are purpose-driven and genre-aware (dark techno /
 //! atmospheric dnb / Sewerslvt-adjacent lo-fi) — never settings descriptions.
 //!
-//! Safety: the core hard-clamps every output sample to ±0.999, so peak stays ≤ 0 dBFS on
-//! every preset; feedback past unity self-oscillates but the in-loop `tanh` limiter clamps it
+//! Safety: the final ±8.0 output clamp is only a runaway/NaN guard (not a level ceiling);
+//! feedback past unity self-oscillates but the in-loop `tanh` limiter clamps it
 //! to a bounded limit cycle. Levels are kept conservative (mix ≥ 0.35, out ≤ 0 dB) so no
 //! preset renders silent or runs away.
 //!

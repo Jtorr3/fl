@@ -924,7 +924,7 @@ impl OuroCore {
             // Freeze Mix: while frozen, crossfade back toward the live input so the freeze
             // isn't an all-or-nothing jump. fm=1 → classic hard freeze.
             let blended = if s.freeze { fm * mixed + (1.0 - fm) * dry } else { mixed };
-            outs[cidx] = blended.clamp(-0.999, 0.999);
+            outs[cidx] = blended.clamp(-8.0, 8.0);
         }
         (outs[0], outs[1])
     }

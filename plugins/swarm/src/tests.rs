@@ -185,7 +185,9 @@ fn shimmer_feedback_bounded() {
 
     assert!(out.iter().all(|v| v.is_finite()), "shimmer produced NaN/inf");
     let pk = peak(&out);
-    assert!(pk <= 1.0, "shimmer peak {pk} exceeded 0 dBFS");
+    // Clamp policy (TRIAGE 2026-07-08): final clamp is a ±8.0 runaway/NaN guard
+    // (≈ +18 dBFS), not a 0 dBFS ceiling — bounded means finite && ≤ the guard.
+    assert!(pk <= 8.001, "shimmer peak {pk} exceeded the +18 dBFS safety guard");
 
     // The feedback must not decay to nothing across the 30 s (it should sustain/bloom).
     let sec = sr as usize;
@@ -273,6 +275,7 @@ fn extreme_settings_finite_and_bounded() {
             "config den={den} size={size} produced NaN/inf"
         );
         let pk = peak(&out);
-        assert!(pk <= 1.0, "config den={den} peak {pk} exceeded 0 dBFS");
+        // Clamp policy (TRIAGE 2026-07-08): extreme fuzz asserts finite && ≤ the ±8.0 guard.
+        assert!(pk <= 8.001, "config den={den} peak {pk} exceeded the +18 dBFS safety guard");
     }
 }

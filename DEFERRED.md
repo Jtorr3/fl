@@ -173,3 +173,27 @@ Each entry: item | feature | why | how to pick it back up.
 - **How to resume:** OVERSEER — pick the Node (post-processing) output to tap and give it its own
   `SpectrumPublisher`; NERVE — either publish its input spectrum into its existing slot right after
   `publish_mods`, or claim a second slot. `suite_core::spectrum` needs no change.
+
+## TRIAGE-P2 backlog (SUITE-TRIAGE 2026-07-08 — audited minors, deliberately deferred)
+
+From docs/TRIAGE-2026-07-08.md (P2 tier of the fix program; per-plugin detail in
+docs/triage/cluster*.md). None of these block daily use; they are quality-polish items:
+
+- **WIRE**: PLC re-entry click; FEC approximation (true per-bandwidth Opus internal rate);
+  `reset()` allocs on the audio thread; latency-rescale on bandwidth change.
+- **SWARM**: synced bursts ~+9 dB hot (burst normalisation); mono-sums stereo capture;
+  grain-clock transport phase-lock.
+- **CARVE**: SC-listen unaligned with the wet path; hop-rate envelope option.
+- **CHAMBER**: room-size / material changes crackle (needs param crossfade); wet re-adds
+  the direct arrival (ER0 vs dry double-hit).
+- **HALT**: tape-stop decay curve; MIDI-note mapping undocumented in the GUI; reverse
+  buffer wrap crackle at loop end.
+- **FLYBY / DRIFT / SHAPESHIFT orbit**: "sync" is rate-only — no transport phase-lock
+  (SEANCE's chopper got the P0 fix; these three follow the same pos_beats pattern).
+- **SMUDGE**: scramble makeup gain acts as a pure volume boost at low RANGE.
+- **PATINA**: reported latency understated with wow/age up (group delay grows past PDC).
+- **ASCEND**: retrigger click at cycle boundary.
+- **X-RAY**: stale-slot drop UX (legend entries vanish without notice).
+- **BANDAID**: unlinked stereo detectors (optional stereo-link switch).
+- **VOXFIT**: dedicated de-ess band tuning (current band fixed 5-9 kHz).
+- **EMBER**: freeze-release fade shape (linear now; equal-power would be smoother).

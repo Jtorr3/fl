@@ -346,7 +346,7 @@ impl GritCore {
             ag = ratio.clamp(db_to_lin(-12.0), db_to_lin(12.0));
         }
 
-        // --- Mix + output trim, with a hard safety ceiling at +/-0.999 (<= 0 dBFS) ---
+        // --- Mix + output trim, with a runaway/NaN safety clamp at +/-8.0 (~+18 dBFS) ---
         // Dry uses the latency-compensated input so partial mix does not comb-filter.
         let out_lin = db_to_lin(s.out_db);
         let mix = s.mix.clamp(0.0, 1.0);
@@ -355,7 +355,7 @@ impl GritCore {
         for ci in 0..2 {
             let w = wet[ci] * ag;
             let mixed = dry[ci] * (1.0 - mix) + w * mix;
-            out[ci] = (mixed * out_lin).clamp(-0.999, 0.999);
+            out[ci] = (mixed * out_lin).clamp(-8.0, 8.0);
         }
         (out[0], out[1])
     }

@@ -781,8 +781,8 @@ impl WireCore {
         let out_lin = db_to_lin(self.out_s.process(s.out_db));
         let dry_l = self.dry_l.process(l_in);
         let dry_r = self.dry_r.process(r_in);
-        let o_l = ((dry_l * (1.0 - mix) + wet_l_out * mix) * out_lin).clamp(-0.999, 0.999);
-        let o_r = ((dry_r * (1.0 - mix) + wet_r_out * mix) * out_lin).clamp(-0.999, 0.999);
+        let o_l = ((dry_l * (1.0 - mix) + wet_l_out * mix) * out_lin).clamp(-8.0, 8.0);
+        let o_r = ((dry_r * (1.0 - mix) + wet_r_out * mix) * out_lin).clamp(-8.0, 8.0);
         (o_l, o_r)
     }
 

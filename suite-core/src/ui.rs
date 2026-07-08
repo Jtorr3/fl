@@ -851,11 +851,14 @@ pub fn mod_section(
     use crate::bus::NUM_MOD_SIGNALS;
     use crate::modlisten::Curve;
 
-    // Live sources on the bus (any kind; NERVE is the publisher). Alloc on the GUI thread.
+    // Live *mod-publishing* sources on the bus. NERVE is the only kind that writes the 8
+    // mod signals; spectrum-only publishers (e.g. X-RAY) claim slots too but never populate
+    // `mods`, so listing them would offer routes that are permanently zero. Filter to NERVE.
     let sources: Vec<(u64, String)> = bus::bus()
         .map(|b| {
             b.snapshot_live()
                 .into_iter()
+                .filter(|s| s.kind == bus::PluginKind::Nerve)
                 .map(|s| {
                     let name = if s.label.is_empty() {
                         format!("#{}", s.instance_id & 0xFFFF)

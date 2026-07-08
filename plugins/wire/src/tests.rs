@@ -177,7 +177,9 @@ fn extreme_degradation_stays_finite_and_bounded() {
     assert!(l.iter().all(|v| v.is_finite()), "non-finite L");
     assert!(r.iter().all(|v| v.is_finite()), "non-finite R");
     let peak = l.iter().chain(r.iter()).fold(0.0f32, |m, &v| m.max(v.abs()));
-    assert!(peak <= 1.0, "peak {peak} exceeded 0 dBFS");
+    // Clamp policy (TRIAGE 2026-07-08): final clamp is a ±8.0 runaway/NaN guard
+    // (≈ +18 dBFS), not a 0 dBFS ceiling — extreme fuzz asserts finite && ≤ the guard.
+    assert!(peak <= 8.001, "peak {peak} exceeded the +18 dBFS safety guard");
 
     // A second pass with regen at max over a long tail must not blow up (feedback stability).
     s.regen_amount = 0.95;
@@ -186,7 +188,7 @@ fn extreme_degradation_stays_finite_and_bounded() {
     let last = &l2[l2.len().saturating_sub(4096)..];
     assert!(last.iter().all(|v| v.is_finite()));
     let lpk = last.iter().fold(0.0f32, |m, &v| m.max(v.abs()));
-    assert!(lpk <= 1.0, "regen tail peak {lpk} exceeded 0 dBFS");
+    assert!(lpk <= 8.001, "regen tail peak {lpk} exceeded the +18 dBFS safety guard");
 }
 
 /// Packet loss changes the output (dropouts present) but stays bounded.

@@ -625,7 +625,7 @@ impl ChoraleCore {
         let ol = (l_in * (1.0 - self.mix_s) + wet_l * self.mix_s) * self.out_s;
         let or = (r_in * (1.0 - self.mix_s) + wet_r * self.mix_s) * self.out_s;
 
-        (ol.clamp(-0.999, 0.999), or.clamp(-0.999, 0.999))
+        (ol.clamp(-8.0, 8.0), or.clamp(-8.0, 8.0))
     }
 
     /// Stereo render from a mono input (fed to both channels as the exciter).

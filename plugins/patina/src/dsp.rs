@@ -41,9 +41,10 @@ const OS_DELAY: usize = 15;
 /// *actual* delay of `BASE_DELAY − 1` samples; the saturation dry [`DelayLine`] adds `OS_DELAY`.
 pub const LATENCY: usize = (BASE_DELAY - 1) + OS_DELAY;
 
-/// Final safety ceiling (just under full scale). Identity for `|y| < 0.999`, so the neutral
-/// passthrough still nulls exactly; only bites boosted / clipped output.
-const CEILING: f32 = 0.999;
+/// Final safety clamp — a pure runaway/NaN guard well above full scale (±8.0 ≈ +18 dBFS),
+/// NOT a level ceiling. The old ±0.999 clamp digitally clipped legitimate >0 dBFS float
+/// headroom (routine on FL buses) even at mix=0; identity for any real signal.
+const CEILING: f32 = 8.0;
 
 /// Wow LFO base frequency (Hz). The done-bar tracks f0 modulation at this rate.
 const WOW_HZ: f32 = 0.4;

@@ -8,7 +8,8 @@
 //! 0 = only early reflections, 1 = only late field); `distance` inverse-distance rolloff
 //! exaggeration (0.5..3); `predelay` seconds (0..0.2); `rt60` override seconds (0 = Sabine auto,
 //! else 0.1..12); `width` 0..2; `mix` dry/wet 0..1; `out` dB (kept ≤ 0 for headroom — the wet
-//! path is safety-clipped and the output hard-clamps at ±0.999, so every preset stays ≤ 0 dBFS).
+//! path is safety-clipped and levels are conservative, so every preset stays ≤ 0 dBFS; the
+//! final ±8.0 output clamp is only a runaway/NaN guard, not a level ceiling).
 //!
 //! Categories (preset-bar sections, first-appearance order): Rooms & Booths / Halls & Chambers /
 //! Cavernous / Textural / Broken. Names are purpose-driven and evocative (dark-techno /

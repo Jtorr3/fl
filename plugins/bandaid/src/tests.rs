@@ -369,5 +369,7 @@ fn extremes_stay_finite_and_bounded() {
     let out = render_with(s, &sig);
     assert!(!suite_core::harness::has_nan_or_inf(&out), "output has NaN/inf");
     let peak = out.iter().fold(0.0f32, |m, &v| m.max(v.abs()));
-    assert!(peak <= 1.0, "output exceeds full scale: peak {peak}");
+    // Clamp policy (TRIAGE 2026-07-08): the final clamp is a runaway/NaN guard at ±8.0
+    // (≈ +18 dBFS), not a 0 dBFS ceiling — extreme-fuzz output is finite and ≤ that guard.
+    assert!(peak <= 8.001, "output exceeds the +18 dBFS safety guard: peak {peak}");
 }

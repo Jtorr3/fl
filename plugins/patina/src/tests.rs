@@ -470,10 +470,12 @@ fn extremes_stay_finite_and_bounded() {
         assert!(l.is_finite() && r.is_finite(), "stereo output NaN/inf");
         peak = peak.max(l.abs()).max(r.abs());
     }
-    assert!(peak <= 1.0, "stereo peak exceeds full scale: {peak}");
+    // Clamp policy (TRIAGE 2026-07-08): final clamp is a ±8.0 runaway/NaN guard
+    // (≈ +18 dBFS), not a 0 dBFS ceiling — extreme fuzz asserts finite && ≤ the guard.
+    assert!(peak <= 8.001, "stereo peak exceeds the +18 dBFS safety guard: {peak}");
 
     let out = render_with(s, &sig);
     assert!(!has_nan_or_inf(&out), "mono output has NaN/inf");
     let mpeak = out.iter().fold(0.0f32, |m, &v| m.max(v.abs()));
-    assert!(mpeak <= 1.0, "mono peak exceeds full scale: {mpeak}");
+    assert!(mpeak <= 8.001, "mono peak exceeds the +18 dBFS safety guard: {mpeak}");
 }

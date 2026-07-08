@@ -450,7 +450,7 @@ impl TracerCore {
             }
 
             let mixed = dry[ci] * (1.0 - mix) + wet * mix;
-            out[ci] = (mixed * out_lin).clamp(-0.999, 0.999);
+            out[ci] = (mixed * out_lin).clamp(-8.0, 8.0);
         }
 
         (out[0], out[1])
@@ -654,6 +654,8 @@ mod tests {
         core.process_mono(&mut out, &s);
         assert!(out.iter().all(|v| v.is_finite()));
         let peak = out.iter().fold(0.0f32, |m, &v| m.max(v.abs()));
-        assert!(peak <= 1.0, "peak {peak} exceeded 0 dBFS");
+        // Clamp policy (TRIAGE 2026-07-08): final clamp is a ±8.0 runaway/NaN guard
+        // (≈ +18 dBFS), not a 0 dBFS ceiling — extreme fuzz asserts finite && ≤ the guard.
+        assert!(peak <= 8.001, "peak {peak} exceeded the +18 dBFS safety guard");
     }
 }

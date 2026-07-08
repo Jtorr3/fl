@@ -471,7 +471,7 @@ impl ShapeshiftCore {
             ag = ratio.clamp(db_to_lin(-12.0), db_to_lin(12.0));
         }
 
-        // --- Mix (latency-compensated dry) + output trim, hard safety ceiling ±0.999 ---
+        // --- Mix (latency-compensated dry) + output trim, runaway/NaN safety clamp ±8.0 ---
         let out_lin = db_to_lin(s.out_db);
         let mix = s.mix.clamp(0.0, 1.0);
         let dry = [dry_l, dry_r];
@@ -479,7 +479,7 @@ impl ShapeshiftCore {
         for ci in 0..2 {
             let wv = wet[ci] * ag;
             let mixed = dry[ci] * (1.0 - mix) + wv * mix;
-            out[ci] = (mixed * out_lin).clamp(-0.999, 0.999);
+            out[ci] = (mixed * out_lin).clamp(-8.0, 8.0);
         }
         (out[0], out[1])
     }

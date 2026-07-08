@@ -25,10 +25,10 @@ use suite_core::dsp::{Detector, EnvFollower, OnePole, Svf};
 /// Number of bands (fixed 3-way LR4).
 pub const NUM_BANDS: usize = 3;
 
-/// Final safety ceiling — a hard clamp just under full scale. Identity for any `|y| < 0.999`
-/// (so the neutral passthrough still nulls exactly for sub-full-scale input); only bites when
-/// a boosted transient would otherwise exceed 0 dBFS.
-const CEILING: f32 = 0.999;
+/// Final safety clamp — a pure runaway/NaN guard well above full scale (±8.0 ≈ +18 dBFS),
+/// NOT a level ceiling. The old ±0.999 clamp digitally clipped boosted transients and any
+/// legitimate >0 dBFS float headroom (routine on FL buses); identity for any real signal.
+const CEILING: f32 = 8.0;
 
 /// Envelope floor used as the transient-difference denominator (~−80 dBFS). Keeps the
 /// attack/sustain weights finite near silence; irrelevant to the null (band ≈ 0 there).
