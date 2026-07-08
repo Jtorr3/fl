@@ -12,6 +12,11 @@ use crate::dsp::*;
 use suite_core::stft::{Complex, Stft};
 use suite_core::testsig;
 
+#[test]
+fn manual_covers_all_params_and_has_recipes() {
+    suite_core::manual::assert_manual_covers_params(crate::MANUAL_DOC, &crate::SmudgeParams::default());
+}
+
 fn rms(x: &[f32]) -> f32 {
     if x.is_empty() {
         return 0.0;

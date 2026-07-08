@@ -14,7 +14,14 @@ DRIFT is pure minimum-phase IIR (TPT/Cytomic state-variable *bell* filters, the 
 time-varying-safe topology TRACER uses). Dry and wet stay sample-aligned, so it
 reports **zero latency** and needs no delay compensation.
 
-## Signal flow
+## What It Is
+
+An endless Shepard-tone illusion in the filter domain: N resonant bell filters, evenly
+spaced across a log-frequency window, all glide together up or down and wrap silently at
+the edges, so the ear hears a rise or fall that never arrives. Drop it on any sustained or
+broadband source for perpetual, hypnotic filter motion — free-running or locked to tempo.
+
+## Signal Flow
 
 ```
               phase(t) ── advances at Rate (Hz) or tempo·division ── wraps [0,1)
@@ -81,3 +88,30 @@ Load **Endless Riser** and let it run — the perceived motion never stops. Tick
 **Sync** and pick a **Division** to lock the sweep to the project tempo. Raise
 **Resonance** and **Depth** for a vocal, obvious sweep; drop **Mix** for a subtle
 underlying motion. **Stereo Offset** widens the effect across the L/R field.
+
+## Controls
+
+- **Rate** — full range traversals per second (free-run mode), 0.01–10 Hz.
+- **Sync** — when on, Rate is derived from the host tempo + Division.
+- **Division** — beats per full glide cycle when synced, 4 Bars … 1/16.
+- **Direction** — rising (Up) or falling (Down) Shepard glide.
+- **Resonance** — shared bell Q, 0.3–12; higher = narrower, more vocal peaks.
+- **Range Lo** — lower edge of the glide window, 20 Hz–2 kHz.
+- **Range Hi** — upper edge of the glide window, 200 Hz–20 kHz.
+- **Peaks** — number of simultaneous filters, 2–8 (spacing = span / N octaves).
+- **Stereo Offset** — R-channel glide phase offset, 0–0.5 cycles (avoid exactly 1/N).
+- **Depth** — peak boost at each filter's window center, 0–36 dB.
+- **Mix** — dry/wet, 0–100 %.
+- **Out** — output trim, −24…+24 dB (soft-limited to 0 dBFS).
+
+## Recipes
+
+1. **Dark-techno sinking sweep** — load **Sinking Feeling** (Rate 0.05 Hz, Direction Down,
+   Resonance 5.0, Range Lo 30 Hz, Range Hi 1.92 k, Peaks 6, Depth 15 dB, Mix 100 %). A low,
+   resonant descent that drags the whole mix endlessly downward under a techno groove.
+2. **Atmospheric-DnB riser** — load **Vapor Climb** (Rate 0.12 Hz, Direction Up, Resonance 4.0,
+   Range Lo 120 Hz, Range Hi 4.8 k, Peaks 5, Stereo Offset 0.30, Depth 11 dB, Mix 75 %). Parallel
+   motion woven under a pad or break rather than over it.
+3. **Vocal-rip tempo shiver** — load **Eighth-Note Shiver** (Sync on, Division 1/8, Direction Down,
+   Resonance 6.0, Range Lo 300 Hz, Range Hi 4.8 k, Peaks 4, Depth 14 dB, Mix 100 %). A tight,
+   nervous resonant strobe over a chopped vocal.

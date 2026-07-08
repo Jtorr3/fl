@@ -12,6 +12,14 @@ bitrates you hear Opus' pre-echo, band-splitting and transient smear; drop the
 bandwidth and it collapses to a telephone; add packet loss and it stutters and mutes
 like a bad VoIP call; wind up the regen and it eats itself alive.
 
+## What It Is
+
+A real Opus codec round-trip abused as a degradation effect — resample, bandwidth-limit,
+crunch, encode, drop packets, decode, and feed back through a re-encoding regen loop. The
+grit is a genuine perceptual coder's, not a bitcrusher's: pre-echo, band-splitting and
+transient smear at low bitrate, telephone collapse at low bandwidth, VoIP stutter under
+loss, and tape-style generation loss as the regen compounds.
+
 ## Codec plan (PRD §5)
 
 **Plan A landed:** the pure-Rust [`opus-rs`](https://crates.io/crates/opus-rs) crate
@@ -29,7 +37,7 @@ codec runs **in the audio thread** (wrapped in `permit_alloc` for the suite's
 the reliable path across the whole 6–128 kbps range — and independent L/R quantisation
 adds a genuine codec-width artifact.
 
-## Signal flow
+## Signal Flow
 
 ```
  in (host) ─ SRC → 48 k ─┐
@@ -104,3 +112,29 @@ adds a genuine codec-width artifact.
 
 Offline audition renders (each preset over pink noise and a chirp) are written to
 `renders/WIRE/*.wav` by the crate tests.
+
+## Controls
+
+- **Bitrate** — Opus target bitrate (CBR), 6–128 kbps. Lower starves the coder ⇒ grittier, more artifacts.
+- **Mode** — encoder profile: Voice (SILK/hybrid, VoIP) or Music (CELT-leaning, audio).
+- **Bandwidth** — pre-codec low-pass, Narrow (~3.5 k, telephone) … Medium … Wide … Super … Full (20 k).
+- **FEC** — in-band forward-error-correction hint (on/off); also adapts the encoder to the loss setting.
+- **Packet Loss** — probability a 20 ms frame is dropped, 0–100 %, with click-free zero-fill concealment.
+- **Crunch** — pre-codec bit-depth (16→5 bit) + sample-rate (÷1→÷24) reduction macro, 0–100 %.
+- **Regen Delay** — feedback delay of the re-encoding generation-loss loop, 0–500 ms.
+- **Regen Amount** — feedback gain of the regen loop (soft-limited + DC-blocked in-loop), 0–95 %.
+- **Width** — M/S side-gain on the decoded stereo, 0–200 %.
+- **Mix** — dry/wet blend, 0–100 %; the dry path is latency-compensated (PDC).
+- **Out** — output trim, −24…+24 dB; the output is hard-guarded to ≤ 0 dBFS.
+
+## Recipes
+
+1. **Dark-techno rumble crush** — load **Bitcrushed Void** (Bitrate 6 kbps, Mode Music, Crunch 75 %,
+   Packet Loss 20 %, Regen Amount 60 %, Width 1.4, Mix 100 %). Everything starved and feeding back
+   into the void — sit it under a driving kick and let the loop chew.
+2. **Atmospheric-DnB tape haze** — load **Generation Loss** (Bitrate 24 kbps, Mode Music, Bandwidth
+   Wide, Crunch 20 %, Regen Delay 180 ms, Regen Amount 70 %, Mix 100 %, Out −1 dB) on a pad or a
+   chopped break; the re-encoding regen smears each pass into tape-style generation decay.
+3. **Vocal-rip telephone** — load **Hold Music** (Bitrate 12 kbps, Mode Voice, Bandwidth Narrow,
+   Crunch 10 %, Width 0.4, Mix 100 %, Out +2 dB) to collapse a vocal to a muffled hold-line, or
+   **Discord Ghost** (16 kbps Voice, Packet Loss 12 %, FEC on) for a glitchy VoIP-ripped vocal.

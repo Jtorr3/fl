@@ -29,6 +29,9 @@ pub mod presets;
 use dsp::{Settings, SlotOrder, SlotSettings, SlotType, SyncDivision, OuroCore};
 use suite_core::presets::{load_all, Preset};
 
+/// Usage manual embedded from docs, rendered in-GUI by the '?' button (BUILT-IN-MANUALS).
+pub const MANUAL_DOC: &str = include_str!("../../../docs/OUROBOROS.md");
+
 // ---------------------------------------------------------------------------
 // Param-facing enums (nih-plug `Enum`), mapped onto the pure-DSP enums.
 // ---------------------------------------------------------------------------
@@ -468,6 +471,7 @@ impl Plugin for Ouroboros {
                         ui.heading(
                             egui::RichText::new("QEYNOS · OUROBOROS").color(suite_core::ui::ACCENT),
                         );
+                        suite_core::ui::manual_button(ui, "ouroboros", "OUROBOROS", MANUAL_DOC);
                         ui.label(
                             egui::RichText::new("recursive feedback processor — delay loop, 3-slot chain, freeze")
                                 .color(suite_core::ui::TEXT_DIM)
@@ -686,6 +690,11 @@ mod render_tests {
     use suite_core::harness::{assert_universal, render_path, write_wav};
     use suite_core::presets::load_all;
     use suite_core::testsig;
+
+    #[test]
+    fn manual_covers_all_params_and_has_recipes() {
+        suite_core::manual::assert_manual_covers_params(crate::MANUAL_DOC, &crate::OuroParams::default());
+    }
 
     /// Render each factory preset over pink noise and a full-band chirp, write the WAVs into
     /// renders/OUROBOROS/, and assert the universal properties.

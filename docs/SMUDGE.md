@@ -7,6 +7,16 @@ amount and each _exactly_ bypassed when that amount is 0**. A slow **chaos** sam
 macro randomises the op parameters over time. Reports **2048-sample latency** (the STFT frame
 size); the dry path is delay-matched so `mix = 0` nulls cleanly.
 
+## What It Is
+
+An STFT chaos engine: every spectral frame runs through four ops in a fixed order —
+scramble (shuffle bins), spectral delay (echo bins across time), blur (average magnitudes),
+and smear/stretch (remap the bin axis) — each exactly bypassed at 0. A slow sample-and-hold
+chaos macro drifts the op parameters on its own. Push it for glitchy bin-shuffle, cascading
+spectral echoes, frozen clouds, or full spectral dissolution on pads, vocals and full mixes.
+
+## Signal Flow
+
 ```
         ┌────────────────────── STFT 2048 / hop 512 / Hann ──────────────────────┐
  in ──┬─┤ per frame:  ① scramble → ② spectral delay → ③ blur → ④ smear/stretch    ├─ wet ─ safety ─┐
@@ -137,3 +147,32 @@ echo emphasis across the spectrum and **Delay Feedback** for longer tails. Turn 
 Depth** (with **Chaos Engine**) to let everything drift on its own. **Stretch Factor** away from
 1.0 gives a spectral pitch-shift illusion. The host auto-delay-compensates the reported
 2048-sample latency; **Mix** blends parallel.
+
+## Controls
+
+- **Scramble** — amount, crossfade toward the permuted spectrum, 0–100 % (0 = exact bypass).
+- **Scramble Range** — neighbourhood half-width N, 0–100 % (0…48 bins).
+- **Scramble Rate** — frames between permutation redraws, 1–32 (1 = per-frame chaos, 4–8 = musical).
+- **Delay** — spectral-delay amount (additive echo level), 0–100 % (0 = exact bypass).
+- **Delay Tilt** — per-band delay curve, −1…+1 (+1 lows-short/highs-long, −1 inverse, 0 flat).
+- **Delay Feedback** — in-loop feedback, 0–95 % (soft-limited; always decays).
+- **Blur** — amount, blend toward the temporally-averaged magnitude, 0–100 % (0 = exact bypass).
+- **Blur Time** — base magnitude time constant τ, 5–2000 ms.
+- **Blur Tilt** — τ tilt across frequency, −1…+1 (+1 smooths highs more).
+- **Stretch** — amount, crossfade toward the remapped spectrum, 0–100 % (0 = exact bypass).
+- **Stretch Factor** — bin-index remap, 0.5–2 (source bin = k / factor; >1 up, <1 down).
+- **Chaos Rate** — frames between sample-and-hold redraws, 1–512.
+- **Chaos Depth** — modulation depth, 0–100 % (multiplicative on amounts ⇒ never lifts a zero).
+- **Mix** — dry/wet, 0–100 %.
+
+## Recipes
+
+1. **Dark-techno spectral echoes** — load **Spectral Echoes** (Delay 80 %, Delay Tilt +1.0,
+   Delay Feedback 70 %, Scramble 10 %, Scramble Range 40 %, Scramble Rate 6, Mix 60 %). Cascading
+   band-delayed echoes off a stab; sweep **Delay Tilt** to move the echo emphasis.
+2. **Atmospheric-DnB frozen cloud** — load **Frozen Blur** (Blur 100 %, Blur Time 2000 ms,
+   Delay 50 %, Delay Feedback 85 %, Mix 80 %) to melt a pad or break into a frozen spectral cloud;
+   **Time Smear** (Blur 90 %, Stretch 40 %, Stretch Factor 1.3) for a lighter, rising wash.
+3. **Vocal-rip glitch scatter** — load **Bin Shuffle Ritual** (Scramble 85 %, Scramble Range 80 %,
+   Scramble Rate 1, Blur 20 %, Blur Time 150 ms, Mix 70 %) to shatter a vocal into per-frame
+   bin-shuffle; raise **Chaos Depth** (with **Chaos Engine**) to let it drift on its own.

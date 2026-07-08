@@ -8,6 +8,16 @@ mutated by the slot chain, the sound evolves as it recirculates — pitching up 
 per echo, closing a filter, shifting into inharmonic clangor, reversing, crushing, or
 saturating into stable self-oscillation.
 
+## What It Is
+
+A feedback delay whose loop is re-processed on every pass through a reorderable chain of
+three effect slots, an in-loop limiter and a DC blocker. Because each repeat is mutated as
+it recirculates, echoes evolve — pitching up an octave, closing a filter, detuning into
+clangor, reversing — and past unity feedback the loop self-oscillates into a bounded,
+sustained tone. Freeze holds whatever is circulating as an infinite tail.
+
+## Signal Flow
+
 ```
  in ─×gate─ + ─ delay(1 ms–2 s, free/sync) ─ [slot A → slot B → slot C] ─ limiter ─ DC ─┬─ out tap
             ▲                                       (order selectable)                    │
@@ -119,3 +129,37 @@ toggle; Freeze Mix sets how much of the held/frozen texture you hear versus the 
 while Freeze is engaged. At 100% it is the classic hard freeze (unchanged); lower it to blend
 the live source back in so the freeze is a smooth crossfade rather than a sudden jump. The
 blend is smoothed (~15 ms) and only active while Freeze is on.
+
+## Controls
+
+- **Delay** — free delay time, 1–2000 ms (skewed); smoothed, click-free when changed.
+- **Sync** — lock the delay to host tempo.
+- **Division** — synced delay length: 1/16, 1/8, 1/8·, 1/4, 1/4·, 1/2, 1 Bar.
+- **Feedback** — loop gain, 0–110 %; past 100 % the loop self-oscillates (bounded by the limiter).
+- **Decay** — fine multiplier on feedback, 0–100 %.
+- **Freeze** — mutes the input (smoothed) and forces 100 % feedback ⇒ an infinite tail.
+- **Freeze Mix** — held-vs-live blend while Freeze is engaged, 0–100 % (100 % = classic hard freeze).
+- **Order** — slot visiting order, the 6 permutations of A/B/C.
+- **Slot A Type** — first loop slot's effect: Off / Pitch Shift / Filter LP·HP·BP / Freq Shift / Saturate / Reverse / Bit Crush.
+- **Slot A Amount** — first slot's primary macro, 0–100 % (meaning depends on Type).
+- **Slot A Param** — first slot's secondary macro, 0–100 % (meaning depends on Type).
+- **Slot B Type** — second loop slot's effect (same options as Slot A).
+- **Slot B Amount** — second slot's primary macro, 0–100 %.
+- **Slot B Param** — second slot's secondary macro, 0–100 %.
+- **Slot C Type** — third loop slot's effect (same options as Slot A).
+- **Slot C Amount** — third slot's primary macro, 0–100 %.
+- **Slot C Param** — third slot's secondary macro, 0–100 %.
+- **Mix** — dry/wet, 0–100 %.
+- **Out** — output trim, −24…+24 dB.
+
+## Recipes
+
+1. **Dark-techno dub throw** — load **Techno Ghost Notes** (Sync on, Division 1/16, Delay 250 ms,
+   Feedback 55 %, Slot A = Pitch Shift, Mix 40 %) to tuck pitched ghost-note echoes behind the
+   beat; or **Halfstep Rumble** (Division 1/2, Feedback 74 %, Decay 90 %) for a dubbed-out rumble.
+2. **Atmospheric-DnB wash** — load **Grief Wash** (Delay 600 ms, Feedback 80 %, Slot A = Saturate,
+   Slot B = Filter LP, Mix 50 %, Out −1 dB) for a saturated low-pass pad that never resolves; push
+   **Feedback** to 110 % for **Frozen Cathedral**'s self-sustaining drone.
+3. **Vocal-rip spiral** — load **Ascension Spiral** (Delay 300 ms, Feedback 70 %, Slot A = Pitch
+   Shift ~+1 st, Slot B = Filter BP, Mix 50 %) to pitch a vocal tail up on every repeat into an
+   endless rising spiral; **Reverse Nightmare** smears it backwards instead.

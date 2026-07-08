@@ -26,6 +26,9 @@ pub mod presets;
 use dsp::{Direction, DriftCore, Settings, SyncDivision};
 use suite_core::presets::{load_all, Preset};
 
+/// Usage manual embedded from docs, rendered in-GUI by the '?' button (BUILT-IN-MANUALS).
+pub const MANUAL_DOC: &str = include_str!("../../../docs/DRIFT.md");
+
 // ---------------------------------------------------------------------------
 // Param-facing enums (nih-plug `Enum`), mapped onto the pure-DSP enums.
 // ---------------------------------------------------------------------------
@@ -351,6 +354,7 @@ impl Plugin for Drift {
                         ui.heading(
                             egui::RichText::new("QEYNOS · DRIFT").color(suite_core::ui::ACCENT),
                         );
+                        suite_core::ui::manual_button(ui, "drift", "DRIFT", MANUAL_DOC);
                         ui.label(
                             egui::RichText::new("infinity filter — endless Shepard sweep")
                                 .color(suite_core::ui::TEXT_DIM)
@@ -551,6 +555,11 @@ mod render_tests {
     use suite_core::harness::{assert_universal, render_path, write_wav};
     use suite_core::presets::load_all;
     use suite_core::testsig;
+
+    #[test]
+    fn manual_covers_all_params_and_has_recipes() {
+        suite_core::manual::assert_manual_covers_params(crate::MANUAL_DOC, &crate::DriftParams::default());
+    }
 
     /// Render each factory preset over pink noise and a full-band chirp, write the WAVs into
     /// renders/DRIFT/, and assert the universal properties.

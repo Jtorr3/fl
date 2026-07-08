@@ -9,6 +9,16 @@ direction. Sum the cloud, optionally send it through a **+12 st shimmer** feedba
 re-enters the buffer to bloom, and blend against the dry signal. **Freeze** locks the write
 head so the buffer holds, turning any moment into an infinite, evolving texture.
 
+## What It Is
+
+A mass granulator: a rolling 10-second capture is sprayed into a cloud of up to 128
+concurrent grains, each randomised at spawn for position, pitch, size, pan and direction.
+An optional +12 st shimmer feedback blooms the cloud into ascending textures, and Freeze
+locks the buffer to hold any moment as an infinite, evolving wash. Drop it on pads, vocals,
+drums or a bus to melt the source into granular atmosphere.
+
+## Signal Flow
+
 ```
  in ──┬───────────────────────────────────────────── dry ─────────────────┐
       │(write, unless frozen)                                            (1-mix)
@@ -128,3 +138,32 @@ toggle; Freeze Mix sets how much of the held/frozen texture you hear versus the 
 while Freeze is engaged. At 100% it is the classic hard freeze (unchanged); lower it to blend
 the live source back in so the freeze is a smooth crossfade rather than a sudden jump. The
 blend is smoothed (~15 ms) and only active while Freeze is on.
+
+## Controls
+
+- **Density** — grain spawn rate, 1–500 gr/s (poisson, or clustered on the grid when synced).
+- **Size** — grain length, 10–500 ms.
+- **Spray** — position spray around the read head, 0–500 ms.
+- **Scatter** — random pitch spread (±), 0–24 st, per grain.
+- **Quantize** — snap Scatter to whole semitones (on/off).
+- **Reverse** — probability a grain plays backward, 0–100 %.
+- **Shimmer** — +12 st feedback send into the buffer, 0–110 % (bounded, self-oscillates past 100 %).
+- **Freeze** — lock the write head; the input is still monitored into the dry path per Mix.
+- **Freeze Mix** — held-vs-live blend while Freeze is engaged, 0–100 % (100 % = classic hard freeze).
+- **Sync** — grid-sync the scheduler to host tempo (else poisson).
+- **Division** — grid tick when synced: 1/16, 1/8, 1/8·, 1/4, 1/4·, 1/2, 1 Bar.
+- **Width** — stereo pan spread of the grains, 0–100 %.
+- **Mix** — dry/wet, 0–100 %.
+- **Out** — output trim, −24…+24 dB.
+
+## Recipes
+
+1. **Dark-techno rhythmic dust** — load **Clockwork Dust** (Sync on, Division 1/8, Density 24 gr/s,
+   Size 45 ms, Spray 200 ms, Scatter 7 st, Quantize on, Width 0.85, Mix 60 %). Tempo-locked granular
+   clusters that scatter behind a techno beat.
+2. **Atmospheric-DnB shimmer bed** — load **Ascension Vapor** (Density 70 gr/s, Size 220 ms,
+   Scatter 0, Quantize on, Shimmer 70 %, Width 0.9, Mix 70 %, Out −1.5 dB). An octave-up shimmer
+   cloud that ascends under pads or a chopped break.
+3. **Vocal-rip reverse swell** — load **Backward Requiem** (Density 50 gr/s, Size 300 ms,
+   Reverse 85 %, Shimmer 20 %, Width 0.95, Mix 65 %) to smear a vocal into backward swells; hit
+   **Freeze** to hold a single moment as an infinite wash while the dry vocal still passes per Mix.

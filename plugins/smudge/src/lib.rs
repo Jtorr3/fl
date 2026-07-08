@@ -31,6 +31,9 @@ use suite_core::bus::PluginKind;
 use suite_core::presets::{load_all, Preset};
 use suite_core::spectrum::SpectrumPublisher;
 
+/// Usage manual embedded from docs, rendered in-GUI by the '?' button (BUILT-IN-MANUALS).
+pub const MANUAL_DOC: &str = include_str!("../../../docs/SMUDGE.md");
+
 // ---------------------------------------------------------------------------
 // Plugin + params
 // ---------------------------------------------------------------------------
@@ -268,6 +271,7 @@ impl Plugin for Smudge {
                         ui.heading(
                             egui::RichText::new("QEYNOS · SMUDGE").color(suite_core::ui::ACCENT),
                         );
+                        suite_core::ui::manual_button(ui, "smudge", "SMUDGE", MANUAL_DOC);
                         ui.label(
                             egui::RichText::new("spectral chaos — scramble · delay · blur · stretch")
                                 .color(suite_core::ui::TEXT_DIM)

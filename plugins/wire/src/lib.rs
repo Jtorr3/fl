@@ -29,6 +29,9 @@ pub mod presets;
 use dsp::{BandwidthSel, Mode, Settings, WireCore};
 use suite_core::presets::{load_all, Preset};
 
+/// Usage manual embedded from docs, rendered in-GUI by the '?' button (BUILT-IN-MANUALS).
+pub const MANUAL_DOC: &str = include_str!("../../../docs/WIRE.md");
+
 // ---------------------------------------------------------------------------
 // Param-facing enums (nih-plug `Enum`), mapped onto the pure-DSP enums.
 // ---------------------------------------------------------------------------
@@ -323,6 +326,7 @@ impl Plugin for Wire {
                         ui.heading(
                             egui::RichText::new("QEYNOS · WIRE").color(suite_core::ui::ACCENT),
                         );
+                        suite_core::ui::manual_button(ui, "wire", "WIRE", MANUAL_DOC);
                         ui.label(
                             egui::RichText::new("codec degradation — Opus round-trip, crunch & regen")
                                 .color(suite_core::ui::TEXT_DIM)
@@ -535,6 +539,11 @@ mod render_tests {
     use suite_core::harness::{assert_universal, render_path, write_wav};
     use suite_core::presets::load_all;
     use suite_core::testsig;
+
+    #[test]
+    fn manual_covers_all_params_and_has_recipes() {
+        suite_core::manual::assert_manual_covers_params(crate::MANUAL_DOC, &crate::WireParams::default());
+    }
 
     /// Render each factory preset over pink noise and a full-band chirp, write the WAVs into
     /// renders/WIRE/, and assert the universal properties.

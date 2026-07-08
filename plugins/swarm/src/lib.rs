@@ -29,6 +29,9 @@ use suite_core::bus::PluginKind;
 use suite_core::presets::{load_all, Preset};
 use suite_core::spectrum::SpectrumPublisher;
 
+/// Usage manual embedded from docs, rendered in-GUI by the '?' button (BUILT-IN-MANUALS).
+pub const MANUAL_DOC: &str = include_str!("../../../docs/SWARM.md");
+
 // ---------------------------------------------------------------------------
 // Param-facing division enum (mapped onto the pure-DSP enum).
 // ---------------------------------------------------------------------------
@@ -334,6 +337,7 @@ impl Plugin for Swarm {
                         use suite_core::ui::labeled_slider as row;
                         ui.add_space(4.0);
                         ui.heading(egui::RichText::new("QEYNOS · SWARM").color(suite_core::ui::ACCENT));
+                        suite_core::ui::manual_button(ui, "swarm", "SWARM", MANUAL_DOC);
                         ui.label(
                             egui::RichText::new("mass granulator — 10 s buffer, ≤128 grains, shimmer, freeze")
                                 .color(suite_core::ui::TEXT_DIM)
@@ -533,6 +537,11 @@ mod render_tests {
     use suite_core::harness::{assert_universal, write_wav, render_path};
     use suite_core::presets::load_all;
     use suite_core::testsig;
+
+    #[test]
+    fn manual_covers_all_params_and_has_recipes() {
+        suite_core::manual::assert_manual_covers_params(crate::MANUAL_DOC, &crate::SwarmParams::default());
+    }
 
     /// Render each factory preset over pink noise and a full-band chirp, write the WAVs into
     /// renders/SWARM/, and assert the universal properties.
