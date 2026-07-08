@@ -1,0 +1,18 @@
+[package]
+name = "bandaid"
+version = "0.1.0"
+edition = "2021"
+license = "ISC"
+description = "Qeynos BANDAID — multiband transient designer: LR4 3-band split, per-band attack/sustain shaping (±12 dB) via fast/slow envelope difference, per-band solo, parallel-delta reconstruction (neutral = exact null)"
+
+[lib]
+# `cdylib` for the CLAP/VST3 bundle; `lib` so `cargo test` and the harness can link the DSP.
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+nih_plug = { workspace = true }
+nih_plug_egui = { workspace = true }
+suite-core = { path = "../../suite-core" }
+
+[dev-dependencies]
+suite-core = { path = "../../suite-core" }
