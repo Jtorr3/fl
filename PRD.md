@@ -365,7 +365,11 @@ forward to after HARD CHECKPOINT 2 — see above)
   Fable use here is user-mandated (explicit "have fable check" instruction),
   logged in STATUS.md per §8.)
 - [x] PEDAL-UI (LOCKED: CONSOLE v2 — pedal + amber CRT terminal; usability guardrails in SPECS override aesthetics. Shipped 2026-07-08: all 28 editors, paint-only, per-plugin THEME/CRT-motion prefs + THEME-OFF fallback; build.ps1 -All 30/30 GREEN)
-**FINAL CHECKPOINT**
+- [x] **FINAL CHECKPOINT** (2026-07-08 ultracode audit + remediation): full-suite audit +
+  fixes — 2 confirmed majors (CRT clip-rect escaping ScrollArea viewport; CHAMBER floor-plan
+  coords settable only inside the glass → guardrail #3) + 12 minors fixed, ledger corrections;
+  `cargo test --workspace --release` GREEN (63 groups, 0 failed, +3 new regression tests) and
+  `build.ps1 -All` GREEN 30/30, 0 gate failures. Suite complete — all §7 items ticked.
 
 ## 8. Model & token policy (user directive 2026-07-07)
 

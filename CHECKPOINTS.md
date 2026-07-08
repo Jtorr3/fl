@@ -197,6 +197,41 @@
 - [ ] **Preset names.** Saving a preset named `NUL`, `CON`, `COM5` etc. now lands on disk as
       `NUL_` / `CON_` / `COM5_` instead of silently vanishing into a Windows device name.
 
+## FINAL CHECKPOINT (2026-07-08) — full-suite verify in FL
+
+### PEDAL-UI — CONSOLE v2 skin + THEME prefs
+- [ ] **Skin renders in FL.** Reopen any few Qeynos plugins → each is a dark pedal enclosure
+      (machined body, amber brand strip flush between the top screws, corner screws, tick-ringed
+      amber knobs, LED footswitch toggles) with a recessed amber CRT bay showing that plugin's
+      live telemetry. Confirm nothing paints over the preset bar when you **scroll a tall editor**
+      (e.g. NERVE at 150 % zoom — the clip-escape bug is fixed) and the CRT cursor no longer sits
+      on top of the last telemetry row.
+- [ ] **Size-menu THEME toggles (try on ~2 plugins).** Click the top-right **NN%** menu → THEME:
+      toggle **CRT motion** (kills the cursor blink / freezes animated scopes to ~8 fps idle) and
+      **Console skin** (instant plain-dark fallback — the enclosure/CRT vanish, all knobs/values
+      still work). Both should apply immediately.
+- [ ] **Prefs persist across reopen.** Turn Console skin OFF on one plugin and CRT motion OFF on
+      another, close both editors, reopen → each comes back with your setting. (Stored in
+      `Documents\Qeynos\ui_prefs.json`; the write is now atomic + merge-safe, so two open editors
+      no longer clobber each other and a corrupt file won't wipe everyone's prefs.)
+
+### BUILT-IN-MANUALS — the '?' panel
+- [ ] **Open the '?' on a few plugins** (top-right of every editor) → a closable/scrollable
+      manual window (What It Is / Signal Flow / Controls / Recipes) should render, and every
+      control on the panel should be described in the Controls section.
+
+### SUITE-TRIAGE — re-test the fixed "broken" behaviors in FL
+The SUITE-TRIAGE fix pass repaired 13 behaviors the audit called broken/weak. Spot-check them
+on real material (all rebuilt/reinstalled):
+- [ ] **NERVE → GRIT drive** — route a NERVE LFO (S1) to GRIT's DRIVE and hear it pump in time.
+- [ ] **CLEAVE 1-bar loop** — feed a 1-bar drum loop, transport playing → slices lock to the
+      step grid, no audio-thread crash at max Sensitivity / Transient mode.
+- [ ] **IMPACT / SNAP key-track** — play a bassline/melody in → the tuned layer tracks the note.
+- [ ] **VOXFIT knob response** — knobs move the sound as labeled (no dead/no-op controls).
+- [ ] **SEANCE grid chop** — the transport-locked chopper cuts on the grid.
+- [ ] **Freeze toggles** — freeze/hold controls (X-RAY Freeze, and any plugin buffer-freeze)
+      hold the display/buffer as expected.
+
 ## NERVE — suite modulation bus (2026-07-08)
 - [ ] **Rescan FL** (Options → Manage plugins → Find more plugins) → verify **Qeynos NERVE**
       loads (CLAP + VST3 both installed; every other Qeynos plugin was also rebuilt/reinstalled
@@ -214,6 +249,11 @@
       reloading a project, re-pick the source in each MOD row (labels make this quick). This is
       deliberate (a persisted random id breaks CLAP state reproducibility); a stable-id scheme
       is a candidate follow-up.
+- [ ] **Not every plugin is a modulation target (by design).** OVERSEER (Node + Master),
+      EMBER, SEANCE, VOXFIT and VOXKEY have **no MOD section** — they never grew the deferred
+      NERVE *listener* layer, so they cannot receive NERVE modulation (they have no MOD row to
+      route into). Everything with a MOD section under its preset bar is a valid target; these
+      five are not. Nothing to do here — noted so you don't hunt for a MOD section that isn't there.
 
 ## X-RAY — shared cross-plugin analyzer (2026-07-08)
 - [ ] **Rescan FL** (Options → Manage plugins → Find more plugins) → verify **Qeynos X-RAY**

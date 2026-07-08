@@ -35,9 +35,11 @@ Each entry: item | feature | why | how to pick it back up.
 - **Deferred 2026-07-07 (design decision per PRD §3, not a failure).** The Node↔Master
   link is tier 1 (same-DLL `static` registry); FL "Make bridged" on either instance
   severs it (documented in README/docs/CHECKPOINTS; audio processing is unaffected).
-- **How to resume:** NERVE/X-RAY build the `memmap2` shared-memory bus in suite-core
-  (PRD §3 tier 2: fixed-layout slots, per-slot seqlock, heartbeat GC); port
-  `plugins/overseer/src/bus.rs` onto it keeping the same `Slot` API.
+- **How to resume (updated 2026-07-08, FINAL CHECKPOINT):** the `memmap2` shared-memory bus
+  ALREADY EXISTS — it was built in `suite-core/src/bus.rs` (PRD §3 tier 2: fixed-layout slots,
+  per-slot seqlock, heartbeat GC; `bus::tests::seqlock_never_tears` covers it) for NERVE/X-RAY.
+  The ONLY remaining step is porting `plugins/overseer/src/bus.rs` (still the tier-1 same-DLL
+  `static` registry) onto `suite_core::bus`, keeping OVERSEER's existing `Slot` API surface.
 
 ## W4-SESSION-BOOTSTRAP — tempo (BPM) application
 - **Deferred 2026-07-07 (server limitation, not a code descope).** The SPECS.md W4
@@ -154,12 +156,14 @@ Each entry: item | feature | why | how to pick it back up.
 
 ## X-RAY spectrum-publishing — non-publishers deferred
 - **Decided 2026-07-08 (PRD §1.5 tractable-majority clause; X-RAY shipped with a publishing
-  MAJORITY — 25 plugins + X-RAY itself publish their 32-band output spectrum to the tier-2 bus).**
+  MAJORITY — 26 plugins + X-RAY itself publish their 32-band output spectrum to the tier-2 bus).**
+  (Roster corrected 2026-07-08 FINAL CHECKPOINT: CHORALE, shipped after this note, also publishes
+  — verified `SpectrumPublisher` init/feed/publish/release in `plugins/chorale/src/lib.rs`.)
 - **What:** `suite_core::spectrum::{SpectrumTap, SpectrumPublisher}` + a uniform 4-part retrofit
   (field, `init` in `initialize`, `feed`-loop + `publish` at the end of `process`, `release` in
-  `Drop`) were wired into: ascend, bandaid, carve, chamber, cleave, drift, ember, flyby, grit,
-  halt, impact, murmur, ouroboros, patina, pluck, seance, shapeshift, smudge, snap, swarm, tracer,
-  undertow, voxfit, voxkey, wire. These do NOT publish:
+  `Drop`) were wired into: ascend, bandaid, carve, chamber, chorale, cleave, drift, ember, flyby,
+  grit, halt, impact, murmur, ouroboros, patina, pluck, seance, shapeshift, smudge, snap, swarm,
+  tracer, undertow, voxfit, voxkey, wire. These do NOT publish:
   - **OVERSEER** — one bundle exporting TWO plugins (Node + Master) with its own tier-1 override
     bus; a per-plugin spectrum publisher (which struct owns the slot, interaction with the
     override/steal-back logic) needs care. Deferred to avoid regressing the tier-1 contract.
@@ -179,8 +183,10 @@ Each entry: item | feature | why | how to pick it back up.
 From docs/TRIAGE-2026-07-08.md (P2 tier of the fix program; per-plugin detail in
 docs/triage/cluster*.md). None of these block daily use; they are quality-polish items:
 
-- **WIRE**: PLC re-entry click; FEC approximation (true per-bandwidth Opus internal rate);
-  `reset()` allocs on the audio thread; latency-rescale on bandwidth change.
+- **WIRE**: PLC re-entry click; `reset()` allocs on the audio thread; latency-rescale on
+  bandwidth change. (FEC approximation / true per-bandwidth Opus internal rate is tracked ONCE
+  in the top-level "WIRE — true per-bandwidth Opus internal rate + real FEC/PLC recovery" entry
+  above — not duplicated here.)
 - **SWARM**: synced bursts ~+9 dB hot (burst normalisation); mono-sums stereo capture;
   grain-clock transport phase-lock.
 - **CARVE**: SC-listen unaligned with the wet path; hop-rate envelope option.
