@@ -376,31 +376,40 @@ impl Plugin for VoxKey {
                             |setter, p| apply_preset(&params, setter, p),
                         );
 
-                        // Live detected → target read-out.
+                        // CONSOLE v2 CRT telemetry bay — live detected → target pitch straight
+                        // from the meter atomics the editor already reads (SPECS call for this
+                        // in the CRT). THEME-OFF ⇒ the same read-out on a plain panel.
                         let (detected, target, conf, active) = meter.load();
-                        ui.horizontal(|ui| {
-                            let det = if detected > 0.0 {
-                                format!("{}  ({:.0} Hz)", hz_to_note_name(detected), detected)
-                            } else {
-                                "—".to_string()
-                            };
-                            let tgt = if active && target > 0.0 {
-                                format!("{}  ({:.0} Hz)", hz_to_note_name(target), target)
-                            } else {
-                                "— (hold / bypass)".to_string()
-                            };
-                            ui.label(egui::RichText::new("IN").color(suite_core::ui::TEXT_DIM).small());
-                            ui.label(egui::RichText::new(det).color(suite_core::ui::TEXT).strong());
-                            ui.label(egui::RichText::new("→").color(suite_core::ui::TEXT_DIM));
-                            ui.label(egui::RichText::new("TGT").color(suite_core::ui::TEXT_DIM).small());
-                            ui.label(egui::RichText::new(tgt).color(suite_core::ui::ACCENT).strong());
-                        });
-                        ui.label(
-                            egui::RichText::new(format!("confidence {:.2}", conf))
-                                .color(suite_core::ui::TEXT_DIM)
-                                .small(),
+                        let det = if detected > 0.0 {
+                            format!("{}  ({:.0} Hz)", hz_to_note_name(detected), detected)
+                        } else {
+                            "—".to_string()
+                        };
+                        let tgt = if active && target > 0.0 {
+                            format!("{}  ({:.0} Hz)", hz_to_note_name(target), target)
+                        } else {
+                            "— (hold / bypass)".to_string()
+                        };
+                        suite_core::ui::crt_lines(
+                            ui,
+                            "voxkey-crt",
+                            "VOXKEY · RETUNE",
+                            &[
+                                ("DETECT", det),
+                                ("TARGET", tgt),
+                                ("CONF", format!("{:.2}", conf)),
+                                (
+                                    "KEY",
+                                    format!(
+                                        "{} {} · {}",
+                                        params.root,
+                                        params.scale,
+                                        if params.midi_mode.value() { "MIDI" } else { "scale" },
+                                    ),
+                                ),
+                            ],
                         );
-                        ui.separator();
+                        ui.add_space(4.0);
 
                         egui::ScrollArea::vertical().show(ui, |ui| {
                             ui.label(egui::RichText::new("KEY").color(suite_core::ui::ACCENT).small());

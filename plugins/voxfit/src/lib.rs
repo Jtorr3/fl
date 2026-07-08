@@ -237,6 +237,23 @@ impl Plugin for VoxFit {
                         );
                         ui.separator();
 
+                        // CONSOLE v2 CRT telemetry bay — honest live param state (the same
+                        // values shown on the knobs below; GUI-thread reads only). THEME-OFF ⇒
+                        // plain readout panel.
+                        suite_core::ui::crt_lines(
+                            ui,
+                            "voxfit-crt",
+                            "VOXFIT · VOX CONFORM",
+                            &[
+                                ("MACRO", format!("sit {} · form {}", params.sit, params.formant)),
+                                ("DE-ESS", format!("thr {} · amt {}{}", params.deess_thresh, params.deess, if params.listen.value() { " · LISTEN" } else { "" })),
+                                ("HARSH", format!("thr {} · amt {}", params.harsh_thresh, params.harsh)),
+                                ("TONE", format!("tilt {} · prox {} · air {}", params.tilt, params.prox, params.air)),
+                                ("OUT", format!("mix {} · {}", params.mix, params.out_trim)),
+                            ],
+                        );
+                        ui.add_space(4.0);
+
                         egui::ScrollArea::vertical().show(ui, |ui| {
                             // The macro up top.
                             ui.label(egui::RichText::new("MACRO").color(suite_core::ui::ACCENT).small());

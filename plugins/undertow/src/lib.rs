@@ -289,6 +289,23 @@ impl Plugin for Undertow {
                         );
                         ui.separator();
 
+                        // CONSOLE v2 CRT telemetry bay — honest live param state (the same
+                        // values shown on the knobs below; GUI-thread reads only). THEME-OFF ⇒
+                        // plain readout panel.
+                        suite_core::ui::crt_lines(
+                            ui,
+                            "undertow-crt",
+                            "UNDERTOW · KICK->RUMBLE",
+                            &[
+                                ("SOURCE", format!("strip {} · drive {}", params.strip, params.drive)),
+                                ("RUMBLE", format!("size {} · decay {}", params.size, params.decay)),
+                                ("TUNE", format!("{} · amt {}", params.tune_note, params.tune_amount)),
+                                ("DUCK", format!("depth {} · rel {}", params.duck_depth, params.duck_release)),
+                                ("OUT", format!("rumble {} · trim {}", params.rumble_level, params.out_trim)),
+                            ],
+                        );
+                        ui.add_space(4.0);
+
                         egui::ScrollArea::vertical().show(ui, |ui| {
                             ui.label(egui::RichText::new("SOURCE").color(suite_core::ui::TEXT_DIM).small());
                             egui::Grid::new("undertow-source")

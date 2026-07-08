@@ -334,6 +334,23 @@ impl Plugin for Seance {
                         );
                         ui.separator();
 
+                        // CONSOLE v2 CRT telemetry bay — honest live param state (the same
+                        // values shown on the knobs below; GUI-thread reads only). THEME-OFF ⇒
+                        // plain readout panel.
+                        suite_core::ui::crt_lines(
+                            ui,
+                            "seance-crt",
+                            "SEANCE · GHOST VOX",
+                            &[
+                                ("MACRO", format!("ghost {} · drown {} · chop {}", params.ghost, params.drown, params.chop_macro)),
+                                ("SHIFT", format!("pitch {} · form {}", params.pitch, params.formant)),
+                                ("CHOP", format!("{} · rate {} · dep {}", params.chop_pattern, params.chop_rate, params.chop_depth)),
+                                ("VERB", format!("size {} · dec {} · wet {}", params.verb_size, params.verb_decay, params.verb_wet)),
+                                ("OUT", format!("mix {} · {}", params.mix, params.out_trim)),
+                            ],
+                        );
+                        ui.add_space(4.0);
+
                         egui::ScrollArea::vertical().show(ui, |ui| {
                             ui.label(egui::RichText::new("MACROS").color(suite_core::ui::ACCENT).small());
                             egui::Grid::new("seance-macros").num_columns(3).spacing([12.0, 6.0]).show(ui, |ui| {

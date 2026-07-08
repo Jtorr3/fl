@@ -276,6 +276,23 @@ impl Plugin for Snap {
                         );
                         ui.separator();
 
+                        // CONSOLE v2 CRT telemetry bay — honest live param state (the same
+                        // values shown on the knobs below; GUI-thread reads only). THEME-OFF ⇒
+                        // plain readout panel.
+                        suite_core::ui::crt_lines(
+                            ui,
+                            "snap-crt",
+                            "SNAP · SNARE/CLAP",
+                            &[
+                                ("ENGINE", format!("mode {} · tune {}", params.mode, params.tune)),
+                                ("BODY", format!("bal {} · snap {} · decay {}", params.balance, params.snap, params.decay)),
+                                ("CLAP", format!("taps {} · spread {}", params.taps, params.spread)),
+                                ("KEYTRK", format!("{} · tone {}", if params.keytrack.value() { "on" } else { "off" }, params.tone)),
+                                ("OUT", format!("drive {} · lvl {}", params.drive, params.level)),
+                            ],
+                        );
+                        ui.add_space(4.0);
+
                         egui::ScrollArea::vertical().show(ui, |ui| {
                             ui.label(egui::RichText::new("ENGINE").color(suite_core::ui::TEXT_DIM).small());
                             egui::Grid::new("snap-engine").num_columns(2).spacing([16.0, 6.0]).show(ui, |ui| {
