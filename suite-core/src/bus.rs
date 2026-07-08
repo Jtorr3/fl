@@ -457,6 +457,52 @@ impl Bus {
         self.read_slot(idx).map(|snap| snap.mods[signal])
     }
 
+    /// Alloc-free single-signal read under the seqlock — for the RT listen path (no
+    /// `String`/`Vec` built). Validates liveness (free/stale → `None`).
+    pub fn read_mod_fast(&self, idx: usize, signal: usize) -> Option<f32> {
+        if idx >= NUM_SLOTS || signal >= NUM_MOD_SIGNALS {
+            return None;
+        }
+        let s = self.slot(idx);
+        let now = now_ms();
+        loop {
+            let s1 = s.seq.load(Ordering::Acquire);
+            if s1 & 1 != 0 {
+                std::hint::spin_loop();
+                continue;
+            }
+            let id = s.instance_id.load(Ordering::Relaxed);
+            let last = s.last_beat_ms.load(Ordering::Relaxed);
+            let v = load_f32(&s.mod_signals[signal]);
+            let s2 = s.seq.load(Ordering::Acquire);
+            if s1 == s2 {
+                if id == FREE || now.saturating_sub(last) > STALE_MS {
+                    return None;
+                }
+                return Some(v);
+            }
+            std::hint::spin_loop();
+        }
+    }
+
+    /// Alloc-free: index of the live slot owned by `instance_id`, if any. For the listen
+    /// layer to cache a source's slot index (re-resolved when the cache misses).
+    pub fn resolve_instance(&self, instance_id: u64) -> Option<usize> {
+        if instance_id == FREE {
+            return None;
+        }
+        let now = now_ms();
+        for i in 0..NUM_SLOTS {
+            let s = self.slot(i);
+            if s.instance_id.load(Ordering::Relaxed) == instance_id
+                && now.saturating_sub(s.last_beat_ms.load(Ordering::Relaxed)) <= STALE_MS
+            {
+                return Some(i);
+            }
+        }
+        None
+    }
+
     // ---- GC ----------------------------------------------------------------
 
     /// Reclaim slots whose heartbeat has gone stale (owner crashed / bridged-away process

@@ -784,6 +784,132 @@ impl<'a> PresetBar<'a> {
     }
 }
 
+// ===========================================================================
+// MOD section — per-param cross-plugin modulation routing (NERVE listen layer)
+// ===========================================================================
+
+/// A collapsible "MOD" section listing the plugin's modulatable params. For each target it
+/// shows: source instance (live NERVE slots on the tier-2 [`crate::bus`]), which of the 8
+/// signals, a depth (-1..1), and a shaping curve. Edits are written straight into the
+/// shared, persisted [`crate::modlisten::ModRoutes`] (GUI thread; the audio thread only
+/// `try_read`s it). Retrofit is one call in a plugin's editor closure:
+///
+/// ```ignore
+/// suite_core::ui::mod_section(ui, &plugin.mod_routes, &[
+///     ("drive", "DRIVE"), ("mix", "MIX"),
+/// ]);
+/// ```
+pub fn mod_section(
+    ui: &mut egui::Ui,
+    routes: &std::sync::RwLock<crate::modlisten::ModRoutes>,
+    targets: &[(&str, &str)],
+) {
+    use crate::bus;
+    use crate::bus::NUM_MOD_SIGNALS;
+    use crate::modlisten::Curve;
+
+    // Live sources on the bus (any kind; NERVE is the publisher). Alloc on the GUI thread.
+    let sources: Vec<(u64, String)> = bus::bus()
+        .map(|b| {
+            b.snapshot_live()
+                .into_iter()
+                .map(|s| {
+                    let name = if s.label.is_empty() {
+                        format!("#{}", s.instance_id & 0xFFFF)
+                    } else {
+                        s.label
+                    };
+                    (s.instance_id, name)
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    egui::CollapsingHeader::new(egui::RichText::new("MOD").color(ACCENT))
+        .id_salt("qeynos-mod-section")
+        .show(ui, |ui| {
+            if sources.is_empty() {
+                ui.label(
+                    egui::RichText::new("No bus sources — add a Qeynos NERVE (un-bridged).")
+                        .color(TEXT_DIM)
+                        .small(),
+                );
+            }
+            let mut cfg = routes.write().unwrap_or_else(|p| p.into_inner());
+            for (pid, label) in targets {
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(*label).color(TEXT).small());
+
+                    let cur = cfg.get(pid).cloned();
+                    let cur_src = cur.as_ref().map(|r| r.source_instance).unwrap_or(0);
+                    let cur_src_label = sources
+                        .iter()
+                        .find(|(id, _)| *id == cur_src)
+                        .map(|(_, l)| l.clone())
+                        .unwrap_or_else(|| "— none —".to_string());
+
+                    egui::ComboBox::from_id_salt((*pid, "mod-src"))
+                        .selected_text(cur_src_label)
+                        .width(96.0)
+                        .show_ui(ui, |ui| {
+                            if ui.selectable_label(cur_src == 0, "— none —").clicked() {
+                                cfg.clear(pid);
+                            }
+                            for (id, l) in &sources {
+                                if ui.selectable_label(cur_src == *id, l).clicked() {
+                                    cfg.entry(pid).source_instance = *id;
+                                }
+                            }
+                        });
+
+                    if let Some(r) = cfg.get(pid).filter(|r| r.source_instance != 0).cloned() {
+                        egui::ComboBox::from_id_salt((*pid, "mod-sig"))
+                            .selected_text(format!("S{}", r.source_index + 1))
+                            .width(50.0)
+                            .show_ui(ui, |ui| {
+                                for i in 0..NUM_MOD_SIGNALS as u8 {
+                                    if ui
+                                        .selectable_label(r.source_index == i, format!("S{}", i + 1))
+                                        .clicked()
+                                    {
+                                        cfg.entry(pid).source_index = i;
+                                    }
+                                }
+                            });
+
+                        let mut d = r.depth;
+                        if ui
+                            .add(
+                                egui::DragValue::new(&mut d)
+                                    .speed(0.01)
+                                    .fixed_decimals(2)
+                                    .prefix("d "),
+                            )
+                            .changed()
+                        {
+                            cfg.entry(pid).depth = d.clamp(-1.0, 1.0);
+                        }
+
+                        egui::ComboBox::from_id_salt((*pid, "mod-curve"))
+                            .selected_text(r.curve.label())
+                            .width(78.0)
+                            .show_ui(ui, |ui| {
+                                for c in Curve::ALL {
+                                    if ui.selectable_label(r.curve == c, c.label()).clicked() {
+                                        cfg.entry(pid).curve = c;
+                                    }
+                                }
+                            });
+
+                        if ui.small_button("✕").clicked() {
+                            cfg.clear(pid);
+                        }
+                    }
+                });
+            }
+        });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
