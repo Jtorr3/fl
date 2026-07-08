@@ -25,6 +25,18 @@
       (uv is at `%USERPROFILE%\.local\bin\uv.exe`, not on PATH). The offline
       `test_vitalgen.py` live smoke test also auto-runs once the key is present.
 
+- [ ] **W9-VOXRIP (shipped 2026-07-07): audition ripped/conformed vocals.** The tool is
+      a standalone Python CLI (no FL rescan needed). Both live paths were verified on
+      the build machine: demucs (htdemucs, CPU) separated a track into
+      `vocals_raw.wav` + `instrumental.wav`, and rubberband (`rubberband-3.3.0` portable,
+      `-F` formant-preserving) conformed a synthetic acapella (C#m/99 BPM → F#m/128 BPM,
+      +5 st). Run it on a REAL song and listen:
+      `uv run --python 3.12 tools\voxrip\voxrip.py "C:\path\song.mp3" --target-bpm 174 --target-key "F#m" --out .\ripped`
+      (uv at `%USERPROFILE%\.local\bin\uv.exe`, not on PATH). First run downloads torch
+      (~200 MB, CPU) + htdemucs weights; both cache afterwards. Audition
+      `ripped\<song>\vocals_conformed.wav` over the target track and read `REPORT.md`
+      for the detected BPM/key + chosen transposition. The rubberband binary self-installs
+      into `tools\bin\rubberband\` (gitignored) on first conform.
 - [ ] **BOOTSTRAP (done 2026-07-07): FL rescan needed.** "Qeynos Template" CLAP is
       installed at `%LOCALAPPDATA%\Programs\Common\CLAP\Qeynos\_template.clap`.
       In FL: Options → Manage plugins → "Find more plugins", then load
