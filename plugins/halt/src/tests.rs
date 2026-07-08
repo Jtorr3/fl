@@ -78,8 +78,9 @@ fn render(
                 l[j] = x;
                 r[j] = x;
             } else {
-                l[j] = ((1.0 - s.mix) * x + s.mix * wl) * gain;
-                r[j] = ((1.0 - s.mix) * x + s.mix * wr) * gain;
+                // Mirror the plugin's blend: Out trim on the wet component only, dry untrimmed.
+                l[j] = crate::dsp::mix_out(x, wl, s.mix, gain);
+                r[j] = crate::dsp::mix_out(x, wr, s.mix, gain);
             }
         }
         t.advance(end - i);
@@ -464,6 +465,123 @@ fn every_preset_renders_and_passes_universal() {
         let path = render_path("HALT", &fname);
         write_wav(&path, warm_l, SR as u32).expect("write render");
     }
+}
+
+// ---------------------------------------------------------------------------
+// P0: pitched stutter — intra-period read-head wraps are crossfaded (no click).
+// ---------------------------------------------------------------------------
+#[test]
+fn stutter_pitch_up_wrap_is_click_free() {
+    // A positive pitch step runs the read head faster than the retrigger period, so it overruns
+    // the captured slice mid-period. Those intra-period wraps must be crossfaded (not just the
+    // retrigger) or they click. Drive a smooth sine so any un-faded wrap shows up as a large
+    // sample-to-sample jump.
+    let engage = 24_064usize; // block-aligned, after warmup so the slice holds real audio
+    let total = engage + 40_000;
+    let input = sine(60.0, 0.6, total); // moderate level: crossfade sums stay < 0 dBFS
+
+    let s = Settings {
+        stutter_div: StutterDiv::Sixteenth,
+        stutter_decay: 0.0,
+        stutter_pitch: 12, // +1 octave → rate doubles each repeat (intra-period overruns)
+        quantize: QuantDiv::Off,
+        mix: 1.0,
+        ..Settings::default()
+    };
+    // Transport stopped so the loop anchors at the present (no quantize snap).
+    let (l, _r) = render(&s, &input, 120.0, false, &[(engage, only(1))]);
+
+    // Measure once the read head has sped up to rate ≥ 2 (after the first ~6000-sample period).
+    // A clean pitched sine's per-sample slope is tiny (< 0.05); an un-faded full-scale wrap
+    // would jump on the order of ~1.0.
+    let region = max_delta(&l, engage + 8_000, total);
+    assert!(region < 0.25, "stutter pitch-up wrap clicks: max sample delta {region:.3}");
+    assert!(l[engage + 8_000..].iter().all(|v| v.is_finite() && v.abs() <= 1.0));
+}
+
+// ---------------------------------------------------------------------------
+// P0/P1: Out trim never steps the level between the idle passthrough and the active path.
+// ---------------------------------------------------------------------------
+#[test]
+fn out_trim_no_step_between_idle_and_active_dry() {
+    // Idle returns the input verbatim (no Out). The active path's dry component must therefore
+    // be untrimmed too, so at mix=0 the active output equals the idle passthrough regardless of
+    // Out — no click on engage/disengage. Out still scales the wet component.
+    let out_gain = db_to_gain(6.0);
+    let x = 0.37f32;
+    assert_eq!(crate::dsp::mix_out(x, 0.9, 0.0, out_gain), x);
+    assert_eq!(crate::dsp::mix_out(x, 0.9, 1.0, out_gain), 0.9 * out_gain);
+    // delta==0 identity + clamp for the mix/out MOD merge helper.
+    assert_eq!(crate::dsp::apply_mod_delta(0.5, 0.0, 0.0, 1.0), 0.5);
+    assert_eq!(crate::dsp::apply_mod_delta(0.9, 0.5, 0.0, 1.0), 1.0);
+}
+
+// ---------------------------------------------------------------------------
+// P0: a MIDI note whose on+off land in the same block still triggers its mode.
+// ---------------------------------------------------------------------------
+#[test]
+fn same_block_note_on_off_still_triggers() {
+    use crate::{apply_note_off, apply_note_on, combine_held, MODE_BASE_NOTE};
+
+    let mut notes = [false; 128];
+    let mut pressed = [false; 128];
+    let stutter_note = MODE_BASE_NOTE + 1; // mode index 1 = stutter
+
+    // Note goes on then off within the same block.
+    apply_note_on(&mut notes, &mut pressed, stutter_note);
+    apply_note_off(&mut notes, stutter_note);
+    assert!(!notes[stutter_note as usize], "held bitmap cleared by the same-block off");
+
+    let held = combine_held([false; NUM_MODES], &notes, &pressed, MODE_BASE_NOTE);
+    assert!(held[1], "same-block on+off must still trigger stutter for this block");
+
+    // Next block: no press latch, note not held → the mode releases.
+    let held2 = combine_held([false; NUM_MODES], &notes, &[false; 128], MODE_BASE_NOTE);
+    assert!(!held2[1], "mode must release once the block's press latch clears");
+}
+
+// ---------------------------------------------------------------------------
+// P0: MIX/OUT NERVE routes actually reach the per-sample blend (bus round-trip).
+// ---------------------------------------------------------------------------
+#[test]
+fn live_mix_route_produces_nonzero_delta() {
+    use nih_plug::prelude::*;
+    use suite_core::bus::{new_instance_id, Bus, PluginKind, NUM_MOD_SIGNALS};
+    use suite_core::modlisten::{Curve, ModRoutes, Route};
+
+    let path = std::env::temp_dir().join(format!(
+        "qeynos-halt-modroute-{}-{}",
+        std::process::id(),
+        new_instance_id()
+    ));
+    let writer = Bus::open_or_create(&path).unwrap();
+    let reader = Bus::open_or_create(&path).unwrap();
+    let src = new_instance_id();
+    let idx = writer.claim(src, PluginKind::Nerve, "LFO").unwrap();
+    let mut mods = [0.0f32; NUM_MOD_SIGNALS];
+    mods[0] = 1.0;
+    writer.publish_mods(idx, &mods);
+    writer.beat(idx);
+
+    let mix = FloatParam::new("Mix", 0.5, FloatRange::Linear { min: 0.0, max: 1.0 });
+    let mut routes = ModRoutes::new();
+    routes.set(Route {
+        param_id: "mix".into(),
+        source_instance: src,
+        source_index: 0,
+        depth: 0.4,
+        curve: Curve::Linear,
+    });
+
+    let delta = routes.modulated_float("mix", &mix, Some(&reader)) - mix.value();
+    assert!(delta.abs() > 0.1, "expected a live nonzero MIX mod delta, got {delta}");
+    assert!((crate::dsp::mix_out(0.2, 0.8, crate::dsp::apply_mod_delta(0.5, delta, 0.0, 1.0), 1.0)
+        - crate::dsp::mix_out(0.2, 0.8, 0.5, 1.0))
+    .abs()
+        > 0.01);
+
+    writer.release(idx, src);
+    let _ = std::fs::remove_file(&path);
 }
 
 // ---------------------------------------------------------------------------

@@ -651,12 +651,24 @@ impl Plugin for Tracer {
 
         let mut base = self.params.snapshot();
         base.midi_note_hz = self.last_note_hz;
+        // NERVE listen layer. trim/mix/out are all applied per-sample from their own smoothers
+        // below, so route them as block-rate PLAIN offsets (delta = modulated_plain − base_plain)
+        // added on top of each smoother's output. This actually delivers the modulation to the
+        // DSP: the previous code wrote the modulated values into `base` only to have them
+        // overwritten by the unmodulated smoothers in the per-sample loop. delta == 0 when no
+        // route is live → bit-identical. Host param state is never written (suite_core::modlisten).
+        let mut trim_delta = 0.0f32;
+        let mut mix_delta = 0.0f32;
+        let mut out_delta = 0.0f32;
         if let Ok(routes) = self.params.mod_routes.try_read() {
             if !routes.routes.is_empty() {
                 let bus = suite_core::bus::bus();
-                base.trim_db = routes.modulated_float("trim", &self.params.trim, bus);
-                base.mix = routes.modulated_float("mix", &self.params.mix, bus);
-                base.out_db = routes.modulated_float("out", &self.params.out, bus);
+                trim_delta =
+                    routes.modulated_float("trim", &self.params.trim, bus) - self.params.trim.value();
+                mix_delta =
+                    routes.modulated_float("mix", &self.params.mix, bus) - self.params.mix.value();
+                out_delta =
+                    routes.modulated_float("out", &self.params.out, bus) - self.params.out.value();
             }
         }
         self.core.configure(&base);
@@ -693,9 +705,9 @@ impl Plugin for Tracer {
             // samples this value only at its 32-sample control-block boundaries, so a
             // per-sample advance clocks the smoother at exactly the right rate.
             s.smart_freq_oct = self.params.smart_freq.smoothed.next();
-            s.trim_db = self.params.trim.smoothed.next();
-            s.mix = self.params.mix.smoothed.next();
-            s.out_db = self.params.out.smoothed.next();
+            s.trim_db = dsp::apply_mod_delta(self.params.trim.smoothed.next(), trim_delta, -24.0, 24.0);
+            s.mix = dsp::apply_mod_delta(self.params.mix.smoothed.next(), mix_delta, 0.0, 1.0);
+            s.out_db = dsp::apply_mod_delta(self.params.out.smoothed.next(), out_delta, -24.0, 24.0);
             s.band_drive_db = [
                 self.params.b1_drive.smoothed.next(),
                 self.params.b2_drive.smoothed.next(),
@@ -803,5 +815,58 @@ mod render_tests {
             let path = render_path("TRACER", &format!("{fname}_vocal"));
             write_wav(&path, &out, sr as u32).expect("write vocal render");
         }
+    }
+}
+
+#[cfg(test)]
+mod mod_route_tests {
+    use crate::dsp::apply_mod_delta;
+    use nih_plug::prelude::*;
+    use suite_core::bus::{new_instance_id, Bus, PluginKind, NUM_MOD_SIGNALS};
+    use suite_core::modlisten::{Curve, ModRoutes, Route};
+
+    /// Regression for the "dead MOD routes" P0: a live NERVE signal must produce a nonzero
+    /// PLAIN mod delta that, applied per-sample through `apply_mod_delta`, shifts the effective
+    /// Settings field — while a dead route (delta 0) stays bit-identical. Before the fix the
+    /// modulated trim/mix/out were overwritten by the unmodulated smoothers and never reached
+    /// the DSP.
+    #[test]
+    fn live_route_shifts_value_dead_route_is_identity() {
+        let path = std::env::temp_dir().join(format!(
+            "qeynos-tracer-modroute-{}-{}",
+            std::process::id(),
+            new_instance_id()
+        ));
+        let writer = Bus::open_or_create(&path).unwrap();
+        let reader = Bus::open_or_create(&path).unwrap();
+        let src = new_instance_id();
+        let idx = writer.claim(src, PluginKind::Nerve, "LFO").unwrap();
+        let mut mods = [0.0f32; NUM_MOD_SIGNALS];
+        mods[0] = 1.0;
+        writer.publish_mods(idx, &mods);
+        writer.beat(idx);
+
+        // Trim spans -24..24 dB; base 0 dB, a full-positive Unipolar signal offsets it up.
+        let trim = FloatParam::new("Trim", 0.0, FloatRange::Linear { min: -24.0, max: 24.0 });
+        let mut routes = ModRoutes::new();
+        routes.set(Route {
+            param_id: "trim".into(),
+            source_instance: src,
+            source_index: 0,
+            depth: 0.5,
+            curve: Curve::Unipolar,
+        });
+
+        let delta = routes.modulated_float("trim", &trim, Some(&reader)) - trim.value();
+        assert!(delta.abs() > 1.0, "expected a live nonzero mod delta, got {delta}");
+        let base = 0.0f32;
+        assert!(
+            (apply_mod_delta(base, delta, -24.0, 24.0) - base).abs() > 1.0,
+            "live delta did not shift the effective value"
+        );
+        assert_eq!(apply_mod_delta(base, 0.0, -24.0, 24.0), base);
+
+        writer.release(idx, src);
+        let _ = std::fs::remove_file(&path);
     }
 }

@@ -481,14 +481,30 @@ impl Plugin for Grit {
         // Block-rate filter configuration from the current param snapshot, with any NERVE
         // listen-layer modulation applied as an additive normalized offset (host state
         // untouched — see suite_core::modlisten).
-        let mut base = self.params.snapshot();
+        let base = self.params.snapshot();
+        // NERVE listen layer. GRIT's `configure` only reads filter/envelope fields (none of
+        // which are modulation targets), so the modulated drive/depth/mix/out are applied
+        // per-sample below as block-rate PLAIN offsets (delta = modulated_plain − base_plain)
+        // added on top of each param's own smoother output. This is what actually delivers the
+        // modulation to the DSP: the previous code wrote the modulated values into `base` only
+        // to have them unconditionally overwritten by the unmodulated smoothers in the loop.
+        // When no route is live every delta is 0 and the per-sample values are bit-identical to
+        // the unmodulated path. Host param state is never written (see suite_core::modlisten).
+        let mut drive_delta = 0.0f32;
+        let mut depth_delta = 0.0f32;
+        let mut mix_delta = 0.0f32;
+        let mut out_delta = 0.0f32;
         if let Ok(routes) = self.params.mod_routes.try_read() {
             if !routes.routes.is_empty() {
                 let bus = suite_core::bus::bus();
-                base.drive_db = routes.modulated_float("drive", &self.params.drive, bus);
-                base.depth = routes.modulated_float("depth", &self.params.depth, bus);
-                base.mix = routes.modulated_float("mix", &self.params.mix, bus);
-                base.out_db = routes.modulated_float("out", &self.params.out, bus);
+                drive_delta =
+                    routes.modulated_float("drive", &self.params.drive, bus) - self.params.drive.value();
+                depth_delta =
+                    routes.modulated_float("depth", &self.params.depth, bus) - self.params.depth.value();
+                mix_delta =
+                    routes.modulated_float("mix", &self.params.mix, bus) - self.params.mix.value();
+                out_delta =
+                    routes.modulated_float("out", &self.params.out, bus) - self.params.out.value();
             }
         }
         self.core.configure(&base);
@@ -524,11 +540,12 @@ impl Plugin for Grit {
 
             let mut s = base;
             s.trim_db = self.params.trim.smoothed.next();
-            s.drive_db = self.params.drive.smoothed.next();
-            s.depth = self.params.depth.smoothed.next();
+            s.drive_db =
+                dsp::apply_mod_delta(self.params.drive.smoothed.next(), drive_delta, 0.0, 48.0);
+            s.depth = dsp::apply_mod_delta(self.params.depth.smoothed.next(), depth_delta, 0.0, 1.0);
             s.curve = self.params.curve.smoothed.next();
-            s.mix = self.params.mix.smoothed.next();
-            s.out_db = self.params.out.smoothed.next();
+            s.mix = dsp::apply_mod_delta(self.params.mix.smoothed.next(), mix_delta, 0.0, 1.0);
+            s.out_db = dsp::apply_mod_delta(self.params.out.smoothed.next(), out_delta, -24.0, 24.0);
 
             let (out_l, out_r) = self.core.process_sample(l_in, r_in, sc, &s);
             main[0][n] = out_l;
@@ -628,5 +645,57 @@ mod render_tests {
             let path = render_path("GRIT", &fname);
             write_wav(&path, &out, sr as u32).expect("write render");
         }
+    }
+}
+
+#[cfg(test)]
+mod mod_route_tests {
+    use crate::dsp::apply_mod_delta;
+    use nih_plug::prelude::*;
+    use suite_core::bus::{new_instance_id, Bus, PluginKind, NUM_MOD_SIGNALS};
+    use suite_core::modlisten::{Curve, ModRoutes, Route};
+
+    /// Regression for the "dead MOD routes" P0: a live NERVE signal must produce a nonzero
+    /// PLAIN mod delta that, applied per-sample through `apply_mod_delta`, actually shifts the
+    /// effective Settings field — while a dead route (delta 0) stays bit-identical. This is the
+    /// bus round-trip the plugin's `process` performs; before the fix the modulated value was
+    /// overwritten by the unmodulated smoother and never reached the DSP.
+    #[test]
+    fn live_route_shifts_value_dead_route_is_identity() {
+        let path = std::env::temp_dir().join(format!(
+            "qeynos-grit-modroute-{}-{}",
+            std::process::id(),
+            new_instance_id()
+        ));
+        let writer = Bus::open_or_create(&path).unwrap();
+        let reader = Bus::open_or_create(&path).unwrap();
+        let src = new_instance_id();
+        let idx = writer.claim(src, PluginKind::Nerve, "LFO").unwrap();
+        let mut mods = [0.0f32; NUM_MOD_SIGNALS];
+        mods[0] = 1.0;
+        writer.publish_mods(idx, &mods);
+        writer.beat(idx);
+
+        let drive = FloatParam::new("Drive", 12.0, FloatRange::Linear { min: 0.0, max: 48.0 });
+        let mut routes = ModRoutes::new();
+        routes.set(Route {
+            param_id: "drive".into(),
+            source_instance: src,
+            source_index: 0,
+            depth: 0.5,
+            curve: Curve::Linear,
+        });
+
+        let delta = routes.modulated_float("drive", &drive, Some(&reader)) - drive.value();
+        assert!(delta.abs() > 1.0, "expected a live nonzero mod delta, got {delta}");
+        let base = 12.0f32;
+        assert!(
+            (apply_mod_delta(base, delta, 0.0, 48.0) - base).abs() > 1.0,
+            "live delta did not shift the effective value"
+        );
+        assert_eq!(apply_mod_delta(base, 0.0, 0.0, 48.0), base);
+
+        writer.release(idx, src);
+        let _ = std::fs::remove_file(&path);
     }
 }

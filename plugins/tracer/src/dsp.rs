@@ -150,6 +150,15 @@ fn db_to_lin(db: f32) -> f32 {
     10.0f32.powf(db / 20.0)
 }
 
+/// Merge a per-sample smoothed parameter value with a block-rate NERVE modulation delta,
+/// clamped to the param's plain `[min, max]` range. `delta` is `modulated_plain − base_plain`,
+/// computed once per block from the listen layer; when no route is live `delta == 0` and the
+/// result is exactly `smoothed` (bit-identical to the unmodulated path). Alloc-free.
+#[inline]
+pub fn apply_mod_delta(smoothed: f32, delta: f32, min: f32, max: f32) -> f32 {
+    (smoothed + delta).clamp(min, max)
+}
+
 // --- Coarse ISO-226-shaped equal-loudness table (rel. 1 kHz, ~60 phon) --------------
 // (freq Hz, extra dB the ear needs to match 1 kHz loudness). Log-freq interpolated.
 const ELC_F: [f32; 11] = [
@@ -433,8 +442,12 @@ impl TracerCore {
                 wet += y * level;
             }
 
-            // Instability guard: reset the tree and crossfade back in on any blow-up.
-            if !wet.is_finite() || wet.abs() > 16.0 {
+            // Instability guard: reset the tree and crossfade back in on any blow-up. The
+            // threshold is a runaway/NaN catch, not a musical ceiling — 16.0 was hair-trigger
+            // (four hard-clipped bands with levels toward +12 dB legitimately sum past it,
+            // causing spurious resets + 256-sample fade-ins = rhythmic dropout). 64.0 still
+            // catches genuine divergence well before the ±8.0 output clamp cannot contain it.
+            if !wet.is_finite() || wet.abs() > 64.0 {
                 self.ch[ci].reset();
                 for i in 0..(n_active - 1) {
                     self.ch[ci].xover[i].set(self.cutoffs[i], self.sr);
@@ -657,5 +670,40 @@ mod tests {
         // Clamp policy (TRIAGE 2026-07-08): final clamp is a ±8.0 runaway/NaN guard
         // (≈ +18 dBFS), not a 0 dBFS ceiling — extreme fuzz asserts finite && ≤ the guard.
         assert!(peak <= 8.001, "peak {peak} exceeded the +18 dBFS safety guard");
+    }
+
+    #[test]
+    fn hot_multiband_does_not_trip_instability_guard() {
+        // Four hard-clipped bands with levels toward +12 dB legitimately sum past the OLD guard
+        // threshold (16.0) on broadband input; that spuriously reset the filter tree and faded
+        // it back in (rhythmic dropout). With the guard raised to 64.0 the signal passes
+        // (bounded by the ±8 output clamp) instead of being repeatedly nuked toward silence.
+        let sr = 48_000.0f32;
+        let x = testsig::white_noise(0.95, 60_000, 7);
+        let mut s = Settings::default();
+        s.band_count = 4;
+        s.xo_mode = [XoMode::Fixed, XoMode::Fixed, XoMode::Fixed];
+        s.xo_fixed_hz = [200.0, 1000.0, 4000.0];
+        s.const_color = false;
+        s.band_drive_db = [48.0, 48.0, 48.0, 48.0];
+        s.band_shape = [ShapeKind::Hard; 4];
+        s.band_level_db = [12.0, 12.0, 12.0, 12.0];
+        s.mix = 1.0;
+
+        let mut core = TracerCore::new(sr);
+        let mut out = x.clone();
+        core.process_mono(&mut out, &s);
+
+        let seg = &out[8_000..];
+        assert!(seg.iter().all(|v| v.is_finite()), "produced NaN/inf");
+        let peak = seg.iter().fold(0.0f32, |m, &v| m.max(v.abs()));
+        assert!(peak <= 8.001, "peak {peak} exceeded the ±8 safety clamp");
+        // If the guard were still tripping on this reachable config the output would be
+        // repeatedly reset + faded, dragging its RMS far down. A healthy hot signal keeps it up.
+        let rms = (seg.iter().map(|&v| v * v).sum::<f32>() / seg.len() as f32).sqrt();
+        assert!(
+            rms > 1.0,
+            "hot multiband RMS collapsed to {rms:.3} — instability guard likely still tripping"
+        );
     }
 }

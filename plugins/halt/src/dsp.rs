@@ -41,6 +41,26 @@ pub const FADE_MS: f32 = 5.0;
 /// Number of momentary modes (tape-stop / stutter / reverse / half-speed).
 pub const NUM_MODES: usize = 4;
 
+/// Blend the dry input with the wet (halted) output for one sample. The Out trim applies ONLY
+/// to the wet/active component; the dry component passes through untrimmed so it matches the
+/// idle bit-exact passthrough exactly. This removes the level step the old
+/// `((1-mix)·dry + mix·wet)·out` blend produced on every engage/disengage when Out ≠ 0 dB (the
+/// dry part was being trimmed while the idle passthrough was not). When the core is idle the
+/// caller bypasses this entirely and returns the input verbatim, preserving the passthrough
+/// contract (`inactive_is_bit_exact_passthrough`). Alloc-free.
+#[inline]
+pub fn mix_out(dry: f32, wet: f32, mix: f32, out_gain: f32) -> f32 {
+    (1.0 - mix) * dry + mix * wet * out_gain
+}
+
+/// Merge a per-sample smoothed parameter value with a block-rate NERVE modulation delta,
+/// clamped to the param's plain `[min, max]` range (`delta = modulated_plain − base_plain`).
+/// `delta == 0` → identity (bit-identical to the unmodulated path). Alloc-free.
+#[inline]
+pub fn apply_mod_delta(smoothed: f32, delta: f32, min: f32, max: f32) -> f32 {
+    (smoothed + delta).clamp(min, max)
+}
+
 // ---------------------------------------------------------------------------
 // Mode + param enums
 // ---------------------------------------------------------------------------
@@ -290,15 +310,10 @@ impl Reader {
     #[inline]
     fn advance(&mut self) {
         self.read_pos += self.rate;
-        if self.mode == Mode::Stutter {
-            // Keep the read inside the captured slice (a higher pitch just loops the slice
-            // faster); the retrigger PERIOD is tracked separately in the core.
-            if self.read_pos >= self.loop_start + self.loop_len {
-                self.read_pos -= self.loop_len;
-            } else if self.read_pos < self.loop_start {
-                self.read_pos += self.loop_len;
-            }
-        }
+        // NOTE: the stutter read-head wrap (keeping the read inside the captured slice when a
+        // pitch step runs the head faster than the retrigger period) is handled in the core, not
+        // here, so the intra-period wrap can be equal-power crossfaded like the retrigger. A
+        // `prev` reader left mid-fade therefore keeps advancing past the slice coherently.
         if self.mode == Mode::TapeStop {
             let step = 1.0 / self.tape_dur.max(1.0);
             if self.tape_releasing {
@@ -640,13 +655,23 @@ impl HaltCore {
         if self.cur.mode == Mode::Stutter {
             self.cur.loop_pos += 1.0;
             if self.cur.loop_pos >= self.cur.loop_len {
-                // Snapshot the just-advanced reader as the fade-out tail, then reset the live
-                // reader's phase to the loop start.
+                // Period retrigger: snapshot the just-advanced reader as the fade-out tail, then
+                // reset the live reader's phase to the loop start (with the per-repeat decay +
+                // pitch step). The rate is clamped to ±2 octaves so a compounding pitch step
+                // can't run away.
                 self.begin_transition();
                 self.cur.loop_pos -= self.cur.loop_len;
                 self.cur.read_pos = self.cur.loop_start;
                 self.cur.amp *= self.cur.stutter_repeat_gain;
                 self.cur.rate = (self.cur.rate * self.cur.stutter_pitch_ratio).clamp(0.25, 4.0);
+            } else if self.cur.read_pos >= self.cur.loop_start + self.cur.loop_len {
+                // Intra-period read-head overrun (pitch step > 0 runs the head faster than the
+                // retrigger period): the read head reached the end of the captured slice before
+                // the period elapsed. Crossfade the wrap exactly like the retrigger so the seam
+                // is click-free — `prev` keeps advancing past the slice coherently for the 5 ms
+                // fade while the live reader jumps back to the loop start.
+                self.begin_transition();
+                self.cur.read_pos -= self.cur.loop_len;
             }
         }
 

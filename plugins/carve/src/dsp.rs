@@ -57,6 +57,15 @@ const ENERGY_EPS: f32 = 1.0e-12;
 /// 0.5 × N/2), so scaling magnitude by 4/N puts a full-scale in-band tone at ≈ 0 dB.
 const MAG_SCALE: f32 = 4.0 / FFT_SIZE as f32;
 
+/// Merge a per-sample smoothed parameter value with a block-rate NERVE modulation delta,
+/// clamped to the param's plain `[min, max]` range. `delta` is `modulated_plain − base_plain`,
+/// computed once per block from the listen layer; when no route is live `delta == 0` and the
+/// result is exactly `smoothed` (bit-identical to the unmodulated path). Alloc-free.
+#[inline]
+pub fn apply_mod_delta(smoothed: f32, delta: f32, min: f32, max: f32) -> f32 {
+    (smoothed + delta).clamp(min, max)
+}
+
 /// Monitoring / output mode.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ListenMode {

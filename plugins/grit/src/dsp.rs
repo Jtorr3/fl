@@ -127,6 +127,22 @@ fn db_to_lin(db: f32) -> f32 {
     10.0f32.powf(db / 20.0)
 }
 
+/// Merge a per-sample smoothed parameter value with a block-rate NERVE modulation delta,
+/// clamped to the param's plain `[min, max]` range. `delta` is `modulated_plain − base_plain`,
+/// computed once per block from the listen layer; when no route is live `delta == 0` and the
+/// result is exactly `smoothed` (bit-identical to the unmodulated path). Alloc-free.
+#[inline]
+pub fn apply_mod_delta(smoothed: f32, delta: f32, min: f32, max: f32) -> f32 {
+    (smoothed + delta).clamp(min, max)
+}
+
+/// One-pole step of `current` toward `target` by `coef` (`0` = frozen, `1` = jump). Used to
+/// glide the effective auto-gain factor so toggling AUTO-GAIN mid-playback can't step the level.
+#[inline]
+pub fn smooth_toward(current: f32, target: f32, coef: f32) -> f32 {
+    current + coef * (target - current)
+}
+
 /// Convert a bandwidth in octaves to an SVF Q (bandpass).
 #[inline]
 fn octaves_to_q(bw_oct: f32) -> f32 {
@@ -201,6 +217,16 @@ pub struct GritCore {
     ag_coef: f32,
     pre_ms: f32,
     post_ms: f32,
+    // AUTO-GAIN toggle blend in [0,1]: 1 = fully engaged (apply the live ratio), 0 = bypassed
+    // (apply unity). One-pole glided (~20 ms) so toggling AUTO-GAIN mid-playback crossfades
+    // instead of stepping — no click. Because the applied factor is `ratio·blend + (1−blend)`,
+    // a settled engaged state is EXACTLY `ratio` (no tracking lag/overshoot) and a settled
+    // bypassed state is EXACTLY 1.0 — both bit-identical to the pre-smoothing behavior.
+    ag_blend: f32,
+    ag_smooth_coef: f32,
+    // False until the first processed sample seeds `ag_blend` with the live target, so a cold
+    // start applies the correct state immediately; only *toggles* during playback glide.
+    ag_primed: bool,
     // Dry-path delay compensation: the wet path runs the distortion core through a 4x
     // oversampler whose linear-phase halfband FIRs impose a fixed group delay. The dry
     // path is delayed by the same integer amount so dry and wet stay sample-aligned at
@@ -224,6 +250,9 @@ impl GritCore {
             ag_coef: 0.0,
             pre_ms: 0.0,
             post_ms: 0.0,
+            ag_blend: 1.0,
+            ag_smooth_coef: 0.0,
+            ag_primed: false,
             dry_delay: [DelayLine::new(latency), DelayLine::new(latency)],
             latency,
         };
@@ -242,6 +271,8 @@ impl GritCore {
         // 300 ms auto-gain averaging window.
         let n = 0.300 * self.sr;
         self.ag_coef = (-1.0 / n).exp();
+        // ~20 ms one-pole for the applied auto-gain factor (declicks AUTO-GAIN toggles).
+        self.ag_smooth_coef = 1.0 - (-1.0 / (0.020 * self.sr)).exp();
         for c in self.ch.iter_mut() {
             c.dc.set(self.sr);
         }
@@ -256,6 +287,8 @@ impl GritCore {
         self.sc_env.reset();
         self.pre_ms = 0.0;
         self.post_ms = 0.0;
+        self.ag_blend = 1.0;
+        self.ag_primed = false;
         for d in self.dry_delay.iter_mut() {
             d.reset();
         }
@@ -338,13 +371,24 @@ impl GritCore {
         }
 
         // --- Auto-gain: match post-RMS to pre-RMS over 300 ms, +/-12 dB clamp ---
-        let mut ag = 1.0f32;
-        if s.auto_gain {
-            self.pre_ms = pre_sum + self.ag_coef * (self.pre_ms - pre_sum);
-            self.post_ms = post_sum + self.ag_coef * (self.post_ms - post_sum);
-            let ratio = (self.pre_ms.max(1.0e-12) / self.post_ms.max(1.0e-12)).sqrt();
-            ag = ratio.clamp(db_to_lin(-12.0), db_to_lin(12.0));
+        // The running means always update so `ratio` stays live. The applied factor crossfades
+        // between `ratio` (engaged) and unity (bypassed) via `ag_blend`, one-pole glided over
+        // ~20 ms, so flipping AUTO-GAIN mid-playback ramps instead of stepping the level in one
+        // sample (no click). A settled engaged state applies exactly `ratio`, a settled bypassed
+        // state exactly 1.0 — both bit-identical to the pre-smoothing behavior (no tracking lag).
+        self.pre_ms = pre_sum + self.ag_coef * (self.pre_ms - pre_sum);
+        self.post_ms = post_sum + self.ag_coef * (self.post_ms - post_sum);
+        let ratio = (self.pre_ms.max(1.0e-12) / self.post_ms.max(1.0e-12))
+            .sqrt()
+            .clamp(db_to_lin(-12.0), db_to_lin(12.0));
+        let target = if s.auto_gain { 1.0 } else { 0.0 };
+        if self.ag_primed {
+            self.ag_blend = smooth_toward(self.ag_blend, target, self.ag_smooth_coef);
+        } else {
+            self.ag_blend = target;
+            self.ag_primed = true;
         }
+        let ag = ratio * self.ag_blend + (1.0 - self.ag_blend);
 
         // --- Mix + output trim, with a runaway/NaN safety clamp at +/-8.0 (~+18 dBFS) ---
         // Dry uses the latency-compensated input so partial mix does not comb-filter.
@@ -374,6 +418,37 @@ impl GritCore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn apply_mod_delta_zero_is_identity_nonzero_shifts_and_clamps() {
+        // delta == 0 → exactly the smoothed value (bit-identical to the unmodulated path).
+        for &v in &[0.0f32, 0.3, 12.0, 48.0] {
+            assert_eq!(apply_mod_delta(v, 0.0, 0.0, 48.0), v);
+        }
+        // A nonzero delta shifts the effective value...
+        assert_eq!(apply_mod_delta(12.0, 6.0, 0.0, 48.0), 18.0);
+        // ...clamped to the param's plain range.
+        assert_eq!(apply_mod_delta(46.0, 6.0, 0.0, 48.0), 48.0);
+        assert_eq!(apply_mod_delta(1.0, -6.0, 0.0, 48.0), 0.0);
+    }
+
+    #[test]
+    fn autogain_toggle_is_smoothed_not_stepped() {
+        // The effective auto-gain factor is one-pole smoothed toward its target, so flipping
+        // AUTO-GAIN cannot step the gain in a single sample. Exercise the pure DSP helper.
+        let coef = 1.0 - (-1.0f32 / (0.020 * 48_000.0)).exp();
+        // A single step moves only a small fraction toward the target (no jump).
+        let one = smooth_toward(1.0, 4.0, coef);
+        assert!(one > 1.0 && one < 1.05, "single step jumped to {one}");
+        // Repeated application converges to the target.
+        let mut v = 1.0f32;
+        for _ in 0..48_000 {
+            v = smooth_toward(v, 4.0, coef);
+        }
+        assert!((v - 4.0).abs() < 0.05, "did not converge: {v}");
+        // coef == 0 freezes; identity preserved.
+        assert_eq!(smooth_toward(2.0, 9.0, 0.0), 2.0);
+    }
 
     fn thd_ratio(x: &[f32], fund_hz: f32, sr: f32) -> f32 {
         // Goertzel magnitude^2 at a given frequency.

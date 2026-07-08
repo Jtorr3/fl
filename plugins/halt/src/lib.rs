@@ -32,6 +32,40 @@ pub const MANUAL_DOC: &str = include_str!("../../../docs/HALT.md");
 /// map to tape-stop / stutter / reverse / half-speed (within the C1..E1 region SPECS calls out).
 const MODE_BASE_NOTE: u8 = 36;
 
+/// Apply a NoteOn to the persistent held bitmap and the per-block "pressed" latch. The latch is
+/// what lets a note whose on+off land in the SAME process block still register for that block
+/// (P0: MIDI bitmap missed same-block on/off notes).
+#[inline]
+fn apply_note_on(notes: &mut [bool; 128], pressed: &mut [bool; 128], note: u8) {
+    notes[note as usize] = true;
+    pressed[note as usize] = true;
+}
+
+/// Apply a NoteOff/Choke to the persistent held bitmap (the per-block pressed latch is left set,
+/// so a same-block on→off still counts as a press for this block).
+#[inline]
+fn apply_note_off(notes: &mut [bool; 128], note: u8) {
+    notes[note as usize] = false;
+}
+
+/// Combine the mode buttons with the MIDI notes into the four momentary "held this block" flags.
+/// A mode is held if its button is down OR its note is currently held OR its note was pressed at
+/// any point this block (the latch).
+#[inline]
+fn combine_held(
+    buttons: [bool; NUM_MODES],
+    notes: &[bool; 128],
+    pressed: &[bool; 128],
+    base_note: u8,
+) -> [bool; NUM_MODES] {
+    let mut held = [false; NUM_MODES];
+    for i in 0..NUM_MODES {
+        let note = base_note as usize + i;
+        held[i] = buttons[i] || (note < 128 && (notes[note] || pressed[note]));
+    }
+    held
+}
+
 // ---------------------------------------------------------------------------
 // Param-facing enums (mapped onto the pure-DSP enums)
 // ---------------------------------------------------------------------------
@@ -502,13 +536,21 @@ impl Plugin for Halt {
         let _ftz = suite_core::dsp::ScopedFtz::enable();
 
         // --- settings (+ NERVE listen layer for mix/out/decay) ---
+        // DECAY feeds the core through `configure`, so route it into the snapshot. MIX and OUT
+        // are applied per-sample from their own smoothers below — the core never reads
+        // Settings.mix / Settings.out_db (that is why those two MOD targets were previously
+        // inert) — so route them as block-rate PLAIN offsets (delta) added to the smoothed value.
         let mut s = self.params.snapshot();
+        let mut mix_delta = 0.0f32;
+        let mut out_delta = 0.0f32;
         if let Ok(routes) = self.params.mod_routes.try_read() {
             if !routes.routes.is_empty() {
                 let bus = suite_core::bus::bus();
-                s.mix = routes.modulated_float("mix", &self.params.mix, bus);
-                s.out_db = routes.modulated_float("out", &self.params.out, bus);
                 s.stutter_decay = routes.modulated_float("decay", &self.params.stutter_decay, bus);
+                mix_delta =
+                    routes.modulated_float("mix", &self.params.mix, bus) - self.params.mix.value();
+                out_delta =
+                    routes.modulated_float("out", &self.params.out, bus) - self.params.out.value();
             }
         }
         self.core.configure(&s);
@@ -531,12 +573,15 @@ impl Plugin for Halt {
             beats_per_bar,
         });
 
-        // --- MIDI: note-on/off → held bitmap (block-rate; modes are crossfaded) ---
+        // --- MIDI: note-on/off → held bitmap (block-rate; modes are crossfaded). A per-block
+        // `pressed` latch also captures a note whose on AND off fall in the same block so a blip
+        // shorter than one buffer still triggers its mode for that block (P0). ---
+        let mut pressed = [false; 128];
         while let Some(event) = context.next_event() {
             match event {
-                NoteEvent::NoteOn { note, .. } => self.notes[note as usize] = true,
-                NoteEvent::NoteOff { note, .. } => self.notes[note as usize] = false,
-                NoteEvent::Choke { note, .. } => self.notes[note as usize] = false,
+                NoteEvent::NoteOn { note, .. } => apply_note_on(&mut self.notes, &mut pressed, note),
+                NoteEvent::NoteOff { note, .. } => apply_note_off(&mut self.notes, note),
+                NoteEvent::Choke { note, .. } => apply_note_off(&mut self.notes, note),
                 _ => {}
             }
         }
@@ -548,11 +593,7 @@ impl Plugin for Halt {
             self.params.reverse.value(),
             self.params.half_speed.value(),
         ];
-        let mut held = [false; NUM_MODES];
-        for i in 0..NUM_MODES {
-            let note = MODE_BASE_NOTE as usize + i;
-            held[i] = buttons[i] || (note < 128 && self.notes[note]);
-        }
+        let held = combine_held(buttons, &self.notes, &pressed, MODE_BASE_NOTE);
         self.core.set_held(&held);
 
         // --- per-sample process ---
@@ -568,9 +609,11 @@ impl Plugin for Halt {
             let r_in = if num_ch > 1 { main[1][n] } else { l_in };
 
             let (wl, wr) = self.core.process_sample(l_in, r_in);
-            // Advance the smoothers every sample so automation stays sample-accurate.
-            let mix = self.params.mix.smoothed.next();
-            let out_gain = util::db_to_gain(self.params.out.smoothed.next());
+            // Advance the smoothers every sample so automation stays sample-accurate, applying
+            // the block-rate NERVE mix/out deltas on top.
+            let mix = dsp::apply_mod_delta(self.params.mix.smoothed.next(), mix_delta, 0.0, 1.0);
+            let out_db = dsp::apply_mod_delta(self.params.out.smoothed.next(), out_delta, -24.0, 24.0);
+            let out_gain = util::db_to_gain(out_db);
 
             if self.core.is_idle() {
                 // Bit-exact passthrough (no mode active, no crossfade in flight).
@@ -579,9 +622,12 @@ impl Plugin for Halt {
                     main[1][n] = r_in;
                 }
             } else {
-                main[0][n] = ((1.0 - mix) * l_in + mix * wl) * out_gain;
+                // Out trim applies only to the wet/active component; the dry component is left
+                // untrimmed so it matches the idle passthrough exactly — no level step on
+                // engage/disengage (see dsp::mix_out).
+                main[0][n] = dsp::mix_out(l_in, wl, mix, out_gain);
                 if num_ch > 1 {
-                    main[1][n] = ((1.0 - mix) * r_in + mix * wr) * out_gain;
+                    main[1][n] = dsp::mix_out(r_in, wr, mix, out_gain);
                 }
             }
         }

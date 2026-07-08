@@ -462,3 +462,58 @@ fn extremes_finite_and_bounded() {
         assert!(pk <= 1.0, "config amount={amount} md={md} peak {pk} > 0 dBFS");
     }
 }
+
+/// The MIX MOD target must actually reach the per-sample blend. MIX is applied from its own
+/// smoother, so `apply_mod_delta(smoothed, delta, 0, 1)` merges the block-rate offset: delta 0
+/// is bit-identical, a nonzero delta shifts (and clamps) the mix. Regression for the inert-MIX
+/// P1 (the modulated Settings.mix was never read by `process_sample`).
+#[test]
+fn mix_mod_delta_reaches_blend() {
+    // Identity when no route is live.
+    for &v in &[0.0f32, 0.25, 0.5, 1.0] {
+        assert_eq!(apply_mod_delta(v, 0.0, 0.0, 1.0), v);
+    }
+    // A live offset shifts the effective mix, clamped to 0..1.
+    assert_eq!(apply_mod_delta(0.5, 0.3, 0.0, 1.0), 0.8);
+    assert_eq!(apply_mod_delta(0.9, 0.5, 0.0, 1.0), 1.0);
+    assert_eq!(apply_mod_delta(0.2, -0.5, 0.0, 1.0), 0.0);
+}
+
+#[test]
+fn live_mix_route_produces_nonzero_delta() {
+    use nih_plug::prelude::*;
+    use suite_core::bus::{new_instance_id, Bus, PluginKind, NUM_MOD_SIGNALS};
+    use suite_core::modlisten::{Curve, ModRoutes, Route};
+
+    let path = std::env::temp_dir().join(format!(
+        "qeynos-carve-modroute-{}-{}",
+        std::process::id(),
+        new_instance_id()
+    ));
+    let writer = Bus::open_or_create(&path).unwrap();
+    let reader = Bus::open_or_create(&path).unwrap();
+    let src = new_instance_id();
+    let idx = writer.claim(src, PluginKind::Nerve, "LFO").unwrap();
+    let mut mods = [0.0f32; NUM_MOD_SIGNALS];
+    mods[0] = 1.0;
+    writer.publish_mods(idx, &mods);
+    writer.beat(idx);
+
+    let mix = FloatParam::new("Mix", 0.5, FloatRange::Linear { min: 0.0, max: 1.0 });
+    let mut routes = ModRoutes::new();
+    routes.set(Route {
+        param_id: "mix".into(),
+        source_instance: src,
+        source_index: 0,
+        depth: 0.4,
+        curve: Curve::Linear,
+    });
+
+    let delta = routes.modulated_float("mix", &mix, Some(&reader)) - mix.value();
+    assert!(delta.abs() > 0.1, "expected a live nonzero MIX mod delta, got {delta}");
+    assert!((apply_mod_delta(0.5, delta, 0.0, 1.0) - 0.5).abs() > 0.1);
+    assert_eq!(apply_mod_delta(0.5, 0.0, 0.0, 1.0), 0.5);
+
+    writer.release(idx, src);
+    let _ = std::fs::remove_file(&path);
+}

@@ -390,13 +390,20 @@ impl Plugin for Carve {
         let _ftz = suite_core::dsp::ScopedFtz::enable();
 
         let mut s = self.params.snapshot();
+        // NERVE listen layer. amount/maxdepth/sens feed the core through `configure`, so route
+        // them straight into the snapshot. MIX is applied per-sample from its own smoother below
+        // (the core is passed `mix` explicitly — it never reads Settings.mix), so route it as a
+        // block-rate PLAIN offset added to the smoothed value; before the fix the modulated
+        // Settings.mix was inert because the per-sample path used the unmodulated smoother.
+        let mut mix_delta = 0.0f32;
         if let Ok(routes) = self.params.mod_routes.try_read() {
             if !routes.routes.is_empty() {
                 let bus = suite_core::bus::bus();
                 s.amount = routes.modulated_float("amount", &self.params.amount, bus);
                 s.max_depth_db = routes.modulated_float("maxdepth", &self.params.maxdepth, bus);
                 s.sens = routes.modulated_float("sens", &self.params.sens, bus);
-                s.mix = routes.modulated_float("mix", &self.params.mix, bus);
+                mix_delta =
+                    routes.modulated_float("mix", &self.params.mix, bus) - self.params.mix.value();
             }
         }
         self.core.configure(&s);
@@ -430,7 +437,7 @@ impl Plugin for Carve {
                 _ => 0.0,
             };
 
-            let mix = self.params.mix.smoothed.next();
+            let mix = dsp::apply_mod_delta(self.params.mix.smoothed.next(), mix_delta, 0.0, 1.0);
             let out_gain = self.params.out.smoothed.next();
             let (out_l, out_r) = self.core.process_sample(l, r, sc, mix, out_gain);
             main[0][n] = out_l;
