@@ -820,6 +820,87 @@ mod render_tests {
         );
     }
 
+    /// SOUND-PASS audition render (permanent infra, `#[ignore]`d in normal runs).
+    /// Renders over a genre-right musical source (detuned reese bass) into
+    /// renders/_audition/SHAPESHIFT/<QVS_AUDITION_DIR or "before">/, covering:
+    ///   (a) every factory preset + `Settings::default()` at their fixed XY, and
+    ///   (b) morph SWEEPS that traverse the XY square so the render crosses each of the four
+    ///       corners — an X sweep at Y=0 (A→B), an X sweep at Y=1 (C→D), and a Y sweep at X=0
+    ///       (A→C) that passes THROUGH the Cheby-3 corner (C, the default corner-C shaper).
+    /// Analyzed offline by tools/audition.py — the sweeps are where a corner level-hole /
+    /// phase-cancellation would show up as a DROPOUT.
+    #[test]
+    #[ignore]
+    fn audition_render_musical_sources() {
+        use crate::dsp::{Corner, Settings, NUM_CORNERS};
+        use suite_core::testsig;
+
+        let sr = 48_000.0f32;
+        let subdir = std::env::var("QVS_AUDITION_DIR").unwrap_or_else(|_| "before".into());
+
+        // Main: 3 s of detuned reese bass at 55 Hz (dark, low, thick).
+        let reese = testsig::synth_reese(55.0, 3.0, sr);
+
+        // (a) Every factory preset plus the default state, at their fixed XY.
+        let presets = load_all(PRESET_JSON);
+        let mut jobs: Vec<(String, Settings)> = presets
+            .iter()
+            .map(|p| {
+                let fname = p.name.to_lowercase().replace([' ', '·', '-', '/'], "_");
+                (fname, settings_from_preset(p))
+            })
+            .collect();
+        jobs.push(("default".into(), Settings::default()));
+        for (fname, s) in &jobs {
+            let mut core = ShapeshiftCore::new(sr);
+            let (l, _r) = core.process_stereo(&reese, s);
+            let path = render_path("_audition/SHAPESHIFT", &format!("{subdir}/{fname}"));
+            write_wav(&path, &l, sr as u32).expect("write audition render");
+        }
+
+        // (b) Morph sweeps. Default corner map so C=(0,1) is the Cheby-3 corner under scrutiny.
+        // Sweep X/Y across the buffer, one sample at a time (the core's 5 ms XY smoother keeps
+        // the motion click-free); orbit off so position is purely the swept user point.
+        let base = Settings {
+            corner: [Corner::TubeTanh, Corner::TapeSoft, Corner::Cheby3, Corner::HardClip],
+            gain_db: [0.0; NUM_CORNERS],
+            pre_db: 6.0,
+            orbit_on: false,
+            auto_gain: false,
+            post_lp_hz: 16_000.0,
+            mix: 1.0,
+            out_db: 0.0,
+            ..Settings::default()
+        };
+        // (fname, x(t), y(t)) with t in 0..1 over the buffer.
+        let sweeps: [(&str, fn(f32) -> (f32, f32)); 3] = [
+            ("sweep_x_at_y0__A_to_B", |t| (t, 0.0)),
+            ("sweep_x_at_y1__C_to_D", |t| (t, 1.0)),
+            ("sweep_y_at_x0__A_to_C_cheby3", |t| (0.0, t)),
+        ];
+        for (fname, traj) in sweeps {
+            let n = reese.len();
+            let mut s0 = base;
+            let (x0, y0) = traj(0.0);
+            s0.x = x0;
+            s0.y = y0;
+            let mut core = ShapeshiftCore::new(sr);
+            core.configure(&s0); // prime smoother at the start position, set post-LP
+            let mut out = Vec::with_capacity(n);
+            for (i, &xin) in reese.iter().enumerate() {
+                let t = if n > 1 { i as f32 / (n - 1) as f32 } else { 0.0 };
+                let (x, y) = traj(t);
+                let mut s = base;
+                s.x = x;
+                s.y = y;
+                let (l, _r) = core.process_sample(xin, xin, &s);
+                out.push(l);
+            }
+            let path = render_path("_audition/SHAPESHIFT", &format!("{subdir}/{fname}"));
+            write_wav(&path, &out, sr as u32).expect("write sweep render");
+        }
+    }
+
     /// Render each factory preset over pink noise and a full-band chirp, write the WAVs (L
     /// channel) into renders/SHAPESHIFT/, and assert the universal properties on each channel.
     #[test]

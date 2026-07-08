@@ -40,7 +40,7 @@ gain-scaled sample to a bounded output:
 | 3 | **Hard clip** | Flat-top clip at ±1. |
 | 4 | **Sine fold** | Rounded wavefolder — folds back on overdrive. |
 | 5 | **Tri fold** | Triangle wavefolder (`asin(sin)`) — sharper fold than the sine fold. |
-| 6 | **Cheby-3** | 3rd Chebyshev polynomial `4x³−3x` — pure 3rd-harmonic generator at unity. |
+| 6 | **Cheby-3** | Polarity-preserving odd cubic `0.4x + 0.6x³` — soft 3rd-harmonic drive (~18% 3rd), monotonic, `f(±1)=±1` (SOUND-PASS: the raw `4x³−3x` Chebyshev nulled the fundamental and inverted polarity, punching a level hole in the XY blend). |
 | 7 | **Bit soft** | Soft digital bit-crush — quantise to a few levels, blended back toward linear. |
 
 Each corner's **gain trim** scales its input *before* the curve, so you can, e.g., keep one

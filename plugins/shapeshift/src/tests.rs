@@ -4,7 +4,7 @@
 
 use super::*;
 use std::f32::consts::TAU;
-use suite_core::harness::{assert_single_coherent_peak, null_residual_db};
+use suite_core::harness::{assert_single_coherent_peak, null_residual_db, rms_dbfs};
 
 const SR: f32 = 48_000.0;
 
@@ -392,6 +392,72 @@ fn all_corners_bounded_under_hard_drive() {
             assert!(y.abs() <= 1.05, "{c:?} exceeded bound at x={x}: {y}");
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Regression (SOUND-PASS): the Cheby-3 corner must not be a level hole. `T₃(x)=4x³−3x`
+// inverts small-signal polarity (slope −3 near 0), so at the corner AND — worse — in the
+// XY blend around it, its output cancels against the other (positive-polarity) corners,
+// producing a level dip when morphing through corner C. The shaper is sign-corrected to a
+// polarity-preserving odd cubic, so the Cheby-3 corner now sits within a few dB of the
+// other three corners on the same reese input.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn cheby3_corner_no_level_hole() {
+    // A low fundamental like the reese sub, driven into the shaper bank. The raw `T₃(x)=4x³−3x`
+    // maps a cosine to `cos3θ` — a PURE 3rd harmonic with ZERO fundamental — and inverts the
+    // small-signal polarity (slope −3 near 0), so the Cheby-3 corner nulls the sub/fundamental
+    // (a "volume hole") and cancels the other corners in the XY blend. The sign-corrected cubic
+    // preserves the fundamental, so corner C carries comparable low-end to the other corners.
+    let n = (SR * 1.0) as usize;
+    let f0 = 55.0f32;
+    let input = sine(f0, 0.6, n);
+
+    // Four DISTINCT corners with Cheby-3 at C=(0,1); flat gains so the only difference between
+    // corners is the shaper. Isolate each corner by parking the XY point on it.
+    let mut base = base_settings();
+    base.corner = [
+        Corner::TubeTanh, // A (0,0)
+        Corner::HardClip, // B (1,0)
+        Corner::Cheby3,   // C (0,1)  <- under scrutiny
+        Corner::SineFold, // D (1,1)
+    ];
+    base.gain_db = [0.0; NUM_CORNERS];
+    base.pre_db = 6.0;
+
+    let skip = (SR * 0.05) as usize;
+    let render = |x: f32, y: f32| -> Vec<f32> {
+        let mut s = base;
+        s.x = x;
+        s.y = y;
+        let mut out = input.clone();
+        ShapeshiftCore::new(SR).process_mono(&mut out, &s);
+        out
+    };
+    // Fundamental level (dB) at each isolated corner (Goertzel — delay/phase invariant).
+    let fund_db = |out: &[f32]| -> f32 { 10.0 * power(&out[skip..], f0).max(1e-20).log10() };
+    let a = fund_db(&render(0.0, 0.0));
+    let b = fund_db(&render(1.0, 0.0));
+    let c = fund_db(&render(0.0, 1.0)); // Cheby-3
+    let d = fund_db(&render(1.0, 1.0));
+    let others_mean = (a + b + d) / 3.0;
+    eprintln!("cheby3 fundamentals dB: A={a:.1} B={b:.1} C(cheby3)={c:.1} D={d:.1} others_mean={others_mean:.1}");
+    // Comparable low-end: the Cheby-3 corner fundamental is within a few dB of the others' mean.
+    assert!(
+        c >= others_mean - 6.0,
+        "Cheby-3 corner is a fundamental/level hole: C={c:.1} dB vs others mean {others_mean:.1} dB \
+         (A={a:.1} B={b:.1} D={d:.1})"
+    );
+
+    // Broadband level parity too (the corner should not be quiet overall).
+    let c_rms = rms_dbfs(&render(0.0, 1.0)[skip..]);
+    let others_rms =
+        (rms_dbfs(&render(0.0, 0.0)[skip..]) + rms_dbfs(&render(1.0, 0.0)[skip..]) + rms_dbfs(&render(1.0, 1.0)[skip..])) / 3.0;
+    assert!(
+        (c_rms - others_rms).abs() <= 5.0,
+        "Cheby-3 corner RMS off the others: C={c_rms:.1} dBFS vs others {others_rms:.1} dBFS"
+    );
 }
 
 #[test]

@@ -51,7 +51,12 @@ pub enum Corner {
     SineFold,
     /// Triangle wavefolder (`asin(sin)` — sharper fold than the sine fold).
     WavefoldTri,
-    /// 3rd-order Chebyshev polynomial `T₃(x)=4x³−3x` (pure 3rd harmonic at unity drive).
+    /// 3rd-harmonic saturator — a polarity-preserving odd cubic `0.4x + 0.6x³` (normalised so
+    /// `f(±1)=±1`). The textbook Chebyshev `T₃(x)=4x³−3x` maps a cosine to a *pure* 3rd harmonic
+    /// (`cos3θ`) with ZERO fundamental and an INVERTED small-signal slope (−3 near 0); in this XY
+    /// morph that made corner C a sub/fundamental "volume hole" that cancelled the other corners
+    /// in the bilinear blend. The sign-corrected cubic keeps the strong 3rd-harmonic colour while
+    /// preserving the fundamental's level and polarity, so the corner morphs smoothly.
     Cheby3,
     /// Soft digital bit-crush: quantise to a few levels, then blend back toward the linear
     /// value so the staircase is smoothed (bit-crush character without the raw alias floor).
@@ -98,8 +103,13 @@ impl Corner {
                 (2.0 / PI) * (x * FRAC_PI_2).sin().clamp(-1.0, 1.0).asin()
             }
             Corner::Cheby3 => {
+                // Polarity-preserving 3rd-harmonic cubic (see the `Cheby3` doc): `0.4c + 0.6c³`.
+                // Raw `T₃ = 4c³ − 3c` nulls the fundamental and inverts small-signal polarity,
+                // which cancels in the XY blend (a volume hole at corner C). This form keeps a
+                // pronounced 3rd harmonic (~18% on a sinusoid) but preserves the fundamental so
+                // the corner has comparable level and morphs smoothly. Monotonic, `f(±1)=±1`.
                 let c = x.clamp(-1.0, 1.0);
-                4.0 * c * c * c - 3.0 * c
+                0.4 * c + 0.6 * c * c * c
             }
             Corner::BitcrushSoft => {
                 const LEVELS: f32 = 6.0;
