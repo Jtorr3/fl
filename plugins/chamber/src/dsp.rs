@@ -620,6 +620,10 @@ impl ChamberCore {
             make_coprime_ish(&mut delays, self.fdn.max_delay());
             self.fdn.set_delays(&delays);
             self.fdn.set_diffusion(0.6);
+            // Anti-metallic delay modulation (SOUND-PASS): the static image-source + FDN
+            // late field rang badly on discrete modes; ~0.25 ms of slow per-line wobble
+            // diffuses them into a smooth cavernous tail without audible pitch drift.
+            self.fdn.set_modulation(0.00008 * self.sr, 0.5);
             self.last_room = room;
         }
         if (rt60 - self.last_rt60).abs() > 1.0e-3 {
