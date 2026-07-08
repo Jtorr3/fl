@@ -385,7 +385,20 @@ POST-COMPLETION verification (user directive 2026-07-08 PM)
   keep this in a real song?"; fix what falls short — preset param retunes, internal
   voicing (default curves, output tilts, diffusion/mod for metallic reverbs, OS where
   aliasing is audible in analysis), never breaking null/latency/alloc contracts;
-  re-render and require measurably-better metrics before commit. (3) DELIVERABLE:
+  re-render and require measurably-better metrics before commit.
+  USER CALIBRATION 2026-07-08 PM: "Some of the presets are completely useless...
+  Especially for our kick and snare generators." → PRESETS ARE JUDGED BY OUTPUT
+  AUDIO, not param distance (the old mechanical gates guaranteed variety, not
+  value). IMPACT + SNAP banks get FULL RE-AUTHORING around use archetypes (e.g.
+  kicks: KAS:ST warehouse rumble / wave-hard 808 / dnb punch / distorted phonk /
+  deep sub roller; snares-claps: dnb crack / wave layered clap / breakcore snap /
+  techno rim), each preset's render individually judged (sub weight, punch
+  envelope, click/body/tail balance, spectral shape vs references) — a preset
+  that wouldn't be picked over a stock sample gets replaced, and banks may
+  SHRINK (15 usable beats 25 filler). Every other plugin's bank gets the same
+  usefulness scrutiny: prune or replace filler, don't just retune it.
+  Reference bar: KAS:ST / Cynthoni / Akiaura / agonyOST (+ refs/ tracks when
+  present — gitignored drop folder). (3) DELIVERABLE:
   renders/_audition/<PLUGIN>/ before+after WAV pairs for the user's ears +
   docs/SOUND-PASS.md verdict table (GOOD-AS-IS / IMPROVED (what changed) /
   LIMITATION (why + what it'd take)). Gates: per-crate tests per fix,
