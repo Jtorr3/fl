@@ -220,6 +220,76 @@ fn packet_loss_alters_output_bounded() {
     assert!(diff > 1e-3, "50% packet loss did not change the output ({diff})");
 }
 
+/// Worst single-sample first-difference relative to a local 50 ms RMS floor of the
+/// difference — the same "click" statistic `tools/audition.py::detect_clicks` computes.
+/// Ignores the first/last 20 ms (edge transients).
+fn worst_click_ratio(out: &[f32], sr: f32) -> f32 {
+    if out.len() < 8 {
+        return 0.0;
+    }
+    let d: Vec<f64> = out.windows(2).map(|w| (w[1] - w[0]).abs() as f64).collect();
+    let win = ((0.05 * sr) as usize).max(8);
+    // Boxcar mean of d^2 → local RMS floor (matches the Python convolve 'same').
+    let mut worst = 0.0f32;
+    let edge = (0.02 * sr) as usize;
+    let n = d.len();
+    for i in edge..n.saturating_sub(edge) {
+        let lo = i.saturating_sub(win / 2);
+        let hi = (i + win / 2 + 1).min(n);
+        let mut acc = 0.0f64;
+        for &v in &d[lo..hi] {
+            acc += v * v;
+        }
+        let local_rms = (acc / (hi - lo) as f64).sqrt() + 1e-9;
+        let ratio = (d[i] / local_rms) as f32;
+        if ratio > worst {
+            worst = ratio;
+        }
+    }
+    worst
+}
+
+/// P2 re-entry-click fix (previously DEFERRED): with packet loss active, the frame *after* a
+/// concealed dropout must ramp in from zero rather than opening on a full-scale sample. On a
+/// continuous (transient-free) source the worst first-difference/local-RMS ratio must stay
+/// below the click threshold, while dropouts still audibly gap. Before the fix this ratio ran
+/// ~30-45 (full-scale re-entry steps); the fade-in brings it well under the detector's 8.0.
+#[test]
+fn dropout_reentry_is_click_free() {
+    let sr = 48_000.0f32;
+    let len = (sr * 3.0) as usize;
+    // Continuous band-limited noise: no natural transients to masquerade as clicks.
+    let input = bl_noise(0.6, len, 4242);
+    let mut s = wet_settings(64.0);
+    s.loss_pct = 40.0; // heavy loss → many dropout/re-entry seams
+    s.bandwidth = BandwidthSel::Full; // full-band so any re-entry step survives to the output
+    let mut core = WireCore::new(sr);
+    let (out, _r) = core.process_stereo(&input, &s);
+
+    let worst = worst_click_ratio(&out, sr);
+    println!("dropout re-entry worst click ratio = {worst:.2}");
+    assert!(
+        worst < 8.0,
+        "dropout re-entry not click-free: worst ratio {worst:.1} (>= 8.0 detector threshold)"
+    );
+
+    // Dropouts must still audibly gap: some 20 ms windows sit far below the overall RMS.
+    let overall_rms =
+        (out.iter().map(|&v| (v * v) as f64).sum::<f64>() / out.len() as f64).sqrt();
+    let win = (0.02 * sr) as usize;
+    let mut i = 0usize;
+    let mut gapped = false;
+    while i + win <= out.len() {
+        let r = (out[i..i + win].iter().map(|&v| (v * v) as f64).sum::<f64>() / win as f64).sqrt();
+        if r < overall_rms * 0.05 {
+            gapped = true;
+            break;
+        }
+        i += win;
+    }
+    assert!(gapped, "no audible dropout gaps at 40% loss — concealment stopped working");
+}
+
 /// SRC round-trips at 96 k (2:1) and 44.1 k without starving or exploding, and passes wet
 /// audio through.
 #[test]

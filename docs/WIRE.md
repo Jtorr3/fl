@@ -72,7 +72,7 @@ adds a genuine codec-width artifact.
 | **Mode** | Voice / Music | Music | Encoder profile: Voice = SILK/hybrid (VoIP), Music = CELT-leaning (Audio). |
 | **Bandwidth** | Narrow…Full | Full | Pre-codec low-pass (Narrow ≈ 3.5 k, Medium 5 k, Wide 7.5 k, Super 12 k, Full 20 k Hz). |
 | **FEC** | off / on | off | In-band forward error correction hint; also adapts the encoder to the loss setting. |
-| **Packet Loss** | 0–100 % | 0 % | Probability a 20 ms frame is dropped ⇒ click-free zero-fill concealment. |
+| **Packet Loss** | 0–100 % | 0 % | Probability a 20 ms frame is dropped ⇒ zero-fill concealment, click-free at both dropout entry (fade-out) and re-entry (fade-in). |
 | **Crunch** | 0–100 % | 0 % | Pre-codec bit-depth (16→5 bit) + sample-rate (÷1→÷24) reduction macro. |
 | **Regen Delay** | 0–500 ms | 120 ms | Feedback delay of the re-encoding generation-loss loop. |
 | **Regen Amount** | 0–95 % | 0 % | Feedback gain of the regen loop (soft-limited + DC-blocked in-loop). |
@@ -119,7 +119,7 @@ Offline audition renders (each preset over pink noise and a chirp) are written t
 - **Mode** — encoder profile: Voice (SILK/hybrid, VoIP) or Music (CELT-leaning, audio).
 - **Bandwidth** — pre-codec low-pass, Narrow (~3.5 k, telephone) … Medium … Wide … Super … Full (20 k).
 - **FEC** — in-band forward-error-correction hint (on/off); also adapts the encoder to the loss setting.
-- **Packet Loss** — probability a 20 ms frame is dropped, 0–100 %, with click-free zero-fill concealment.
+- **Packet Loss** — probability a 20 ms frame is dropped, 0–100 %, with zero-fill concealment that fades out at the dropout and fades back in on re-entry so both seams are click-free.
 - **Crunch** — pre-codec bit-depth (16→5 bit) + sample-rate (÷1→÷24) reduction macro, 0–100 %.
 - **Regen Delay** — feedback delay of the re-encoding generation-loss loop, 0–500 ms.
 - **Regen Amount** — feedback gain of the regen loop (soft-limited + DC-blocked in-loop), 0–95 %.

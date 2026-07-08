@@ -450,6 +450,7 @@ pub struct ChannelCodec {
     // Packet-loss + PLC.
     rng: u32,
     last_tail: f32, // last emitted decoded sample, for the drop crossfade
+    prev_dropped: bool, // was the previous frame a concealed drop? (re-entry fade-in)
 
     // Regen feedback.
     fb_delay: FbDelay,
@@ -488,6 +489,7 @@ impl ChannelCodec {
             packet: vec![0u8; 4096],
             rng: 0x9E37_79B9,
             last_tail: 0.0,
+            prev_dropped: false,
             fb_delay: FbDelay::new(MAX_REGEN_DELAY),
             dc: DcBlocker::default(),
             cur_bitrate: -1,
@@ -517,6 +519,7 @@ impl ChannelCodec {
         self.in_fifo.clear_to_zeros(0);
         self.out_fifo.clear_to_zeros(FRAME);
         self.last_tail = 0.0;
+        self.prev_dropped = false;
     }
 
     fn set_mode(&mut self, mode: Mode) {
@@ -578,11 +581,11 @@ impl ChannelCodec {
     fn run_frame(&mut self, loss_pct: f32) {
         let drop = self.next_rand() * 100.0 < loss_pct;
         let n = self.enc.encode(&self.frame_in, FRAME, &mut self.packet).unwrap_or(0);
+        let fade = 128.min(FRAME); // ~2.7 ms fade window (entry fade-out / re-entry fade-in)
         if drop || n < 2 {
             // Packet loss / encode failure: zero-fill with a short fade from the last tail so
             // the dropout is click-free at entry. (opus-rs decode() rejects empty input, so we
             // synthesise the concealment rather than calling a decoder PLC path.)
-            let fade = 128.min(FRAME); // ~2.7 ms
             for i in 0..FRAME {
                 let g = if i < fade {
                     1.0 - i as f32 / fade as f32
@@ -591,15 +594,27 @@ impl ChannelCodec {
                 };
                 self.frame_out[i] = self.last_tail * g;
             }
+            self.prev_dropped = true;
         } else {
             let got = self
                 .dec
                 .decode(&self.packet[..n], FRAME, &mut self.frame_out)
                 .unwrap_or(0);
-            // Short crossfade at re-entry from a previous drop is implicit: the decoder output
-            // starts near zero after concealment. Fill any short decode with zeros.
+            // Fill any short decode with zeros.
             for v in self.frame_out.iter_mut().skip(got) {
                 *v = 0.0;
+            }
+            // Click-free RE-ENTRY (P2 fix, previously DEFERRED): after a concealed dropout the
+            // emitted tail sat at ~0, but a freshly-decoded frame can open at an arbitrary
+            // (up to full-scale) sample — a step discontinuity that reads as an audible click.
+            // Ramp the first few ms up from zero so re-entry is seamless while the dropout
+            // itself still audibly gaps. No-op when no drop preceded (prev_dropped == false),
+            // so the loss-free path stays byte-identical (null / latency contracts untouched).
+            if self.prev_dropped {
+                for i in 0..fade {
+                    self.frame_out[i] *= i as f32 / fade as f32;
+                }
+                self.prev_dropped = false;
             }
         }
     }

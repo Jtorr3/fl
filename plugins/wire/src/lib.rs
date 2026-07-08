@@ -572,6 +572,38 @@ mod render_tests {
         suite_core::manual::assert_manual_covers_params(crate::MANUAL_DOC, &crate::WireParams::default());
     }
 
+    /// SOUND-PASS audition: render every factory preset AND `Settings::default()` over two
+    /// genre-right musical sources (a formant vocal + an amen-ish break), writing WAVs to
+    /// renders/_audition/WIRE/<QVS_AUDITION_DIR>/ (default "before"). `#[ignore]` — driven by
+    /// the sound-pass worker, not the normal gate.
+    #[test]
+    #[ignore]
+    fn audition_render_presets() {
+        let sr = 48_000.0f32;
+        let subdir = std::env::var("QVS_AUDITION_DIR").unwrap_or_else(|_| "before".to_string());
+        let vocal = testsig::synth_vocal(220.0, (sr * 4.0) as usize, sr);
+        let brk = testsig::synth_break(140.0, 2, sr); // ~3.4 s of amen-ish break
+
+        let mut items: Vec<(String, crate::dsp::Settings)> = load_all(PRESET_JSON)
+            .iter()
+            .map(|p| (p.name.clone(), settings_from_preset(p)))
+            .collect();
+        items.push(("default".to_string(), crate::dsp::Settings::default()));
+
+        let plugin_dir = format!("_audition/WIRE/{subdir}");
+        for (name, s) in &items {
+            let fname = name.to_lowercase().replace([' ', '·', '-', '/'], "_");
+            for (src, tag) in [(&vocal, "vocal"), (&brk, "break")] {
+                let mut core = WireCore::new(sr);
+                let mut out = src.clone();
+                core.process_mono(&mut out, s);
+                let path = render_path(&plugin_dir, &format!("{fname}__{tag}"));
+                write_wav(&path, &out, sr as u32).expect("write audition render");
+                println!("AUDITION_WAV {}", path.display());
+            }
+        }
+    }
+
     /// Render each factory preset over pink noise and a full-band chirp, write the WAVs into
     /// renders/WIRE/, and assert the universal properties.
     #[test]
