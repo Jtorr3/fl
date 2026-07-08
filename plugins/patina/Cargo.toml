@@ -1,0 +1,18 @@
+[package]
+name = "patina"
+version = "0.1.0"
+edition = "2021"
+license = "ISC"
+description = "Qeynos PATINA — analog lo-fi character: wow/flutter (fractional delay), tape saturation (2x OS), head-bump EQ, azimuth HF skew, dropouts, keyed noise (hiss/hum/crackle), and an AGE macro"
+
+[lib]
+# `cdylib` for the CLAP/VST3 bundle; `lib` so `cargo test` and the harness can link the DSP.
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+nih_plug = { workspace = true }
+nih_plug_egui = { workspace = true }
+suite-core = { path = "../../suite-core" }
+
+[dev-dependencies]
+suite-core = { path = "../../suite-core" }
