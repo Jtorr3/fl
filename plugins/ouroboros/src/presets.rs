@@ -76,6 +76,7 @@ pub fn settings_from_preset(p: &Preset) -> Settings {
         feedback: g("feedback", d.feedback),
         decay_scale: g("decay", d.decay_scale),
         freeze: g("freeze", 0.0) >= 0.5,
+        freeze_mix: g("freezemix", d.freeze_mix),
         order: SlotOrder::from_index(g("order", 0.0) as usize),
         slots: [
             slot("a", &d.slots[0]),

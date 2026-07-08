@@ -112,6 +112,8 @@ pub struct SwarmParams {
     pub shimmer: FloatParam,
     #[id = "freeze"]
     pub freeze: BoolParam,
+    #[id = "freezemix"]
+    pub freeze_mix: FloatParam,
     #[id = "sync"]
     pub sync: BoolParam,
     #[id = "division"]
@@ -182,6 +184,10 @@ impl Default for SwarmParams {
                 .with_value_to_string(formatters::v2s_f32_percentage(0))
                 .with_string_to_value(formatters::s2v_f32_percentage()),
             freeze: BoolParam::new("Freeze", d.freeze),
+            freeze_mix: FloatParam::new("Freeze Mix", d.freeze_mix, FloatRange::Linear { min: 0.0, max: 1.0 })
+                .with_unit(" %")
+                .with_value_to_string(formatters::v2s_f32_percentage(0))
+                .with_string_to_value(formatters::s2v_f32_percentage()),
             sync: BoolParam::new("Sync", d.sync),
             division: EnumParam::new("Division", DivisionParam::Sixteenth),
             width: FloatParam::new("Width", d.width, FloatRange::Linear { min: 0.0, max: 1.0 })
@@ -211,6 +217,7 @@ impl SwarmParams {
             reverse_prob: self.reverse.value(),
             shimmer: self.shimmer.value(),
             freeze: self.freeze.value(),
+            freeze_mix: self.freeze_mix.value(),
             sync: self.sync.value(),
             division: self.division.value().to_dsp(),
             tempo_bpm,
@@ -370,6 +377,8 @@ impl Plugin for Swarm {
                                     setter.set_parameter(&params.freeze, fz);
                                     setter.end_set_parameter(&params.freeze);
                                 }
+                                ui.add_space(12.0);
+                                row(ui, "FREEZE MIX", &params.freeze_mix, setter);
                             });
                             ui.separator();
 

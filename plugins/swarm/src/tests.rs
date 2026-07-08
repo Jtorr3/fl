@@ -129,6 +129,36 @@ fn freeze_sustains_without_input() {
     );
 }
 
+/// Freeze Mix = 0 with Freeze engaged collapses the output to the live input — the fader
+/// blends live↔frozen instead of an all-or-nothing freeze.
+#[test]
+fn freeze_mix_zero_passes_live() {
+    let sr = 48_000.0f32;
+    let mut s = Settings::default();
+    s.density = 40.0;
+    s.mix = 1.0;
+    let mut core = SwarmCore::new(sr);
+    let tone = testsig::sine(280.0, 0.4, (sr * 1.0) as usize, sr);
+    // Warm the buffer (not frozen).
+    core.configure(&s);
+    for &x in tone.iter().take((sr * 0.4) as usize) {
+        core.process_sample(x, x, &s);
+    }
+    s.freeze = true;
+    s.freeze_mix = 0.0;
+    core.configure(&s);
+    let (mut resid, mut en) = (0.0f64, 0.0f64);
+    for (i, &x) in tone.iter().enumerate().skip((sr * 0.4) as usize) {
+        let (y, _) = core.process_sample(x, x, &s);
+        if i > (sr * 0.6) as usize {
+            resid += ((y - x) as f64).powi(2);
+            en += (x as f64).powi(2);
+        }
+    }
+    let residual_db = 10.0 * (resid / en.max(1e-20)).log10();
+    assert!(residual_db < -40.0, "swarm freeze_mix=0 not live-passthrough: {residual_db:.1} dB");
+}
+
 /// DONE-BAR (3): 110 % shimmer feedback stays bounded (peak ≤ 0 dBFS, finite) over 30 s.
 #[test]
 fn shimmer_feedback_bounded() {

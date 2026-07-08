@@ -120,3 +120,11 @@ Sync** and pick a **Division** with **Rhythmic Dust** for tempo-locked granular 
 **Freeze** to lock the current 10 s of audio and play the buffer as an infinite, evolving pad
 (the dry input still passes per **Mix**). **Reverse** flips grains backward; **Width** spreads the
 cloud across the stereo field. Zero reported latency.
+
+## Freeze Mix
+
+**Freeze Mix** (0–100%, default 100%) works alongside the **Freeze** toggle. Freeze stays a
+toggle; Freeze Mix sets how much of the held/frozen texture you hear versus the live signal
+while Freeze is engaged. At 100% it is the classic hard freeze (unchanged); lower it to blend
+the live source back in so the freeze is a smooth crossfade rather than a sudden jump. The
+blend is smoothed (~15 ms) and only active while Freeze is on.

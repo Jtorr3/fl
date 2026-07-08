@@ -51,6 +51,7 @@ pub struct MurmurParams {
     #[id = "random"] pub randomness: FloatParam,
     #[id = "sens"] pub sensitivity: FloatParam,
     #[id = "freeze"] pub freeze: BoolParam,
+    #[id = "freezemix"] pub freeze_mix: FloatParam,
     #[id = "reroll"] pub reroll: BoolParam,
     #[id = "width"] pub width: FloatParam,
     #[id = "mix"] pub mix: FloatParam,
@@ -89,6 +90,7 @@ impl Default for MurmurParams {
             randomness: pct("Randomness", d.randomness),
             sensitivity: pct("Sensitivity", d.sensitivity),
             freeze: BoolParam::new("Freeze", d.freeze),
+            freeze_mix: pct("Freeze Mix", d.freeze_mix),
             reroll: BoolParam::new("Re-Roll", false),
             width: pct("Width", d.width),
             mix: FloatParam::new("Mix", d.mix, FloatRange::Linear { min: 0.0, max: 1.0 })
@@ -110,6 +112,7 @@ impl MurmurParams {
             randomness: self.randomness.value(),
             sensitivity: self.sensitivity.value(),
             freeze: self.freeze.value(),
+            freeze_mix: self.freeze_mix.value(),
             width: self.width.value(),
             mix: self.mix.value(),
         }
@@ -252,6 +255,13 @@ impl Plugin for Murmur {
                                     setter.end_set_parameter(&params.freeze);
                                 }
                             });
+                            egui::Grid::new("murmur-freezemix")
+                                .num_columns(2)
+                                .spacing([16.0, 6.0])
+                                .show(ui, |ui| {
+                                    row(ui, "FREEZE MIX", &params.freeze_mix, setter);
+                                    ui.end_row();
+                                });
                             ui.separator();
 
                             ui.label(egui::RichText::new("OUTPUT").color(suite_core::ui::TEXT_DIM).small());

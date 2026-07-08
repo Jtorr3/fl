@@ -25,6 +25,7 @@
 //! is allocation-free (safe under nih-plug's `assert_process_allocs`).
 
 use std::f32::consts::{PI, TAU};
+use suite_core::dsp::OnePole;
 use suite_core::stft::{Complex, Stft};
 
 pub const FFT_SIZE: usize = 2048;
@@ -52,6 +53,9 @@ pub struct Settings {
     pub fitting: f32,
     /// Freeze: hold the captured spectrum (τ→∞).
     pub freeze: bool,
+    /// 0..1 — while Freeze is engaged, blend the output between the live (latency-matched
+    /// dry) signal (0) and the fully-frozen spectrum (1). 1.0 = classic hard freeze.
+    pub freeze_mix: f32,
     /// Gate threshold (dB relative to a full-scale component). Bins whose input magnitude
     /// is above this lock to input phase; below it they become phase-vocoder tails.
     pub gate_db: f32,
@@ -68,6 +72,7 @@ impl Default for Settings {
             decay_ms: [800.0; N_BANDS],
             fitting: 0.0,
             freeze: false,
+            freeze_mix: 1.0,
             gate_db: -60.0,
             tail_gain_db: 0.0,
             mix: 1.0,
@@ -96,6 +101,7 @@ struct Cfg {
     tail_gain: f32,
     fitting: f32,
     freeze: bool,
+    freeze_mix: f32,
 }
 
 impl Cfg {
@@ -107,6 +113,7 @@ impl Cfg {
             tail_gain: 1.0,
             fitting: 0.0,
             freeze: false,
+            freeze_mix: 1.0,
         }
     }
 
@@ -122,6 +129,7 @@ impl Cfg {
         self.tail_gain = 10.0_f32.powf(s.tail_gain_db / 20.0);
         self.fitting = s.fitting.clamp(0.0, 1.0);
         self.freeze = s.freeze;
+        self.freeze_mix = s.freeze_mix.clamp(0.0, 1.0);
     }
 }
 
@@ -323,6 +331,8 @@ pub struct EmberCore {
     scr: Scratch,
     dry_l: Delay,
     dry_r: Delay,
+    /// Smoothed Freeze-Mix (live↔frozen blend, applied only while frozen).
+    fm: OnePole,
 }
 
 impl EmberCore {
@@ -343,6 +353,12 @@ impl EmberCore {
             scr: Scratch::new(nb),
             dry_l: Delay::new(FFT_SIZE),
             dry_r: Delay::new(FFT_SIZE),
+            fm: {
+                let mut op = OnePole::new();
+                op.set_time(15.0, sr);
+                op.reset(1.0);
+                op
+            },
         }
     }
 
@@ -356,6 +372,7 @@ impl EmberCore {
         self.chan_r.reset();
         self.dry_l.reset();
         self.dry_r.reset();
+        self.fm.reset(self.cfg.freeze_mix);
     }
 
     /// Recompute derived per-bin config from a settings snapshot (call at block rate).
@@ -371,7 +388,17 @@ impl EmberCore {
         let dry_l = self.dry_l.push(l);
         let dry_r = self.dry_r.push(r);
         let m = mix.clamp(0.0, 1.0);
-        (dry_l + m * (wet_l - dry_l), dry_r + m * (wet_r - dry_r))
+        let out_l = dry_l + m * (wet_l - dry_l);
+        let out_r = dry_r + m * (wet_r - dry_r);
+
+        // Freeze Mix: while frozen, crossfade back toward the live (latency-matched dry)
+        // signal so the freeze isn't an all-or-nothing jump. fm=1 → classic hard freeze.
+        let fm = self.fm.process(self.cfg.freeze_mix);
+        if self.cfg.freeze {
+            (fm * out_l + (1.0 - fm) * dry_l, fm * out_r + (1.0 - fm) * dry_r)
+        } else {
+            (out_l, out_r)
+        }
     }
 
     /// Offline mono convenience for the harness: process `buf` in place through the core
@@ -545,5 +572,34 @@ mod tests {
         }
         let resid_db = db((acc / cnt as f32).sqrt());
         assert!(resid_db < -80.0, "mix=0 null was {resid_db:.1} dB (need < -80)");
+    }
+
+    /// Freeze Mix = 0 with Freeze engaged collapses the output to the live (latency-matched
+    /// dry) signal — proving the fader blends live↔frozen instead of an all-or-nothing freeze.
+    #[test]
+    fn freeze_mix_zero_passes_live() {
+        let sr = 48_000.0f32;
+        let tone = suite_core::testsig::sine(300.0, 0.4, (sr * 1.0) as usize, sr);
+        let mut core = EmberCore::new(sr);
+        let mut s = Settings { mix: 1.0, ..Settings::default() };
+        core.configure(&s);
+        for &x in tone.iter().take((sr * 0.4) as usize) {
+            core.process_sample(x, x, s.mix);
+        }
+        s.freeze = true;
+        s.freeze_mix = 0.0;
+        core.configure(&s);
+        let lat = core.latency();
+        let (mut resid, mut en) = (0.0f64, 0.0f64);
+        for (i, &x) in tone.iter().enumerate().skip((sr * 0.4) as usize) {
+            let (y, _) = core.process_sample(x, x, s.mix);
+            if i > (sr * 0.6) as usize {
+                let d = tone[i - lat];
+                resid += ((y - d) as f64).powi(2);
+                en += (d as f64).powi(2);
+            }
+        }
+        let residual_db = 10.0 * (resid / en.max(1e-20)).log10();
+        assert!(residual_db < -40.0, "ember freeze_mix=0 not live-passthrough: {residual_db:.1} dB");
     }
 }

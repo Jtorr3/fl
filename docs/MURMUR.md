@@ -139,3 +139,11 @@ for wilder room-to-room variation, drop it to 0 for a fixed reverb whose RT60 = 
 **Re-Roll** any time to draw a new room by hand, or tick **Freeze** to hold the current wash as
 an infinite pad. **Size** sets the room scale, **Color** tilts bright→dark, **Width** spreads the
 tail, **Mix** blends parallel. Zero latency.
+
+## Freeze Mix
+
+**Freeze Mix** (0–100%, default 100%) works alongside the **Freeze** toggle. Freeze stays a
+toggle; Freeze Mix sets how much of the held/frozen texture you hear versus the live signal
+while Freeze is engaged. At 100% it is the classic hard freeze (unchanged); lower it to blend
+the live source back in so the freeze is a smooth crossfade rather than a sudden jump. The
+blend is smoothed (~15 ms) and only active while Freeze is on.

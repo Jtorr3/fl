@@ -42,6 +42,7 @@ pub fn settings_from_preset(p: &Preset) -> Settings {
         randomness: g("random", d.randomness),
         sensitivity: g("sens", d.sensitivity),
         freeze: false,
+        freeze_mix: g("freezemix", d.freeze_mix),
         width: g("width", d.width),
         mix: g("mix", d.mix),
     }

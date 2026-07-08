@@ -61,6 +61,7 @@ pub fn settings_from_preset(p: &Preset) -> Settings {
         decay_ms: band_from_preset(p, "dec", "decay", &d.decay_ms),
         fitting: g("fitting", d.fitting),
         freeze: g("freeze", 0.0) >= 0.5,
+        freeze_mix: g("freezemix", d.freeze_mix),
         gate_db: g("gate", d.gate_db),
         tail_gain_db: g("tailgain", d.tail_gain_db),
         mix: g("mix", d.mix),

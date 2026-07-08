@@ -212,6 +212,9 @@ pub struct Settings {
     pub decay_scale: f32,
     /// Freeze: mutes input and forces feedback to 100 % (click-free, smoothed).
     pub freeze: bool,
+    /// 0..1 — while Freeze is engaged, blend the output between the live input (0) and the
+    /// fully-frozen loop (1). 1.0 = classic hard freeze; lower keeps the live source audible.
+    pub freeze_mix: f32,
     pub order: SlotOrder,
     pub slots: [SlotSettings; 3],
     /// Dry/wet mix, 0..1.
@@ -230,6 +233,7 @@ impl Default for Settings {
             feedback: 0.5,
             decay_scale: 1.0,
             freeze: false,
+            freeze_mix: 1.0,
             order: SlotOrder::Abc,
             slots: [SlotSettings::default(); 3],
             mix: 0.5,
@@ -730,6 +734,7 @@ pub struct OuroCore {
     input_gate_s: OnePole, // 1 = pass, 0 = muted (freeze)
     mix_s: OnePole,
     out_s: OnePole,
+    fm_s: OnePole, // Freeze-Mix (live↔frozen blend, applied only while frozen)
     slot_amount_s: [OnePole; 3],
     slot_param_s: [OnePole; 3],
     primed: bool,
@@ -748,6 +753,7 @@ impl OuroCore {
             input_gate_s: OnePole::new(),
             mix_s: OnePole::new(),
             out_s: OnePole::new(),
+            fm_s: OnePole::new(),
             slot_amount_s: [OnePole::new(); 3],
             slot_param_s: [OnePole::new(); 3],
             primed: false,
@@ -768,6 +774,7 @@ impl OuroCore {
         self.decay_s.set_time(t, self.sr);
         self.mix_s.set_time(t, self.sr);
         self.out_s.set_time(t, self.sr);
+        self.fm_s.set_time(t, self.sr);
         // Delay length and the freeze input-gate get a longer, click-free glide.
         self.delay_ms_s.set_time(40.0, self.sr);
         self.input_gate_s.set_time(20.0, self.sr);
@@ -813,6 +820,7 @@ impl OuroCore {
         self.decay_s.reset(s.decay_scale.clamp(0.0, 1.0));
         self.input_gate_s.reset(if s.freeze { 0.0 } else { 1.0 });
         self.mix_s.reset(s.mix.clamp(0.0, 1.0));
+        self.fm_s.reset(s.freeze_mix.clamp(0.0, 1.0));
         self.out_s.reset(s.out_db);
         for i in 0..3 {
             self.slot_amount_s[i].reset(s.slots[i].amount);
@@ -863,6 +871,7 @@ impl OuroCore {
             .input_gate_s
             .process(if s.freeze { 0.0 } else { 1.0 });
         let mix = self.mix_s.process(s.mix.clamp(0.0, 1.0));
+        let fm = self.fm_s.process(s.freeze_mix.clamp(0.0, 1.0));
         let out_lin = db_to_lin(self.out_s.process(s.out_db));
         for i in 0..3 {
             self.slot_amount_s[i].process(s.slots[i].amount);
@@ -911,7 +920,11 @@ impl OuroCore {
             c.fb_prev = fb_amt * tap;
             // Dry/wet mix + trim; final safety clamp keeps the render ≤ 0 dBFS.
             let dry = inputs[cidx];
-            outs[cidx] = ((dry * (1.0 - mix) + tap * mix) * out_lin).clamp(-0.999, 0.999);
+            let mixed = (dry * (1.0 - mix) + tap * mix) * out_lin;
+            // Freeze Mix: while frozen, crossfade back toward the live input so the freeze
+            // isn't an all-or-nothing jump. fm=1 → classic hard freeze.
+            let blended = if s.freeze { fm * mixed + (1.0 - fm) * dry } else { mixed };
+            outs[cidx] = blended.clamp(-0.999, 0.999);
         }
         (outs[0], outs[1])
     }

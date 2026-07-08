@@ -43,9 +43,58 @@ fn base_settings() -> Settings {
         randomness: 0.0,
         sensitivity: 0.6,
         freeze: false,
+        freeze_mix: 1.0,
         width: 1.0,
         mix: 1.0,
     }
+}
+
+/// Freeze Mix: with Freeze engaged and Freeze Mix = 0, the output collapses to the live input
+/// (the frozen tail is fully mixed out); at Freeze Mix = 1 the frozen tail is audible. Proves
+/// the fader blends live↔frozen instead of a sudden all-or-nothing freeze.
+#[test]
+fn freeze_mix_blends_live_vs_frozen() {
+    let sr = 48_000.0f32;
+    let tone = suite_core::testsig::sine(220.0, 0.4, (sr * 1.0) as usize, sr);
+
+    // Prime a tail, then freeze with mix = 0 → output should track the live input closely.
+    let mut core = MurmurCore::new(sr);
+    let warm = Settings { freeze: false, mix: 1.0, ..base_settings() };
+    core.configure(&warm);
+    for &x in tone.iter().take((sr * 0.5) as usize) {
+        core.process_sample(x, x, warm.mix);
+    }
+    let frozen0 = Settings { freeze: true, freeze_mix: 0.0, mix: 1.0, ..base_settings() };
+    core.configure(&frozen0);
+    // Let the freeze-mix smoother settle, then measure the residual vs the live input.
+    let mut resid = 0.0f64;
+    let mut energy = 0.0f64;
+    for (i, &x) in tone.iter().enumerate().skip((sr * 0.5) as usize) {
+        let (l, _r) = core.process_sample(x, x, frozen0.mix);
+        if i > (sr * 0.7) as usize {
+            resid += ((l - x) as f64).powi(2);
+            energy += (x as f64).powi(2);
+        }
+    }
+    let residual_db = 10.0 * (resid / energy.max(1e-20)).log10();
+    assert!(residual_db < -40.0, "freeze_mix=0 not live-passthrough: {residual_db:.1} dB");
+
+    // freeze_mix = 1 → the frozen tail sustains (non-trivial output during silence).
+    let mut core2 = MurmurCore::new(sr);
+    core2.configure(&warm);
+    for &x in tone.iter() {
+        core2.process_sample(x, x, warm.mix);
+    }
+    let frozen1 = Settings { freeze: true, freeze_mix: 1.0, mix: 1.0, ..base_settings() };
+    core2.configure(&frozen1);
+    let mut tail = 0.0f64;
+    let silence = (sr * 1.5) as usize;
+    for _ in 0..silence {
+        let (l, _r) = core2.process_sample(0.0, 0.0, frozen1.mix);
+        tail += (l as f64).powi(2);
+    }
+    let tail_rms = (tail / silence as f64).sqrt();
+    assert!(tail_rms > 1e-4, "freeze_mix=1 tail should sustain, rms {tail_rms:.6}");
 }
 
 /// Done-bar (1): two identical impulses 2 s apart with randomness up land in different rooms —

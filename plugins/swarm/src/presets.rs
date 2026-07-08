@@ -53,6 +53,7 @@ pub fn settings_from_preset(p: &Preset) -> Settings {
         reverse_prob: g("reverse", d.reverse_prob),
         shimmer: g("shimmer", d.shimmer),
         freeze: g("freeze", 0.0) >= 0.5,
+        freeze_mix: g("freezemix", d.freeze_mix),
         sync: g("sync", 0.0) >= 0.5,
         division: SyncDivision::from_index(g("division", 0.0) as usize),
         tempo_bpm: 120.0,

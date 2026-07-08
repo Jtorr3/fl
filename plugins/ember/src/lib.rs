@@ -76,6 +76,7 @@ pub struct EmberParams {
 
     #[id = "fitting"] pub fitting: FloatParam,
     #[id = "freeze"] pub freeze: BoolParam,
+    #[id = "freezemix"] pub freeze_mix: FloatParam,
     #[id = "gate"] pub gate: FloatParam,
     #[id = "tailgain"] pub tailgain: FloatParam,
     #[id = "mix"] pub mix: FloatParam,
@@ -127,6 +128,10 @@ impl Default for EmberParams {
                 .with_value_to_string(formatters::v2s_f32_percentage(0))
                 .with_string_to_value(formatters::s2v_f32_percentage()),
             freeze: BoolParam::new("Freeze", false),
+            freeze_mix: FloatParam::new("Freeze Mix", 1.0, FloatRange::Linear { min: 0.0, max: 1.0 })
+                .with_unit(" %")
+                .with_value_to_string(formatters::v2s_f32_percentage(0))
+                .with_string_to_value(formatters::s2v_f32_percentage()),
             gate: FloatParam::new("Gate", -60.0, FloatRange::Linear { min: -90.0, max: 0.0 })
                 .with_unit(" dB")
                 .with_value_to_string(formatters::v2s_f32_rounded(1)),
@@ -175,6 +180,7 @@ impl EmberParams {
             decay_ms,
             fitting: self.fitting.value(),
             freeze: self.freeze.value(),
+            freeze_mix: self.freeze_mix.value(),
             gate_db: self.gate.value(),
             tail_gain_db: self.tailgain.value(),
             mix: self.mix.value(),
@@ -350,6 +356,7 @@ impl Plugin for Ember {
                                     setter.end_set_parameter(&params.freeze);
                                 }
                             });
+                            row(ui, "FREEZE MIX", &params.freeze_mix, setter);
                         });
                     });
             },

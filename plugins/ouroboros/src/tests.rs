@@ -244,6 +244,37 @@ fn freeze_sustains_without_input() {
     );
 }
 
+/// Freeze Mix = 0 with Freeze engaged collapses the output to the live input — proving the
+/// fader blends live↔frozen instead of an all-or-nothing freeze.
+#[test]
+fn freeze_mix_zero_passes_live() {
+    let sr = 48_000.0f32;
+    let mut s = Settings::default();
+    s.delay_ms = 180.0;
+    s.feedback = 0.5;
+    s.mix = 1.0;
+    let mut core = OuroCore::new(sr);
+    let tone = testsig::sine(260.0, 0.4, (sr * 1.0) as usize, sr);
+    // Warm the loop, not frozen.
+    core.configure(&s);
+    for &x in tone.iter().take((sr * 0.4) as usize) {
+        core.process_sample(x, x, &s);
+    }
+    s.freeze = true;
+    s.freeze_mix = 0.0;
+    core.configure(&s);
+    let (mut resid, mut en) = (0.0f64, 0.0f64);
+    for (i, &x) in tone.iter().enumerate().skip((sr * 0.4) as usize) {
+        let (y, _) = core.process_sample(x, x, &s);
+        if i > (sr * 0.6) as usize {
+            resid += ((y - x) as f64).powi(2);
+            en += (x as f64).powi(2);
+        }
+    }
+    let residual_db = 10.0 * (resid / en.max(1e-20)).log10();
+    assert!(residual_db < -40.0, "ouroboros freeze_mix=0 not live-passthrough: {residual_db:.1} dB");
+}
+
 /// Every slot type must stay finite and bounded under extreme macros in the feedback loop.
 #[test]
 fn all_slot_types_finite_and_bounded() {

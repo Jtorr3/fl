@@ -258,6 +258,8 @@ pub struct OuroParams {
     pub decay: FloatParam,
     #[id = "freeze"]
     pub freeze: BoolParam,
+    #[id = "freezemix"]
+    pub freeze_mix: FloatParam,
     #[id = "order"]
     pub order: EnumParam<OrderParam>,
 
@@ -305,6 +307,10 @@ impl Default for OuroParams {
                 .with_value_to_string(formatters::v2s_f32_percentage(0))
                 .with_string_to_value(formatters::s2v_f32_percentage()),
             freeze: BoolParam::new("Freeze", d.freeze),
+            freeze_mix: FloatParam::new("Freeze Mix", d.freeze_mix, FloatRange::Linear { min: 0.0, max: 1.0 })
+                .with_unit(" %")
+                .with_value_to_string(formatters::v2s_f32_percentage(0))
+                .with_string_to_value(formatters::s2v_f32_percentage()),
             order: EnumParam::new("Order", OrderParam::Abc),
             slot_a: SlotParams::new("Slot A", SlotTypeParam::Off),
             slot_b: SlotParams::new("Slot B", SlotTypeParam::Off),
@@ -331,6 +337,7 @@ impl OuroParams {
             feedback: self.feedback.value(),
             decay_scale: self.decay.value(),
             freeze: self.freeze.value(),
+            freeze_mix: self.freeze_mix.value(),
             order: self.order.value().to_dsp(),
             slots: [
                 self.slot_a.snapshot(),
@@ -509,6 +516,8 @@ impl Plugin for Ouroboros {
                                     setter.set_parameter(&params.freeze, fz);
                                     setter.end_set_parameter(&params.freeze);
                                 }
+                                ui.add_space(12.0);
+                                row(ui, "FREEZE MIX", &params.freeze_mix, setter);
                             });
                             ui.separator();
 

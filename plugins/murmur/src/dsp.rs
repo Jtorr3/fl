@@ -82,6 +82,9 @@ pub struct Settings {
     pub sensitivity: f32,
     /// Freeze: sustain the current tail (RT60 → ∞, input ducked).
     pub freeze: bool,
+    /// 0..1 — while Freeze is engaged, blend the output between the live input (0) and the
+    /// fully-frozen tail (1). 1.0 = classic hard freeze; lower keeps the live source audible.
+    pub freeze_mix: f32,
     /// 0..1 — stereo width of the wet signal (0 = mono, 1 = full).
     pub width: f32,
     /// 0..1 — dry/wet mix.
@@ -97,6 +100,7 @@ impl Default for Settings {
             randomness: 0.4,
             sensitivity: 0.5,
             freeze: false,
+            freeze_mix: 1.0,
             width: 1.0,
             mix: 0.35,
         }
@@ -231,6 +235,8 @@ pub struct MurmurCore {
     pending_reroll: bool,
     /// Smoothed input-duck gain (1 normal, →0 under freeze).
     duck: OnePole,
+    /// Smoothed Freeze-Mix (live↔frozen blend, applied only while frozen).
+    fm: OnePole,
     prev_color: f32,
     prev_freeze: bool,
     dc_l: DcBlock,
@@ -249,6 +255,9 @@ impl MurmurCore {
         let mut duck = OnePole::new();
         duck.set_time(DUCK_MS, sr);
         duck.reset(1.0);
+        let mut fm = OnePole::new();
+        fm.set_time(15.0, sr);
+        fm.reset(1.0);
         let d = Settings::default();
         let mut core = Self {
             sr,
@@ -263,6 +272,7 @@ impl MurmurCore {
             max_delay,
             pending_reroll: false,
             duck,
+            fm,
             prev_color: d.color,
             prev_freeze: d.freeze,
             dc_l: DcBlock::default(),
@@ -287,6 +297,7 @@ impl MurmurCore {
         }
         self.onset.reset();
         self.duck.reset(1.0);
+        self.fm.reset(self.settings.freeze_mix);
         self.dc_l.reset();
         self.dc_r.reset();
         self.cur = 0;
@@ -323,6 +334,7 @@ impl MurmurCore {
         }
         // Input-duck target: 0 under freeze (let the tail sustain), 1 otherwise.
         self.duck.set_time(DUCK_MS, self.sr);
+        self.fm.set_time(15.0, self.sr);
         self.prev_freeze = s.freeze;
     }
 
@@ -433,7 +445,19 @@ impl MurmurCore {
         wet_r = safety_clip(self.dc_r.process(wet_r));
 
         let m = mix.clamp(0.0, 1.0);
-        (l + m * (wet_l - l), r + m * (wet_r - r))
+        let out_l = l + m * (wet_l - l);
+        let out_r = r + m * (wet_r - r);
+
+        // Freeze Mix: while frozen, crossfade the (fully-frozen) output back toward the live
+        // input so the freeze isn't an all-or-nothing jump. fm=1 → classic hard freeze; fm<1
+        // keeps the live source audible under the frozen tail. (Always smoothed; when not
+        // frozen the smoother still tracks the target but the branch below is inactive.)
+        let fm = self.fm.process(self.settings.freeze_mix.clamp(0.0, 1.0));
+        if self.settings.freeze {
+            (fm * out_l + (1.0 - fm) * l, fm * out_r + (1.0 - fm) * r)
+        } else {
+            (out_l, out_r)
+        }
     }
 
     /// Offline mono convenience for the harness: process `buf` in place with a fixed `Settings`.
