@@ -371,6 +371,26 @@ forward to after HARD CHECKPOINT 2 — see above)
   `cargo test --workspace --release` GREEN (63 groups, 0 failed, +3 new regression tests) and
   `build.ps1 -All` GREEN 30/30, 0 gate failures. Suite complete — all §7 items ticked.
 
+POST-COMPLETION verification (user directive 2026-07-08 PM)
+- [ ] SOUND-PASS ("listen to all plugins and make improvements to the sound of each.
+  Ask yourself; does this warrant being used in an actual song? Is this good?").
+  Method (no human ears in the loop — analysis stands in, user auditions last):
+  (1) INFRA: tools/audition.py — producer-relevant analysis of WAVs (LUFS-I/true peak/
+  crest, 1/3-oct balance vs dark-techno + atmospheric-dnb reference curves, mud
+  200-500 Hz / harsh 2-5 kHz flags, click/discontinuity detector, DC, metallic
+  ringing-mode detector for tails, THD character on sine probes, stereo corr/width) +
+  suite_core::testsig musical audition sources (techno kick loop, reese, breakbeat,
+  pad; vocal exists). (2) PER PLUGIN: render EVERY factory preset + the default state
+  over genre-appropriate musical sources; run audition.py; judge "would a producer
+  keep this in a real song?"; fix what falls short — preset param retunes, internal
+  voicing (default curves, output tilts, diffusion/mod for metallic reverbs, OS where
+  aliasing is audible in analysis), never breaking null/latency/alloc contracts;
+  re-render and require measurably-better metrics before commit. (3) DELIVERABLE:
+  renders/_audition/<PLUGIN>/ before+after WAV pairs for the user's ears +
+  docs/SOUND-PASS.md verdict table (GOOD-AS-IS / IMPROVED (what changed) /
+  LIMITATION (why + what it'd take)). Gates: per-crate tests per fix,
+  workspace + build.ps1 -All at the end. Cut-candidates included (still installed).
+
 ## 8. Model & token policy (user directive 2026-07-07)
 
 - **Opus is the default engine.** Launch the loop session on Opus
