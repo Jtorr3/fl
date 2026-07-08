@@ -11,9 +11,10 @@ use crate::presets::{settings_from_preset, PRESET_JSON};
 use suite_core::harness::{assert_universal, render_path, write_wav};
 use suite_core::pitch::{cents, Mpm};
 use suite_core::presets::load_all;
-use suite_core::testsig::{sine, synth_vocal};
+use suite_core::testsig::{sine, synth_vocal, FakeTransport};
 
 const SR: f32 = 48_000.0;
+const BLOCK: usize = 256;
 
 fn measure_f0(sig: &[f32], win: usize) -> f32 {
     let win = win.min(sig.len());
@@ -271,4 +272,273 @@ fn showcase_renders() {
 fn db_gain_sane() {
     assert!(db_to_gain(0.0) > 0.99 && db_to_gain(0.0) < 1.01);
     assert!(db_to_gain(-6.0) < db_to_gain(0.0));
+}
+
+// ---------------------------------------------------------------------------
+// Regression tests for the triage fixes (chopper phase-lock, wash bypass,
+// SIZE crossfade).
+// ---------------------------------------------------------------------------
+
+/// Drive the full stereo core block-by-block with a `FakeTransport` starting at `start_beat`,
+/// returning the L output. `playing` chooses transport-locked (grid) vs stopped (free-run).
+fn render_with_transport(
+    input: &[f32],
+    s: &Settings,
+    start_beat: f64,
+    bpm: f64,
+    playing: bool,
+) -> Vec<f32> {
+    let mut core = SeanceCore::new(SR);
+    core.reset();
+    let mut t = FakeTransport::new(SR as f64, bpm).playing(playing);
+    t.seek_samples(start_beat * 60.0 / bpm * SR as f64);
+    let mut out = vec![0.0f32; input.len()];
+    let mut i = 0usize;
+    while i < input.len() {
+        core.configure(s);
+        core.set_transport(&t.frame());
+        let end = (i + BLOCK).min(input.len());
+        for j in i..end {
+            let (l, _r) = core.process_sample(input[j], input[j]);
+            out[j] = l;
+        }
+        t.advance(end - i);
+        i = end;
+    }
+    out
+}
+
+/// Rising-edge onsets of a gated envelope (division starts), past `skip` warmup samples.
+fn gate_onsets(sig: &[f32], skip: usize) -> Vec<usize> {
+    let atk = (-1.0 / (0.0005 * SR)).exp();
+    let rel = (-1.0 / (0.010 * SR)).exp();
+    let mut env = 0.0f32;
+    let mut e = vec![0.0f32; sig.len()];
+    for (i, &v) in sig.iter().enumerate() {
+        let a = v.abs();
+        let c = if a > env { atk } else { rel };
+        env = c * env + (1.0 - c) * a;
+        e[i] = env;
+    }
+    let peak = e[skip.min(e.len())..].iter().cloned().fold(0.0f32, f32::max);
+    let thr = 0.5 * peak;
+    let gap = (0.05 * SR) as usize;
+    let mut out = Vec::new();
+    let mut last: Option<usize> = None;
+    for i in (skip + 1)..e.len() {
+        if e[i - 1] < thr && e[i] >= thr && last.map_or(true, |l| i - l >= gap) {
+            out.push(i);
+            last = Some(i);
+        }
+    }
+    out
+}
+
+/// The chopper phase-locks to the transport grid: rendering at two different bar offsets
+/// places every chop onset at the SAME absolute-grid divisions (proving the gate phase is
+/// derived from the playhead, not free-running from instantiation).
+#[test]
+fn chop_phase_locks_to_transport_grid() {
+    let bpm = 120.0f64;
+    let rate = 2usize; // 1/8 == 0.5 beat
+    let div_beats = CHOP_DIVISIONS[rate].1 as f64;
+    let s = Settings {
+        chop_pattern: 0,
+        chop_rate: rate,
+        chop_depth: 1.0,
+        tempo_bpm: bpm as f32,
+        verb_wet: 0.0,
+        verb_shimmer: 0.0,
+        wash: 0.0,
+        duck_depth: 0.0,
+        mix: 1.0,
+        ..Settings::default()
+    };
+    let dur = (SR * 3.0) as usize;
+    let input = sine(300.0, 0.5, dur, SR);
+    let skip = 6000usize;
+    let beats_per_sample = bpm / 60.0 / SR as f64;
+
+    let mut residuals: Vec<f64> = Vec::new();
+    let mut counts: Vec<usize> = Vec::new();
+    for &start in &[0.0f64, 0.37] {
+        let out = render_with_transport(&input, &s, start, bpm, true);
+        let onsets = gate_onsets(&out, skip);
+        counts.push(onsets.len());
+        for &o in &onsets {
+            let abs_beat = start + o as f64 * beats_per_sample;
+            let k = (abs_beat / div_beats).round();
+            residuals.push(abs_beat - k * div_beats); // distance to nearest grid division (beats)
+        }
+    }
+    assert!(counts.iter().all(|&c| c >= 4), "too few chop onsets: {counts:?}");
+    let rmin = residuals.iter().cloned().fold(f64::INFINITY, f64::min);
+    let rmax = residuals.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    // All onsets (from BOTH bar offsets) share the same sub-division phase → grid-locked.
+    // (A free-running chopper would put the 0.37-offset render 0.37 beat off the grid.)
+    let spread_ms = (rmax - rmin) * 60.0 / bpm * 1000.0;
+    assert!(
+        spread_ms < 5.0,
+        "chop onsets not grid-locked across bar offsets: residual spread {spread_ms:.2} ms"
+    );
+}
+
+/// With the transport stopped, the chopper still gates (free-run clock), so auditioning a
+/// stopped project still chops.
+#[test]
+fn chop_free_runs_when_stopped() {
+    let bpm = 120.0f64;
+    let rate = 2usize;
+    let s = Settings {
+        chop_pattern: 0,
+        chop_rate: rate,
+        chop_depth: 1.0,
+        tempo_bpm: bpm as f32,
+        verb_wet: 0.0,
+        verb_shimmer: 0.0,
+        wash: 0.0,
+        duck_depth: 0.0,
+        mix: 1.0,
+        ..Settings::default()
+    };
+    let dur = (SR * 3.0) as usize;
+    let input = sine(300.0, 0.5, dur, SR);
+    let out = render_with_transport(&input, &s, 0.0, bpm, false);
+    let onsets = gate_onsets(&out, 6000);
+    assert!(
+        onsets.len() >= 4,
+        "stopped transport should still free-run chop, got {} onsets",
+        onsets.len()
+    );
+}
+
+/// Re-engaging the wash after a bypass window plays fresh (recent) buffer content, not the
+/// stale pre-bypass audio: with a LOUD→quiet source, the first block after re-engage stays
+/// quiet (the fix keeps writing the wow buffer while bypassed). The old early-return left the
+/// buffer frozen on the loud pre-bypass signal → a loud ghost/click at engage.
+#[test]
+fn wash_bypass_reengage_plays_fresh_not_stale() {
+    let dur = (SR * 2.4) as usize;
+    let reeng = (SR * 1.6) as usize;
+    let tau = std::f32::consts::TAU;
+    // Loud (0.4) until 1.0 s, ramp down to quiet (0.03) by 1.5 s, quiet thereafter.
+    let input: Vec<f32> = (0..dur)
+        .map(|n| {
+            let t = n as f32 / SR;
+            let amp = if t < 1.0 {
+                0.4
+            } else if t < 1.5 {
+                0.4 + (0.03 - 0.4) * ((t - 1.0) / 0.5)
+            } else {
+                0.03
+            };
+            amp * (tau * 220.0 * t).sin()
+        })
+        .collect();
+
+    let mut core = SeanceCore::new(SR);
+    core.reset();
+    let mut out = vec![0.0f32; dur];
+    let mut i = 0usize;
+    while i < dur {
+        // Wash ON, then OFF across the middle (buffer must stay fresh while bypassed), then ON.
+        let wash = if i < (SR * 0.8) as usize {
+            0.6
+        } else if i < reeng {
+            0.0
+        } else {
+            0.6
+        };
+        let s = Settings {
+            wash,
+            verb_wet: 0.0,
+            verb_shimmer: 0.0,
+            chop_depth: 0.0,
+            duck_depth: 0.0,
+            mix: 1.0,
+            ..Settings::default()
+        };
+        core.configure(&s);
+        let end = (i + BLOCK).min(dur);
+        for j in i..end {
+            let (l, _r) = core.process_sample(input[j], input[j]);
+            out[j] = l;
+        }
+        i = end;
+    }
+    assert_universal(&out);
+
+    let rms = |seg: &[f32]| -> f32 {
+        (seg.iter().map(|v| (v * v) as f64).sum::<f64>() / seg.len().max(1) as f64).sqrt() as f32
+    };
+    // Just after re-engage the source is quiet (~0.03). Fresh buffer → quiet out; stale buffer
+    // would replay the 0.4 pre-bypass tone.
+    let win = (0.04 * SR) as usize;
+    let after = rms(&out[reeng + 64..reeng + 64 + win]);
+    assert!(
+        after < 0.12,
+        "wash re-engage replayed stale buffer: post-engage RMS {after:.3} (quiet source ~0.03)"
+    );
+}
+
+/// Sweeping SIZE mid-render produces no sample-to-sample discontinuity above a click
+/// threshold: the dual-FDN equal-power crossfade masks the delay-length changes (the old
+/// single-FDN `set_len` snapped the read pointers → crackle).
+#[test]
+fn size_sweep_no_click() {
+    let dur = (SR * 2.5) as usize;
+    let input = synth_vocal(160.0, dur, SR);
+
+    // Render the shimmer verb (pure wet) with a per-block SIZE governed by `size_at`.
+    let render = |size_at: &dyn Fn(usize) -> f32| -> Vec<f32> {
+        let mut core = SeanceCore::new(SR);
+        core.reset();
+        let mut out = vec![0.0f32; dur];
+        let mut i = 0usize;
+        while i < dur {
+            let s = Settings {
+                verb_size: size_at(i),
+                verb_wet: 0.8,
+                verb_shimmer: 0.3,
+                verb_decay: 3.0,
+                chop_depth: 0.0,
+                wash: 0.0,
+                duck_depth: 0.0,
+                mix: 1.0,
+                ..Settings::default()
+            };
+            core.configure(&s);
+            let end = (i + BLOCK).min(dur);
+            for j in i..end {
+                let (l, _r) = core.process_sample(input[j], input[j]);
+                out[j] = l;
+            }
+            i = end;
+        }
+        out
+    };
+    let max_adj = |sig: &[f32]| -> f32 {
+        let mut m = 0.0f32;
+        for w in sig[8000..].windows(2) {
+            m = m.max((w[1] - w[0]).abs());
+        }
+        m
+    };
+
+    // Baseline: the material's own steepest slope at a fixed size (no delay-length changes).
+    let baseline = render(&|_| 0.55);
+    assert_universal(&baseline);
+    let base_max = max_adj(&baseline);
+
+    // Swept: SIZE 0.2 → 0.9 across the render. The dual-FDN crossfade must keep the maximum
+    // adjacent-sample jump within the material bound; the old single-FDN `set_len` snapped the
+    // read pointers and injected discontinuities far above it.
+    let swept = render(&|i| 0.2 + 0.7 * (i as f32 / dur as f32));
+    assert_universal(&swept);
+    let swept_max = max_adj(&swept);
+
+    assert!(
+        swept_max < base_max * 1.5 + 0.02,
+        "SIZE sweep produced a click: swept max adjacent diff {swept_max:.4} vs steady baseline {base_max:.4}"
+    );
 }

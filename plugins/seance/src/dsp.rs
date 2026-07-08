@@ -18,10 +18,12 @@
 //! mono +12 st engine in its feedback loop. Everything is preallocated in [`SeanceCore::new`];
 //! the per-sample path is allocation-free (safe under nih-plug's `assert_process_allocs`).
 
+use std::f32::consts::FRAC_PI_2;
+
 use suite_core::dsp::{DelayLine, Detector, EnvFollower, OnePole, Svf};
 use suite_core::fdn::{Fdn8, N};
 use suite_core::shift::{ShiftEngine, DEFAULT_FFT, DEFAULT_HOP};
-use suite_core::testsig::Rng;
+use suite_core::testsig::{Rng, TransportFrame};
 
 /// Main analysis FFT for the formant-preserving shift (== reported latency).
 pub const MAIN_FFT: usize = DEFAULT_FFT;
@@ -222,14 +224,25 @@ impl RawControls {
 // Chopper — BPM-synced gate
 // ---------------------------------------------------------------------------
 
-/// A tempo-synced gate: a free-running phase over one rate division drives one of four
-/// pattern shapes (or a per-division sample-and-hold random level), one-pole slewed for
-/// click-free 3–8 ms edges. `depth` blends the gate toward unity.
+/// A tempo-synced gate. When the host transport is **playing**, the gate phase is derived
+/// directly from the absolute playhead (`pos_beats` modulo the chop division), so chop
+/// boundaries land exactly on the bar grid and every playback/bounce is identical. When the
+/// transport is **stopped**, it free-runs from a local clock (the old behaviour) so the
+/// chopper still works while auditioning. One of four pattern shapes (or a per-division
+/// sample-and-hold random level) is one-pole slewed for click-free 3–8 ms edges; `depth`
+/// blends the gate toward unity.
 pub struct Chopper {
     sr: f32,
-    phase: f32,     // 0..1 within the current division
-    inc: f32,       // per-sample phase increment
-    edge: OnePole,  // gate-edge smoother
+    // Free-run clock — used only while the transport is stopped.
+    phase: f32, // 0..1 within the current division
+    inc: f32,   // per-sample phase increment
+    // Transport-locked grid.
+    playing: bool,
+    beat_pos: f64,          // absolute playhead in quarter-note beats (advanced per sample)
+    beats_per_sample: f64,  // playhead advance per output sample
+    beats_per_div: f32,     // length of one chop division in beats
+    prev_phase: f32,        // last division phase (for S&H boundary detection)
+    edge: OnePole,          // gate-edge smoother
     rng: Rng,
     rand_level: f32, // S&H random level for the Random pattern
     pattern: usize,
@@ -245,6 +258,11 @@ impl Chopper {
             sr,
             phase: 0.0,
             inc: 0.0,
+            playing: false,
+            beat_pos: 0.0,
+            beats_per_sample: 0.0,
+            beats_per_div: CHOP_DIVISIONS[2].1, // 1/8 default
+            prev_phase: 0.0,
             edge,
             rng: Rng::new(0x5EA9CE01),
             rand_level: 1.0,
@@ -255,17 +273,31 @@ impl Chopper {
 
     pub fn reset(&mut self) {
         self.phase = 0.0;
+        self.beat_pos = 0.0;
+        self.prev_phase = 0.0;
         self.edge.reset(1.0);
         self.rand_level = 1.0;
     }
 
-    /// Recompute the phase increment for the current tempo + division (block rate).
+    /// Recompute the phase increment / division for the current tempo + rate (block rate).
     pub fn configure(&mut self, tempo_bpm: f32, rate: usize, pattern: usize, depth: f32) {
         let beats = CHOP_DIVISIONS[rate.min(CHOP_DIVISIONS.len() - 1)].1;
         let period_s = (beats * 60.0 / tempo_bpm.max(20.0)).max(1.0e-4);
         self.inc = 1.0 / (period_s * self.sr);
+        self.beats_per_div = beats;
         self.pattern = pattern.min(CHOP_PATTERNS.len() - 1);
         self.depth = depth.clamp(0.0, 1.0);
+    }
+
+    /// Latch the host transport (block rate). While playing, the authoritative playhead
+    /// (`ppq_pos`, in beats) is snapped in so the grid phase re-aligns every block; the
+    /// per-sample advance then keeps it sample-accurate within the block.
+    pub fn set_transport(&mut self, playing: bool, ppq_pos: f64, beats_per_sample: f64) {
+        self.playing = playing;
+        self.beats_per_sample = beats_per_sample.max(0.0);
+        if playing {
+            self.beat_pos = ppq_pos.max(0.0);
+        }
     }
 
     /// The raw pattern gate (0..1) for a phase within one division.
@@ -285,13 +317,30 @@ impl Chopper {
     /// Advance one sample; return the smoothed gate multiplier.
     #[inline]
     pub fn process(&mut self) -> f32 {
-        let raw = self.raw_gate(self.phase);
-        self.phase += self.inc;
-        if self.phase >= 1.0 {
-            self.phase -= 1.0;
-            // New division → redraw the S&H random level.
+        // Division phase: grid-locked to the playhead while playing, else the free-run clock.
+        let phase = if self.playing && self.beats_per_div > 0.0 {
+            ((self.beat_pos / self.beats_per_div as f64).rem_euclid(1.0)) as f32
+        } else {
+            self.phase
+        };
+        // A wrap (phase steps back toward 0) is a new division → redraw the S&H random level.
+        if phase < self.prev_phase {
             self.rand_level = if (self.rng.next_u32() & 1) == 0 { 0.0 } else { 1.0 };
         }
+        let raw = self.raw_gate(phase);
+        self.prev_phase = phase;
+
+        if self.playing {
+            self.beat_pos += self.beats_per_sample;
+            // Keep the free-run clock synced so a play→stop transition continues seamlessly.
+            self.phase = phase;
+        } else {
+            self.phase += self.inc;
+            if self.phase >= 1.0 {
+                self.phase -= 1.0;
+            }
+        }
+
         let g = self.edge.process(raw);
         // depth blends gate → unity.
         1.0 - self.depth * (1.0 - g)
@@ -325,15 +374,37 @@ impl DcBlock {
 /// Lush stereo FDN reverb with an octave-up phase-vocoder shifter in the feedback loop
 /// (the "shimmer"). The shifted feedback is soft-limited (`tanh`) and DC-blocked so the
 /// loop is bounded and drift-free even at high shimmer.
+///
+/// **Size crossfade (MURMUR pattern).** Changing the FDN delay lengths live snaps the
+/// [`Fdn8`] read pointers, so automating SIZE / the DROWN macro crackles. To avoid this the
+/// verb runs **two** `Fdn8` instances that both always process the input (so the idle one is
+/// pre-warmed); on a SIZE change we reconfigure the idle FDN to the new lengths and
+/// equal-power crossfade to it over [`VERB_XFADE_MS`]. Decay changes only recompute per-line
+/// gains (no pointer jump), so they are applied live to both FDNs without a crossfade. Both
+/// FDNs are preallocated, so the whole path stays allocation-free at process time.
 pub struct ShimmerVerb {
     sr: f32,
-    fdn: Fdn8,
+    fdn: [Fdn8; 2],
+    /// Index of the currently-audible FDN (crossfade origin).
+    cur: usize,
+    /// Crossfade position 0→1 toward the idle FDN (`1 − cur`). 0 = not crossfading.
+    xf: f32,
+    xf_inc: f32,
+    crossfading: bool,
+    /// SIZE the audible FDN is configured to, and the SIZE the idle FDN was just loaded with.
+    cur_size: f32,
+    idle_size: f32,
+    /// Latest requested SIZE / decay (from `configure`).
+    req_size: f32,
+    decay: f32,
+    prev_decay: f32,
+    /// First-configure force flag (set the size directly at startup — buffers are empty, so
+    /// there is nothing to click, and existing steady-state renders are unchanged).
+    primed: bool,
     shifter: ShiftEngine, // mono, +12 st, in the feedback path
     dc: DcBlock,
     shimmer_fb: f32,      // one-sample-delayed shifted feedback
     max_delay: usize,
-    prev_size: f32,
-    prev_decay: f32,
 }
 
 /// Nominal shortest / longest FDN line (ms) at size = 0.5 — a medium-large ethereal space.
@@ -342,6 +413,10 @@ const VMAX_MS: f32 = 75.0;
 const VSIZE_MIN: f32 = 0.5;
 const VSIZE_MAX: f32 = 1.8;
 const VMIN_DELAY: usize = 48;
+/// Equal-power crossfade duration on a SIZE change (ms) — click-free delay-length swap.
+const VERB_XFADE_MS: f32 = 60.0;
+/// SIZE change (0..1) that triggers a new crossfade.
+const VSIZE_EPS: f32 = 5.0e-4;
 
 impl ShimmerVerb {
     pub fn new(sr: f32) -> Self {
@@ -350,37 +425,50 @@ impl ShimmerVerb {
         let mut shifter = ShiftEngine::new(SHIMMER_FFT, SHIMMER_HOP, sr);
         shifter.set_pitch_ratio(2.0); // +12 st
         shifter.set_envelope_preserve(false); // classic bright chipmunk shimmer
-        let mut fdn = Fdn8::new(max_delay, sr);
-        fdn.set_damping(0.35);
-        fdn.set_diffusion(0.7);
+        let mk_fdn = || {
+            let mut f = Fdn8::new(max_delay, sr);
+            f.set_damping(0.35);
+            f.set_diffusion(0.7);
+            f
+        };
         let mut v = Self {
             sr,
-            fdn,
+            fdn: [mk_fdn(), mk_fdn()],
+            cur: 0,
+            xf: 0.0,
+            xf_inc: 1.0 / (VERB_XFADE_MS * 0.001 * sr).max(1.0),
+            crossfading: false,
+            cur_size: 0.6,
+            idle_size: 0.6,
+            req_size: 0.6,
+            decay: 2.2,
+            prev_decay: -1.0,
+            primed: false,
             shifter,
             dc: DcBlock::default(),
             shimmer_fb: 0.0,
             max_delay,
-            prev_size: -1.0,
-            prev_decay: -1.0,
         };
+        // Load both FDNs with the default room directly (no crossfade at construction).
         v.configure(0.6, 2.2, true);
         v
     }
 
     pub fn reset(&mut self) {
-        self.fdn.reset();
+        for f in self.fdn.iter_mut() {
+            f.reset();
+        }
         self.shifter.reset();
         self.dc.reset();
         self.shimmer_fb = 0.0;
+        self.cur = 0;
+        self.xf = 0.0;
+        self.crossfading = false;
+        self.primed = false;
     }
 
-    pub fn configure(&mut self, size: f32, decay: f32, force: bool) {
-        if !force
-            && (size - self.prev_size).abs() < 1.0e-4
-            && (decay - self.prev_decay).abs() < 1.0e-4
-        {
-            return;
-        }
+    /// Compute the eight (coprime-ish) delay lengths for a given SIZE.
+    fn delays_for(&self, size: f32) -> [usize; N] {
         let scale = VSIZE_MIN + (VSIZE_MAX - VSIZE_MIN) * size.clamp(0.0, 1.0);
         let mut delays = [0usize; N];
         for i in 0..N {
@@ -390,19 +478,89 @@ impl ShimmerVerb {
             delays[i] = d.clamp(VMIN_DELAY, self.max_delay);
         }
         make_coprime_ish(&mut delays, self.max_delay, VMIN_DELAY);
-        self.fdn.set_delays(&delays);
-        self.fdn.set_rt60(decay.max(0.1));
-        self.prev_size = size;
-        self.prev_decay = decay;
+        delays
+    }
+
+    /// Load `size` into FDN `idx` immediately (delay lengths + current decay).
+    fn load_fdn(&mut self, idx: usize, size: f32) {
+        let delays = self.delays_for(size);
+        self.fdn[idx].set_delays(&delays);
+        self.fdn[idx].set_rt60(self.decay.max(0.1));
+    }
+
+    /// If the requested SIZE has drifted from the audible SIZE and no crossfade is in flight,
+    /// load the idle FDN with the new size and begin an equal-power crossfade to it.
+    fn maybe_start_size_xfade(&mut self) {
+        if self.crossfading || (self.req_size - self.cur_size).abs() <= VSIZE_EPS {
+            return;
+        }
+        let idle = 1 - self.cur;
+        self.load_fdn(idle, self.req_size);
+        self.idle_size = self.req_size;
+        self.crossfading = true;
+        self.xf = 0.0;
+    }
+
+    pub fn configure(&mut self, size: f32, decay: f32, force: bool) {
+        self.req_size = size.clamp(0.0, 1.0);
+        self.decay = decay;
+        // Decay only recomputes per-line gains (no read-pointer jump) → apply live to both.
+        if force || (decay - self.prev_decay).abs() > 1.0e-4 {
+            for f in self.fdn.iter_mut() {
+                f.set_rt60(decay.max(0.1));
+            }
+            self.prev_decay = decay;
+        }
+        if force || !self.primed {
+            // Startup / reset: set both FDNs to the size directly, no crossfade.
+            let delays = self.delays_for(self.req_size);
+            for f in self.fdn.iter_mut() {
+                f.set_delays(&delays);
+                f.set_rt60(decay.max(0.1));
+            }
+            self.cur_size = self.req_size;
+            self.idle_size = self.req_size;
+            self.crossfading = false;
+            self.xf = 0.0;
+            self.primed = true;
+            return;
+        }
+        // Live SIZE move → click-free crossfade.
+        self.maybe_start_size_xfade();
     }
 
     /// Process one stereo pair through the shimmer verb. `shimmer` scales the octave
     /// feedback amount (0 = plain verb).
     #[inline]
     pub fn process(&mut self, in_l: f32, in_r: f32, shimmer: f32) -> (f32, f32) {
-        // Inject the (delayed) shimmer feedback into the FDN input.
+        // Inject the (delayed) shimmer feedback into both FDN inputs.
         let fb = self.shimmer_fb;
-        let (vl, vr) = self.fdn.process(in_l + fb, in_r + fb);
+        let il = in_l + fb;
+        let ir = in_r + fb;
+        // Both FDNs always run so the idle one stays pre-warmed for the next crossfade.
+        let nxt = 1 - self.cur;
+        let (cl, cr) = self.fdn[self.cur].process(il, ir);
+        let (nl, nr) = self.fdn[nxt].process(il, ir);
+
+        // Equal-power blend cur → nxt.
+        let theta = self.xf.clamp(0.0, 1.0) * FRAC_PI_2;
+        let (ca, cb) = (theta.cos(), theta.sin());
+        let vl = ca * cl + cb * nl;
+        let vr = ca * cr + cb * nr;
+
+        // Advance the crossfade; on completion, swap and re-arm for further SIZE moves.
+        if self.crossfading {
+            self.xf += self.xf_inc;
+            if self.xf >= 1.0 {
+                self.xf = 0.0;
+                self.crossfading = false;
+                self.cur = nxt;
+                self.cur_size = self.idle_size;
+                // A continuing sweep may already need the next hop.
+                self.maybe_start_size_xfade();
+            }
+        }
+
         let vmono = 0.5 * (vl + vr);
         // Octave-up shifter on the wet, soft-limited + DC-blocked, scaled by shimmer amount.
         let shifted = self.shifter.process(vmono);
@@ -451,18 +609,22 @@ impl Wash {
     }
 
     /// `amount` 0..1: darker LP + deeper wow. `rate_hz` = wow LFO rate.
+    ///
+    /// The write path (LP + wow buffer) runs **always**, even when the wash is bypassed, so
+    /// the delay line is continuously filled with fresh material. Re-engaging the wash then
+    /// reads recent audio instead of a stale/zeroed buffer — no dropout/click at engage. Only
+    /// the read/mix is skipped while bypassed (bypass stays coloration- and delay-free).
     #[inline]
     fn process(&mut self, x: f32, amount: f32, rate_hz: f32) -> f32 {
-        if amount < 1.0e-4 {
-            // Bypass entirely (no added delay/coloration when the wash is off).
-            return x;
-        }
-        // LP cutoff: bright (18 k) → dark (2.5 k) as amount rises.
+        let bypass = amount < 1.0e-4;
+        // LP cutoff: bright (18 k) → dark (2.5 k) as amount rises. Bright at/near bypass, so
+        // the buffered content is continuous across the bypass↔engage boundary.
         let cutoff = (18_000.0 - amount * 15_500.0).clamp(500.0, self.sr * 0.45);
         self.lp.set(cutoff, 0.707, self.sr);
         let low = self.lp.process(x).lp;
 
-        // Wow: write, then read a fractionally-modulated delay.
+        // Wow write path: always fill the buffer and advance the LFO (kept running so it
+        // never jumps on re-engage).
         let len = self.buf.len();
         self.buf[self.w] = low;
         let depth = WOW_DEPTH_MS * 0.001 * self.sr * amount;
@@ -471,6 +633,15 @@ impl Wash {
         if self.lfo_phase >= 1.0 {
             self.lfo_phase -= 1.0;
         }
+
+        if bypass {
+            // Bypassed: buffer stays fresh (above), but emit the dry input with no added
+            // delay/coloration.
+            self.w = (self.w + 1) % len;
+            return x;
+        }
+
+        // Read a fractionally-modulated delay from the (freshly-written) buffer.
         let delay = (self.base_delay + depth * lfo).clamp(1.0, len as f32 - 2.0);
         let read = self.w as f32 - delay;
         let read = if read < 0.0 { read + len as f32 } else { read };
@@ -616,6 +787,7 @@ impl Smooth {
 
 /// SEANCE's full stereo DSP core.
 pub struct SeanceCore {
+    sr: f32,
     settings: Settings,
 
     // Main formant-preserving shifters (one per channel).
@@ -651,6 +823,7 @@ impl SeanceCore {
         dry_l.set_delay(lat);
         dry_r.set_delay(lat);
         Self {
+            sr,
             settings: d,
             shift_l: ShiftEngine::new(MAIN_FFT, MAIN_HOP, sr),
             shift_r: ShiftEngine::new(MAIN_FFT, MAIN_HOP, sr),
@@ -673,6 +846,11 @@ impl SeanceCore {
     /// Reported constant latency in samples (the main shifter FFT size).
     pub fn latency_samples(&self) -> u32 {
         MAIN_FFT as u32
+    }
+
+    /// The core's sample rate (Hz).
+    pub fn sample_rate(&self) -> f32 {
+        self.sr
     }
 
     pub fn reset(&mut self) {
@@ -713,6 +891,15 @@ impl SeanceCore {
         self.sm_duck.set(s.duck_depth);
         self.sm_mix.set(s.mix);
         self.sm_out.set(s.out_gain);
+    }
+
+    /// Latch the host transport (block rate) so the chopper can phase-lock its gate to the
+    /// playhead. Call after [`configure`](Self::configure) (which sets the chop division).
+    /// When the transport is stopped the chopper free-runs. The offline harness convenience
+    /// methods do not call this, so they render with a stopped (free-running) transport.
+    pub fn set_transport(&mut self, t: &TransportFrame) {
+        self.chopper
+            .set_transport(t.playing, t.ppq_pos, t.beats_per_sample());
     }
 
     /// Process one stereo sample pair.

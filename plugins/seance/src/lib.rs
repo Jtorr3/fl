@@ -421,10 +421,32 @@ impl Plugin for Seance {
     ) -> ProcessStatus {
         let _ftz = suite_core::dsp::ScopedFtz::enable();
 
-        let tempo = context.transport().tempo.unwrap_or(120.0) as f32;
+        let t = context.transport();
+        let tempo = t.tempo.unwrap_or(120.0) as f32;
         let raw = self.params.raw(tempo);
         let s = raw.resolve();
         self.core.configure(&s);
+
+        // Phase-lock the chopper to the transport grid: build a shared TransportFrame from the
+        // host position (same plumbing as CLEAVE) and hand it to the core.
+        {
+            let sr = self.core.sample_rate();
+            let tempo_f = t.tempo.unwrap_or(120.0).max(1.0);
+            let tsn = t.time_sig_numerator.unwrap_or(4).max(1) as f64;
+            let tsd = t.time_sig_denominator.unwrap_or(4).max(1) as f64;
+            let beats_per_bar = (tsn * 4.0 / tsd).max(1.0e-3);
+            let bars_per_sample = (tempo_f / 60.0 / sr as f64) / beats_per_bar;
+            let ppq = t.pos_beats().unwrap_or(0.0);
+            let frame = suite_core::testsig::TransportFrame {
+                playing: t.playing,
+                tempo: tempo_f,
+                ppq_pos: ppq,
+                bar_pos: ppq / beats_per_bar,
+                bars_per_sample,
+                beats_per_bar,
+            };
+            self.core.set_transport(&frame);
+        }
 
         let num_samples = buffer.samples();
         let main = buffer.as_slice();
