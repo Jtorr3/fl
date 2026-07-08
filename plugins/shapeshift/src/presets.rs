@@ -1,65 +1,156 @@
-//! SHAPESHIFT factory presets. Each is an embedded flat-JSON blob parsed by
-//! `suite_core::presets`; the same list drives the GUI selector and the offline render tests.
+//! SHAPESHIFT factory presets (SPECS "PRESET-EXPANSION" deep bank). Each is an embedded
+//! flat-JSON blob parsed by `suite_core::presets`. The same list drives the GUI selector
+//! (grouped by the `"category"` tag into preset-bar sections) and the offline render tests.
 //!
-//! Value encodings (plain): `x`/`y` XY point 0..1; `cA`..`cD` corner shaper index 0..7
-//! (Tube, Tape, Diode, Hard, SineFold, TriFold, Cheby3, BitSoft); `gA`..`gD` per-corner gain dB;
-//! `pre` pre-gain dB; `orbit` 0/1; `orate` Hz; `osync` 0/1; `odiv` 0..3 (1/2,1 bar,2 bar,4 bar);
-//! `oradius` 0..0.5; `oshape` 0/1 (circle/figure-8); `ophase` 0..1; `postlp` Hz; `autogain` 0/1;
-//! `mix` 0..1; `out` dB.
+//! Value encodings (plain, un-normalized): `x`/`y` XY point 0..1; `cA`..`cD` corner shaper index
+//! 0..7 (0 Tube, 1 Tape, 2 Diode, 3 Hard, 4 SineFold, 5 TriFold, 6 Cheby3, 7 BitSoft);
+//! `gA`..`gD` per-corner input gain dB (±24); `pre` pre-gain dB (−12..+36); `orbit` 0/1;
+//! `orate` Hz (0.01..20); `osync` 0/1; `odiv` 0..3 (½/1/2/4 bar); `oradius` 0..0.5;
+//! `oshape` 0/1 (circle/figure-8); `ophase` 0..1; `postlp` Hz (200..20k); `autogain` 0/1;
+//! `mix` 0..1; `out` dB (±24).
+//!
+//! Categories (preset-bar sections, first-appearance order): Warm / Morph / Orbit / Digital /
+//! Extreme. Names are purpose-driven and genre-aware (dark-techno / atmospheric-dnb /
+//! Cynthoni-Sewerslvt taste) — never a settings description. Auto-gain rides on every preset and
+//! output trims sit at or below 0 dB (negative on the hot ones) so each render stays finite,
+//! non-silent, and under the 0 dBFS ceiling.
 
 use crate::dsp::{Corner, OrbitShape, Settings, SyncDivision, NUM_CORNERS};
 use suite_core::presets::Preset;
 
-/// The factory presets, in menu order (≥6, build brief).
+/// The factory presets, in menu order, tagged by category.
 pub const PRESET_JSON: &[&str] = &[
-    // Morph between warm tube/tape and sine/triangle folding across the pad.
-    r#"{ "name": "Warm-Fold Morph", "category": "Morph",
-         "x": 0.30, "y": 0.40,
-         "cA": 0, "cB": 4, "cC": 1, "cD": 5,
-         "gA": 0.0, "gB": 2.0, "gC": 0.0, "gD": 3.0,
+    // ---- Warm -------------------------------------------------------------
+    r#"{ "name": "Analog Sunrise Bed", "category": "Warm",
+         "x": 0.25, "y": 0.30,
+         "cA": 0, "cB": 1, "cC": 1, "cD": 0,
+         "gA": 0.0, "gB": 1.0, "gC": 0.0, "gD": 1.5,
+         "pre": 5.0, "orbit": 0, "orate": 0.5, "osync": 0, "odiv": 1,
+         "oradius": 0.3, "oshape": 0, "ophase": 0.0,
+         "postlp": 15000.0, "autogain": 1, "mix": 0.85, "out": 0.0 }"#,
+    r#"{ "name": "Ferrous Lull", "category": "Warm",
+         "x": 0.20, "y": 0.55,
+         "cA": 1, "cB": 1, "cC": 2, "cD": 1,
+         "gA": 0.0, "gB": 0.0, "gC": 2.0, "gD": 0.0,
+         "pre": 7.0, "orbit": 0, "orate": 0.5, "osync": 0, "odiv": 1,
+         "oradius": 0.3, "oshape": 0, "ophase": 0.0,
+         "postlp": 12000.0, "autogain": 1, "mix": 0.9, "out": -0.5 }"#,
+    r#"{ "name": "Dust On The Reel", "category": "Warm",
+         "x": 0.35, "y": 0.25,
+         "cA": 1, "cB": 2, "cC": 0, "cD": 1,
+         "gA": 1.0, "gB": 2.0, "gC": 0.0, "gD": 1.0,
          "pre": 8.0, "orbit": 0, "orate": 0.5, "osync": 0, "odiv": 1,
          "oradius": 0.3, "oshape": 0, "ophase": 0.0,
-         "postlp": 14000.0, "autogain": 1, "mix": 1.0, "out": 0.0 }"#,
-    // Asymmetric diode drive with a slow circular orbit for a breathing edge.
-    r#"{ "name": "Diode Drive Orbit", "category": "Orbit",
-         "x": 0.50, "y": 0.50,
-         "cA": 2, "cB": 0, "cC": 2, "cD": 3,
-         "gA": 2.0, "gB": 0.0, "gC": 2.0, "gD": 4.0,
-         "pre": 12.0, "orbit": 1, "orate": 0.3, "osync": 0, "odiv": 1,
-         "oradius": 0.35, "oshape": 0, "ophase": 0.0,
-         "postlp": 12000.0, "autogain": 1, "mix": 1.0, "out": -1.0 }"#,
-    // Chebyshev 3rd-harmonic shimmer with a slow figure-8 wander.
-    r#"{ "name": "Cheby Shimmer", "category": "Morph",
-         "x": 0.60, "y": 0.50,
+         "postlp": 10000.0, "autogain": 1, "mix": 0.8, "out": 0.0 }"#,
+    // ---- Morph ------------------------------------------------------------
+    r#"{ "name": "Cynthoni Haze", "category": "Morph",
+         "x": 0.45, "y": 0.55,
+         "cA": 0, "cB": 4, "cC": 6, "cD": 5,
+         "gA": 0.0, "gB": 2.0, "gC": 1.0, "gD": 3.0,
+         "pre": 10.0, "orbit": 0, "orate": 0.5, "osync": 0, "odiv": 1,
+         "oradius": 0.3, "oshape": 0, "ophase": 0.0,
+         "postlp": 14000.0, "autogain": 1, "mix": 0.9, "out": -1.0 }"#,
+    r#"{ "name": "Glass Membrane", "category": "Morph",
+         "x": 0.60, "y": 0.40,
          "cA": 6, "cB": 0, "cC": 4, "cD": 6,
          "gA": 0.0, "gB": 0.0, "gC": 1.0, "gD": 2.0,
-         "pre": 10.0, "orbit": 1, "orate": 0.2, "osync": 0, "odiv": 2,
-         "oradius": 0.3, "oshape": 1, "ophase": 0.0,
-         "postlp": 18000.0, "autogain": 1, "mix": 0.8, "out": 0.0 }"#,
-    // Soft-crush + fold digital grit, darker post filter.
-    r#"{ "name": "Bit Edge", "category": "Digital",
+         "pre": 9.0, "orbit": 0, "orate": 0.5, "osync": 0, "odiv": 1,
+         "oradius": 0.3, "oshape": 0, "ophase": 0.0,
+         "postlp": 16000.0, "autogain": 1, "mix": 0.85, "out": 0.0 }"#,
+    r#"{ "name": "Velvet Sinew", "category": "Morph",
+         "x": 0.40, "y": 0.65,
+         "cA": 0, "cB": 1, "cC": 5, "cD": 4,
+         "gA": 1.0, "gB": 0.0, "gC": 2.0, "gD": 2.0,
+         "pre": 11.0, "orbit": 0, "orate": 0.5, "osync": 0, "odiv": 1,
+         "oradius": 0.3, "oshape": 0, "ophase": 0.0,
+         "postlp": 13000.0, "autogain": 1, "mix": 1.0, "out": -1.0 }"#,
+    r#"{ "name": "Fold Cathedral", "category": "Morph",
+         "x": 0.55, "y": 0.60,
+         "cA": 4, "cB": 5, "cC": 4, "cD": 5,
+         "gA": 0.0, "gB": 2.0, "gC": 1.0, "gD": 2.0,
+         "pre": 12.0, "orbit": 0, "orate": 0.5, "osync": 0, "odiv": 1,
+         "oradius": 0.3, "oshape": 0, "ophase": 0.0,
+         "postlp": 11000.0, "autogain": 1, "mix": 0.9, "out": -1.5 }"#,
+    // ---- Orbit ------------------------------------------------------------
+    r#"{ "name": "Tidal Drift", "category": "Orbit",
+         "x": 0.50, "y": 0.50,
+         "cA": 0, "cB": 1, "cC": 6, "cD": 4,
+         "gA": 0.0, "gB": 1.0, "gC": 1.0, "gD": 2.0,
+         "pre": 9.0, "orbit": 1, "orate": 0.15, "osync": 0, "odiv": 1,
+         "oradius": 0.30, "oshape": 0, "ophase": 0.0,
+         "postlp": 14000.0, "autogain": 1, "mix": 0.9, "out": -1.0 }"#,
+    r#"{ "name": "Sewer Current", "category": "Orbit",
+         "x": 0.50, "y": 0.45,
+         "cA": 2, "cB": 3, "cC": 0, "cD": 5,
+         "gA": 2.0, "gB": 1.0, "gC": 0.0, "gD": 3.0,
+         "pre": 12.0, "orbit": 1, "orate": 0.25, "osync": 0, "odiv": 1,
+         "oradius": 0.35, "oshape": 1, "ophase": 0.0,
+         "postlp": 9000.0, "autogain": 1, "mix": 1.0, "out": -1.5 }"#,
+    r#"{ "name": "Barbed Pendulum", "category": "Orbit",
+         "x": 0.50, "y": 0.50,
+         "cA": 3, "cB": 6, "cC": 2, "cD": 4,
+         "gA": 2.0, "gB": 0.0, "gC": 2.0, "gD": 3.0,
+         "pre": 13.0, "orbit": 1, "orate": 0.5, "osync": 1, "odiv": 2,
+         "oradius": 0.40, "oshape": 1, "ophase": 0.0,
+         "postlp": 10000.0, "autogain": 1, "mix": 1.0, "out": -2.0 }"#,
+    r#"{ "name": "Lunar Wobble", "category": "Orbit",
+         "x": 0.50, "y": 0.55,
+         "cA": 1, "cB": 4, "cC": 5, "cD": 0,
+         "gA": 0.0, "gB": 2.0, "gC": 2.0, "gD": 0.0,
+         "pre": 10.0, "orbit": 1, "orate": 0.5, "osync": 1, "odiv": 3,
+         "oradius": 0.45, "oshape": 0, "ophase": 0.25,
+         "postlp": 12000.0, "autogain": 1, "mix": 0.9, "out": -1.0 }"#,
+    // ---- Digital ----------------------------------------------------------
+    r#"{ "name": "Chlorine Bloom", "category": "Digital",
          "x": 0.40, "y": 0.60,
          "cA": 7, "cB": 3, "cC": 7, "cD": 5,
          "gA": 0.0, "gB": 3.0, "gC": 0.0, "gD": 2.0,
          "pre": 9.0, "orbit": 0, "orate": 0.5, "osync": 0, "odiv": 1,
          "oradius": 0.3, "oshape": 0, "ophase": 0.0,
          "postlp": 8000.0, "autogain": 1, "mix": 1.0, "out": -1.0 }"#,
-    // Gentle tape saturation parked near a warm corner.
-    r#"{ "name": "Tape Corner", "category": "Warm",
-         "x": 0.20, "y": 0.30,
-         "cA": 1, "cB": 1, "cC": 0, "cD": 1,
-         "gA": 0.0, "gB": 0.0, "gC": 0.0, "gD": 0.0,
-         "pre": 6.0, "orbit": 0, "orate": 0.5, "osync": 0, "odiv": 1,
+    r#"{ "name": "Datamosh Ritual", "category": "Digital",
+         "x": 0.55, "y": 0.50,
+         "cA": 6, "cB": 7, "cC": 3, "cD": 7,
+         "gA": 0.0, "gB": 2.0, "gC": 3.0, "gD": 1.0,
+         "pre": 11.0, "orbit": 1, "orate": 0.5, "osync": 0, "odiv": 1,
+         "oradius": 0.25, "oshape": 0, "ophase": 0.0,
+         "postlp": 7000.0, "autogain": 1, "mix": 1.0, "out": -1.5 }"#,
+    r#"{ "name": "Sub Rosa Static", "category": "Digital",
+         "x": 0.35, "y": 0.40,
+         "cA": 2, "cB": 7, "cC": 3, "cD": 3,
+         "gA": 1.0, "gB": 2.0, "gC": 0.0, "gD": 2.0,
+         "pre": 12.0, "orbit": 0, "orate": 0.5, "osync": 0, "odiv": 1,
          "oradius": 0.3, "oshape": 0, "ophase": 0.0,
-         "postlp": 16000.0, "autogain": 1, "mix": 0.9, "out": 0.0 }"#,
-    // Everything harsh, fast tempo-free figure-8 — maximum morphing chaos.
-    r#"{ "name": "Full Chaos Orbit", "category": "Extreme",
+         "postlp": 6000.0, "autogain": 1, "mix": 0.95, "out": -1.5 }"#,
+    // ---- Extreme ----------------------------------------------------------
+    r#"{ "name": "Total Erosion", "category": "Extreme",
          "x": 0.50, "y": 0.50,
-         "cA": 3, "cB": 6, "cC": 5, "cD": 7,
+         "cA": 3, "cB": 5, "cC": 6, "cD": 7,
          "gA": 3.0, "gB": 2.0, "gC": 4.0, "gD": 1.0,
-         "pre": 15.0, "orbit": 1, "orate": 2.0, "osync": 0, "odiv": 0,
-         "oradius": 0.5, "oshape": 1, "ophase": 0.0,
+         "pre": 18.0, "orbit": 1, "orate": 2.0, "osync": 0, "odiv": 1,
+         "oradius": 0.50, "oshape": 1, "ophase": 0.0,
          "postlp": 10000.0, "autogain": 1, "mix": 1.0, "out": -2.0 }"#,
+    r#"{ "name": "Rusted Godhead", "category": "Extreme",
+         "x": 0.50, "y": 0.50,
+         "cA": 5, "cB": 3, "cC": 5, "cD": 3,
+         "gA": 4.0, "gB": 2.0, "gC": 4.0, "gD": 2.0,
+         "pre": 20.0, "orbit": 0, "orate": 0.5, "osync": 0, "odiv": 1,
+         "oradius": 0.3, "oshape": 0, "ophase": 0.0,
+         "postlp": 8000.0, "autogain": 1, "mix": 1.0, "out": -3.0 }"#,
+    r#"{ "name": "Screech Liturgy", "category": "Extreme",
+         "x": 0.60, "y": 0.50,
+         "cA": 6, "cB": 5, "cC": 6, "cD": 5,
+         "gA": 2.0, "gB": 3.0, "gC": 2.0, "gD": 3.0,
+         "pre": 22.0, "orbit": 1, "orate": 6.0, "osync": 0, "odiv": 1,
+         "oradius": 0.40, "oshape": 0, "ophase": 0.0,
+         "postlp": 16000.0, "autogain": 1, "mix": 0.9, "out": -2.5 }"#,
+    r#"{ "name": "The Drowning Machine", "category": "Extreme",
+         "x": 0.50, "y": 0.50,
+         "cA": 2, "cB": 3, "cC": 3, "cD": 7,
+         "gA": 4.0, "gB": 4.0, "gC": 3.0, "gD": 2.0,
+         "pre": 24.0, "orbit": 1, "orate": 0.5, "osync": 1, "odiv": 0,
+         "oradius": 0.50, "oshape": 1, "ophase": 0.0,
+         "postlp": 5000.0, "autogain": 1, "mix": 1.0, "out": -3.0 }"#,
 ];
 
 /// Build a DSP [`Settings`] from a parsed preset, falling back to defaults for missing keys.
@@ -102,36 +193,70 @@ mod tests {
     use super::*;
     use suite_core::presets::load_all;
 
-    #[test]
-    fn all_presets_parse_and_differ_from_default() {
-        let presets = load_all(PRESET_JSON);
-        assert!(presets.len() >= 6, "need >= 6 presets, got {}", presets.len());
-        let d = Settings::default();
-        for p in &presets {
-            let s = settings_from_preset(p);
-            let mut diffs = 0;
-            if (s.x - d.x).abs() > 1e-3 {
-                diffs += 1;
-            }
-            if (s.y - d.y).abs() > 1e-3 {
-                diffs += 1;
-            }
-            if (s.pre_db - d.pre_db).abs() > 1e-3 {
-                diffs += 1;
-            }
-            if s.corner != d.corner {
-                diffs += 1;
-            }
-            if s.orbit_on != d.orbit_on {
-                diffs += 1;
-            }
-            if (s.mix - d.mix).abs() > 1e-3 {
-                diffs += 1;
-            }
-            if (s.post_lp_hz - d.post_lp_hz).abs() > 1e-3 {
-                diffs += 1;
-            }
-            assert!(diffs >= 3, "preset '{}' differs in only {diffs} params", p.name);
+    /// Count how many `Settings` fields differ between two presets (enums/bools by equality,
+    /// floats by a loose epsilon). Each of the four corner shapers and four corner gains is
+    /// counted individually; `tempo_bpm` is a fixed constant and is skipped. Drives both the
+    /// differ-from-default and pairwise-distinctness quality gates.
+    fn count_diffs(a: &Settings, b: &Settings) -> usize {
+        let mut n = 0;
+        if a.orbit_on != b.orbit_on { n += 1; }
+        if a.orbit_sync != b.orbit_sync { n += 1; }
+        if a.orbit_div != b.orbit_div { n += 1; }
+        if a.orbit_shape != b.orbit_shape { n += 1; }
+        if a.auto_gain != b.auto_gain { n += 1; }
+        for i in 0..NUM_CORNERS {
+            if a.corner[i] != b.corner[i] { n += 1; }
+            if (a.gain_db[i] - b.gain_db[i]).abs() > 1e-3 { n += 1; }
         }
+        let fs = [
+            (a.x, b.x), (a.y, b.y), (a.pre_db, b.pre_db),
+            (a.orbit_rate_hz, b.orbit_rate_hz), (a.orbit_radius, b.orbit_radius),
+            (a.orbit_phase0, b.orbit_phase0), (a.post_lp_hz, b.post_lp_hz),
+            (a.mix, b.mix), (a.out_db, b.out_db),
+        ];
+        for (x, y) in fs {
+            if (x - y).abs() > 1e-3 { n += 1; }
+        }
+        n
+    }
+
+    /// PRESET-EXPANSION quality gate (mechanical), all four rules across the full bank.
+    #[test]
+    fn bank_meets_expansion_quality_gate() {
+        let presets = load_all(PRESET_JSON);
+        // Deep bank: SPECS target 15-30 for a complex FX.
+        assert!(presets.len() >= 15, "SHAPESHIFT bank too small: {}", presets.len());
+
+        let d = Settings::default();
+        let settings: Vec<Settings> = presets.iter().map(settings_from_preset).collect();
+
+        // Rule 1 (loads) is implicit in load_all. Rule 2: every preset is categorised and differs
+        // from the default in >= 4 params.
+        for (p, s) in presets.iter().zip(&settings) {
+            assert!(p.category.is_some(), "preset '{}' has no category", p.name);
+            let diffs = count_diffs(s, &d);
+            assert!(diffs >= 4, "preset '{}' differs from default in only {diffs} params", p.name);
+        }
+
+        // Rule 3 (no near-duplicates): every preset differs from EVERY other in >= 2.
+        for i in 0..settings.len() {
+            for j in (i + 1)..settings.len() {
+                let diffs = count_diffs(&settings[i], &settings[j]);
+                assert!(
+                    diffs >= 2,
+                    "presets '{}' and '{}' differ in only {diffs} params (near-duplicate)",
+                    presets[i].name, presets[j].name
+                );
+            }
+        }
+
+        // Names must be unique too.
+        for i in 0..presets.len() {
+            for j in (i + 1)..presets.len() {
+                assert_ne!(presets[i].name, presets[j].name, "duplicate preset name");
+            }
+        }
+        // Rule 4 (render passes universal assertions) is enforced by the
+        // `render_tests::every_preset_renders_and_passes_universal` test in lib.rs.
     }
 }
