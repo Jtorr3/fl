@@ -196,3 +196,21 @@
       cap at 128).
 - [ ] **Preset names.** Saving a preset named `NUL`, `CON`, `COM5` etc. now lands on disk as
       `NUL_` / `CON_` / `COM5_` instead of silently vanishing into a Windows device name.
+
+## NERVE — suite modulation bus (2026-07-08)
+- [ ] **Rescan FL** (Options → Manage plugins → Find more plugins) → verify **Qeynos NERVE**
+      loads (CLAP + VST3 both installed; every other Qeynos plugin was also rebuilt/reinstalled
+      by the retrofit's rebuild-all).
+- [ ] **Cross-plugin modulation smoke test.** Put **NERVE** on any track, label it, load
+      **Techno Pump 1/8** with the transport playing. Open **GRIT** (or any retrofitted plugin)
+      on another track → expand the **MOD** section under its preset bar → route DRIVE to the
+      NERVE instance, signal S1, depth ~0.4 → the drive should audibly pump at 1/8ths while the
+      knob (and host automation) stays at its base value.
+- [ ] **Bridging caveat (informational):** cross-plugin modulation runs over a shared-memory
+      file (`%TEMP%\qeynos-bus`), so plugins should be **un-bridged** (FL default). Bridged
+      instances still map the same OS-wide file, but keeping the suite un-bridged is the
+      supported configuration (and what tier-1 OVERSEER already requires).
+- [ ] **Session-scoped routes:** MOD routes point at a NERVE *session* identity — after
+      reloading a project, re-pick the source in each MOD row (labels make this quick). This is
+      deliberate (a persisted random id breaks CLAP state reproducibility); a stable-id scheme
+      is a candidate follow-up.
