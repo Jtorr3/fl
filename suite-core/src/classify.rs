@@ -923,7 +923,14 @@ impl Default for MixAnalysis {
 /// hold the fallback to a *higher* bar than [`CONF_MARGIN`]: a clearly-characterised mix
 /// (strong sub + dark tilt at a techno tempo, or a dense break at a dnb tempo) clears it, but
 /// a murky/ambiguous mix stays [`SessionTheme::Generic`] rather than guess wrong.
-pub const MIX_FALLBACK_CONF_FLOOR: f32 = 0.5;
+///
+/// Retuned (OVERSEER LEARN-THEME fix): the original `0.5` sat only ~0.1 above a real dnb
+/// mix's score, so characterful-but-not-textbook material (a dark break, a mix with the tops
+/// rolled off) fell back to Generic and LEARN THEME captured nothing usable — ASSIST had zero
+/// targets. Lowered to `0.42` (still comfortably above [`CONF_MARGIN`] and well above a murky
+/// noise bed's score) so a clearly-characterised mix locks a real theme with margin, while an
+/// ambiguous mix still declines.
+pub const MIX_FALLBACK_CONF_FLOOR: f32 = 0.42;
 
 /// Infer the session theme from the live Node reports + master mix analysis. Returns
 /// `(theme, confidence)`. Below [`CONF_MARGIN`] the theme is [`SessionTheme::Generic`].
@@ -1032,10 +1039,13 @@ pub fn infer_theme_from_mix(mix_feat: &FeatureSummary, mix: &MixAnalysis) -> (Se
         * band(tempo, 118.0, 140.0, 16.0).max(if tempo <= 0.0 { 0.7 } else { 0.0 });
 
     // DNB-BREAKS: dense onsets (a break) + present sub + brighter/airier top; fast tempo when
-    // known.
+    // known. The brightness term is a soft *bonus* (floor 0.8, not 0.6): a dnb break at a dnb
+    // tempo is dnb even when its tops are rolled off (dark neuro/liquid material is common), so
+    // brightness must not be near-veto it into Generic — the tempo + break density are the real
+    // separators. This lifts a dark-but-clear break's score above the fallback floor with margin.
     let dnb = ge(onset, 6.0, 5.0)
         * ge(low, 0.20, 0.25)
-        * (0.6 + 0.4 * bright)
+        * (0.8 + 0.2 * bright)
         * band(tempo, 160.0, 180.0, 20.0).max(if tempo <= 0.0 { 0.5 } else { 0.0 });
 
     // AMBIENT/ATMOS: sparse onsets + sustained + wide, no driving low-end transients.
