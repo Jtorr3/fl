@@ -66,9 +66,17 @@ Presets: **Kick Strip**, **Vocal Strip**, **Bus Glue**.
 
 ```
 in → 4-band EQ → 3-band multiband comp (LR4 splits on TPT SVFs)
-   → lookahead limiter (2 ms, brickwall) → LUFS meter → mix → out
+   → maximizer Drive → lookahead limiter (2 ms, brickwall) → LUFS meter → mix → out
 ```
 
+- **Gain staging / maximizer.** The **Drive** stage (0–18 dB, default 6 dB) lifts the wet
+  program *into* the limiter, so enabling the Master at its defaults is **loudness-neutral-to-
+  louder and transparent** (like a real mastering chain), not net-lossy. The drive sits
+  **before** the limiter, so the limiter still guarantees the true-peak ceiling at the output
+  (measured post-drive). The multiband comp defaults are **gentle glue** (thresholds −16/−15/−14,
+  ratio 2, ≈1.5 dB threshold-neutral makeup) rather than several dB of squash — glue, then
+  maximize. A NEUTRALIZED Master (Drive 0, flat EQ, ratio-1 comp, high ceiling) still nulls/passes
+  clean. Drive 0 dB = pure gain-neutral: the maximizer is off.
 - The limiter delays audio by its 2 ms lookahead and **reports that latency** to the
   host; the dry path of `Mix` is latency-matched so mix=0 nulls.
 - True-peak-style metering approximated with 4x-oversampled peak detection (`TP≈`).
@@ -84,6 +92,7 @@ in → 4-band EQ → 3-band multiband comp (LR4 splits on TPT SVFs)
 | Low/Mid/High Ratio | 1–20:1 | per-band comp |
 | Low/Mid/High Makeup | ±24 dB | per-band gain |
 | Knee / Attack / Release | 0–24 dB / 0.1–100 ms / 10–1000 ms | shared comp ballistics |
+| Drive | 0–18 dB (default 6) | maximizer input drive into the limiter (loudness); 0 = off/neutral |
 | Ceiling | −12..0 dB | limiter output ceiling (brickwall) |
 | Lim Release | 10–1000 ms | limiter gain-envelope release |
 | Mix | 0–100 % | latency-matched dry/wet |
@@ -224,6 +233,9 @@ OVERSEER ships two editors from one bundle. Every parameter of both is listed be
 - **Knee** — shared multiband-comp soft-knee width, 0–24 dB.
 - **Attack** — shared comp attack, 0.1–100 ms.
 - **Release** — shared comp release, 10–1000 ms.
+- **Drive** — maximizer input drive into the limiter, 0–18 dB (default 6). This is the loudness
+  stage: it raises the program toward the ceiling so enabling the Master is louder-not-quieter,
+  while the limiter (downstream) keeps the true-peak at or below the **Ceiling**. 0 dB = neutral.
 - **Ceiling** — brickwall limiter output ceiling, −12…0 dB.
 - **Lim Release** — limiter gain-envelope release, 10–1000 ms.
 - **Mix** — latency-matched dry/wet, 0–100 %.

@@ -170,3 +170,52 @@ measurably toward the DARK-TECHNO reference; a murky/silent mix stays Generic; a
 `infer_theme` path is byte-unchanged. `process()` stays alloc-free (the self-analysis summary is
 already computed; inference is block/editor-rate). All deep-dive fixes + null/latency/PDC contracts
 re-verified GREEN (`cargo test -p overseer` 48/48, `--workspace` 0 failures, `build.ps1 -All` 30/30).
+
+### OVERSEER gain-staging + LEARN fix (2026-07-08, two user-reported defects)
+
+**User report (verbatim):** clicked Master "LEARN THEME" — *"bar ran, theme stayed generic, hardly
+any sound change — everything just got quieter and quality improved upon disabling."* Two defects.
+
+**DEFECT 1 — the Master chain was net-lossy (could only quiet/squash, never maximize).** Root cause
+confirmed: `EQ → multiband comp → limiter → mix`, where the limiter ONLY attenuates
+(`needed = ceiling/win_peak`, no input drive / makeup / output gain) and the comp defaults
+(thresholds −24/−22/−20, 0 makeup) took several dB of pure loss on a normal mix. There was no gain
+stage, so dropping the Master at default made a mix **quieter and duller than bypass** (the deep-dive
+E2E even worked around it by trimming the input UP — *"the chain is compressive"*).
+**Fix — a real mastering gain stage:** (a) a **maximizer Drive** (0–18 dB, default **6**) applied to
+the wet signal *into* the limiter (`master.rs` `process_block`) — it lifts loudness toward the
+ceiling, and because it is **pre-limiter** the limiter still guarantees the true-peak ceiling at the
+output; (b) the default multiband comp is now **gentle glue** (thresholds −16/−15/−14, ratio 2,
+≈1.5 dB threshold-neutral makeup) instead of −6 dB of squash; (c) a wet-path **~4 Hz DC blocker**
+(post-drive, pre-limiter) so the gentle-glue makeup can't inject DC. Exposed as a `Drive` param
+(default 6, `neutral_master` zeroes it → the neutral-null & mix=0 contracts hold).
+**Measured (`tools/audition.py`, DEFAULT master, bypass = mix 0 vs enabled):**
+- *kick+reese* (~−14 LUFS-I in): LUFS-I **−14.2 → −9.0 (+5.2, LOUDER not quieter)**; true-peak
+  **−6.0 → −1.02 dBTP** (ceiling honored); crest **7.9 → 7.7 dB** (punch kept); the source's own
+  DC_OFFSET is **fixed** by the new DC blocker.
+- *break+pad, full-range* (proves the master adds no tonal degradation): LUFS-I **−18.3 → −11.9
+  (+6.3)**; true-peak **−5.8 → −0.92 dBTP**; crest **13.3 → 12.0 dB**; deviation-vs-dark-techno
+  **206 → 198 dB** (toward the reference); **no new MUD/HARSH/DULL flags** — `audition.py` verdict
+  **IMPROVED**. (The kick+reese pair reads SUB_HEAVY/DULL/MUD by source character — a kick+reese has
+  no >8 kHz tops and is sub-dominant — the documented IMPACT/SNAP "DULL = no cymbal top" precedent,
+  not a Master artifact; the full-range source confirms it.)
+- Independent 4x-OS true-peak on the OUTPUT samples is capped exactly at the ceiling under 6/12/18 dB
+  of Drive (`default_master_honors_true_peak_ceiling_under_drive`) — the deep-dive ISP fix holds.
+Regression tests: `audit.rs::default_master_is_not_quieter_than_bypass` (LUFS ≥ bypass +1, TP ≤
+ceiling, crest ≥ 6, sub > harsh) + `default_master_honors_true_peak_ceiling_under_drive`.
+
+**DEFECT 2 — LEARN THEME captured but stayed GENERIC (ASSIST had zero targets).** The mix-fallback
+confidence floor `MIX_FALLBACK_CONF_FLOOR = 0.5` sat only ~0.1 above a real dnb mix's score, so
+characterful-but-not-textbook material fell back to Generic. **Fix (shared `classify.rs`):** lowered
+the floor to **0.42** (still above `CONF_MARGIN` and well above a murky bed) and made the dnb
+brightness term a soft bonus (`0.8 + 0.2·bright`, was `0.6 + 0.4·bright`) so a dark break at a dnb
+tempo isn't near-vetoed. Result: dnb mix confidence **0.60 → 0.80** (margin over the floor); techno
+stays 1.00; murky/silent stay Generic. `audit_master_theme_fallback_from_mix` TIGHTENED to require
+margin over the floor AND to assert both characterful captures LOCK a non-Generic theme with
+non-zero ASSIST targets (mirrors the `lib.rs` commit path, which locks the freshly-inferred mix
+theme). E2E (assisted DARK-TECHNO 0.3) still lands −8.2 LUFS-I / crest 7.5 / TP −2.5 dBTP.
+
+Gates GREEN: `cargo test -p overseer --release` **50/50** (incl. the 2 new gain-staging tests +
+tightened theme test), `cargo test --workspace --release` 0 failures, `build.ps1 -All` 30/30.
+All deep-dive fixes (limiter ISP, comp attack honesty, drive-0 sat bypass, ENRICH planted-defect,
+PDC) + the mix=0 / neutral-null / assist-0-null contracts re-verified.
