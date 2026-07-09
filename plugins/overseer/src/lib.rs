@@ -925,6 +925,8 @@ pub struct MasterParams {
     #[id = "release"]
     pub release: FloatParam,
 
+    #[id = "maxdrive"]
+    pub drive: FloatParam,
     #[id = "ceiling"]
     pub ceiling: FloatParam,
     #[id = "limrel"]
@@ -976,6 +978,14 @@ impl Default for MasterParams {
             attack: ms_param("Attack", d.comp_attack, 0.1, 100.0),
             release: ms_param("Release", d.comp_release, 10.0, 1000.0),
 
+            drive: FloatParam::new(
+                "Drive",
+                d.drive_db,
+                FloatRange::Linear { min: 0.0, max: 18.0 },
+            )
+            .with_unit(" dB")
+            .with_smoother(SmoothingStyle::Linear(20.0))
+            .with_value_to_string(formatters::v2s_f32_rounded(1)),
             ceiling: FloatParam::new(
                 "Ceiling",
                 d.ceiling_db,
@@ -1027,6 +1037,7 @@ impl MasterParams {
             comp_knee: self.knee.value(),
             comp_attack: self.attack.value(),
             comp_release: self.release.value(),
+            drive_db: self.drive.value(),
             ceiling_db: self.ceiling.value(),
             limiter_release: self.lim_release.value(),
             mix: self.mix.value(),
@@ -1060,6 +1071,7 @@ fn apply_master_preset(params: &MasterParams, setter: &ParamSetter, p: &Preset) 
     set_f(setter, &params.knee, s.comp_knee);
     set_f(setter, &params.attack, s.comp_attack);
     set_f(setter, &params.release, s.comp_release);
+    set_f(setter, &params.drive, s.drive_db);
     set_f(setter, &params.ceiling, s.ceiling_db);
     set_f(setter, &params.lim_release, s.limiter_release);
     set_f(setter, &params.mix, s.mix);
@@ -1502,6 +1514,7 @@ impl Plugin for OverseerMaster {
                                 .num_columns(3)
                                 .spacing([12.0, 6.0])
                                 .show(ui, |ui| {
+                                    row(ui, "DRIVE", &params.drive, setter);
                                     row(ui, "CEILING", &params.ceiling, setter);
                                     row(ui, "LIM RELEASE", &params.lim_release, setter);
                                     row(ui, "MIX", &params.mix, setter);
@@ -1736,6 +1749,7 @@ mod tests {
             b.ratio = 1.0;
             b.makeup = 0.0;
         }
+        s.drive_db = 0.0; // maximizer off → a NEUTRALIZED master passes clean
         s.ceiling_db = 0.0;
         s
     }

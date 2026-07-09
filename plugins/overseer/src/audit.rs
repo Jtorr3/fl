@@ -197,6 +197,7 @@ fn neutral_master(ceiling_db: f32) -> MasterSettings {
         b.ratio = 1.0;
         b.makeup = 0.0;
     }
+    s.drive_db = 0.0; // maximizer off → a NEUTRALIZED master passes clean
     s.ceiling_db = ceiling_db;
     s
 }
@@ -961,7 +962,13 @@ fn audit_master_theme_fallback_from_mix() {
         SessionTheme::DarkTechno,
         "Master-alone mix fallback must infer DARK-TECHNO from a kick+reese mix"
     );
-    assert!(t_conf >= MIX_FALLBACK_CONF_FLOOR, "techno fallback conf {t_conf} below floor");
+    // TIGHTENED (LEARN-THEME fix): require real MARGIN over the floor, not a hairline pass —
+    // a LEARN capture of characterful material must lock a theme with room to spare, not sit
+    // one noisy block away from falling back to Generic.
+    assert!(
+        t_conf >= MIX_FALLBACK_CONF_FLOOR + 0.3,
+        "techno fallback conf {t_conf} lacks margin over floor {MIX_FALLBACK_CONF_FLOOR}"
+    );
 
     // --- (b) the theme's assist targets are non-zero (SUGGEST moves come alive) ---
     let targets = theme_assist_targets(t_theme);
@@ -1047,7 +1054,30 @@ fn audit_master_theme_fallback_from_mix() {
         SessionTheme::DnbBreaks,
         "Master-alone mix fallback must infer DNB-BREAKS from a break+pad mix at 174 BPM"
     );
-    assert!(d_conf >= MIX_FALLBACK_CONF_FLOOR, "dnb fallback conf {d_conf} below floor");
+    // TIGHTENED: a dark break at a dnb tempo (tops rolled off) must still clear the floor with
+    // margin — the retuned brightness term must not near-veto it into Generic.
+    assert!(
+        d_conf >= MIX_FALLBACK_CONF_FLOOR + 0.15,
+        "dnb fallback conf {d_conf} lacks margin over floor {MIX_FALLBACK_CONF_FLOOR}"
+    );
+
+    // TIGHTENED: LEARN THEME must LOCK a non-Generic theme on both characterful captures. This
+    // mirrors the Master editor's commit path (lib.rs `master_enrich_ui`): on a finished LEARN
+    // it writes `theme.index()` where `theme` is the freshly-inferred mix theme — so a captured
+    // dark-techno / dnb mix locks DARK-TECHNO / DNB-BREAKS, never Generic (the user's bug: "bar
+    // ran, theme stayed generic").
+    for (mix_theme, tag) in [(t_theme, "techno"), (d_theme, "dnb")] {
+        assert_ne!(
+            mix_theme,
+            SessionTheme::Generic,
+            "LEARN THEME on a characterful {tag} mix must lock a non-Generic theme"
+        );
+        assert_ne!(
+            theme_assist_targets(mix_theme),
+            crate::enrich::AssistTargets::default(),
+            "locked {tag} theme must yield non-zero ASSIST targets (SUGGEST comes alive)"
+        );
+    }
 
     // --- (d) NODE-PRESENT path UNCHANGED: with real Node reports the Master still uses
     //     the per-instrument `infer_theme`, and `infer_theme` with NO nodes still declines
@@ -1067,4 +1097,137 @@ fn audit_master_theme_fallback_from_mix() {
         SessionTheme::Generic,
         "infer_theme must still decline on empty nodes (fallback lives at the Master call site)"
     );
+}
+
+// ===========================================================================
+// 11. GAIN STAGING — enabling the DEFAULT Master must be loudness-neutral-to-LOUDER
+//     and honor the true-peak ceiling (the user's DEFECT 1: "everything just got
+//     quieter and quality improved upon disabling").
+// ===========================================================================
+
+/// Render `src` (mono, stereo-duplicated) through a fresh Master with `s`, returning
+/// `(out_l, integrated_lufs, true_peak_db)`. The meters are read post-limiter, so `tp` is the
+/// output true-peak (ceiling must be honored there, drive notwithstanding).
+fn master_loudness(s: &MasterSettings, src: &[f32]) -> (Vec<f32>, f32, f32) {
+    let mut core = new_master();
+    let mut l = src.to_vec();
+    let mut r = src.to_vec();
+    master_render(&mut core, s, &mut l, &mut r);
+    let lufs = core.meters.lufs_integrated();
+    let tp = crate::node::load_f32(&core.meters.true_peak); // stored as dB already
+    (l, lufs, tp)
+}
+
+/// DEFECT 1 root-cause regression: at DEFAULT settings the Master must not be net-lossy.
+/// Enabling it on a normal mix must come out **≥ the bypass (dry) integrated loudness** — the
+/// maximizer drive + gentle glue replace the old net-loss chain — while the true-peak stays at
+/// or below the ceiling and the crest is not collapsed.
+#[test]
+fn default_master_is_not_quieter_than_bypass() {
+    // A normal techno-ish mix at a realistic pre-master level (~−16…−12 LUFS-I).
+    let kick = testsig::synth_kick_loop(132.0, 4, SR);
+    let secs = kick.len() as f32 / SR;
+    let reese = testsig::synth_reese(55.0, secs, SR);
+    let mix = mix_sum(&[&kick, &scale(&reese, 0.6)]);
+    let src = scale(&mix, 0.5 / peak(&mix));
+
+    // Bypass = the DEFAULT chain with mix=0 (the dry path = the input, latency-matched). Its
+    // metered loudness IS the input's integrated loudness — the exact "disable it" comparison.
+    let mut bypass = MasterSettings::default();
+    bypass.mix = 0.0;
+    let (dry, lufs_dry, _tp_dry) = master_loudness(&bypass, &src);
+
+    // Enabled = the DEFAULT chain (drive 6 dB, gentle glue, ceiling −1).
+    let enabled = MasterSettings::default();
+    let (wet, lufs_on, tp_on) = master_loudness(&enabled, &src);
+
+    write_stereo("default_bypass", &dry, &dry);
+    write_stereo("default_enabled", &wet, &wet);
+
+    // Full-range evidence pair (break + pad) for audition.py: a source WITH tops, so the
+    // producer-flag comparison reflects the Master's own tonal effect rather than the
+    // kick+reese source's inherent no-top DULL / sub-heavy character.
+    {
+        let brk = testsig::synth_break(150.0, 4, SR);
+        let bsecs = brk.len() as f32 / SR;
+        let pad = testsig::synth_pad(220.0, bsecs, SR);
+        let fr = mix_sum(&[&brk, &scale(&pad, 0.5)]);
+        let fsrc = scale(&fr, 0.5 / peak(&fr));
+        let mut byp = MasterSettings::default();
+        byp.mix = 0.0;
+        let (fdry, fl_dry, _) = master_loudness(&byp, &fsrc);
+        let (fwet, fl_on, ftp) = master_loudness(&MasterSettings::default(), &fsrc);
+        write_stereo("default_bypass_fullrange", &fdry, &fdry);
+        write_stereo("default_enabled_fullrange", &fwet, &fwet);
+        println!(
+            "GAINSTAGE fullrange(break+pad): bypass {fl_dry:.2} -> enabled {fl_on:.2} LUFS-I, TP {ftp:.2} dBTP"
+        );
+    }
+
+    let crest_dry = crest_db(&dry);
+    let crest_on = crest_db(&wet);
+    let axis = |x: &[f32], f: &[f32]| band_db(x, f) - db(rms(x));
+    let sub_on = axis(&wet, &[45.0, 55.0, 70.0]);
+    let harsh_on = axis(&wet, &[2_800.0, 3_500.0, 4_500.0]);
+    println!(
+        "GAINSTAGE default: bypass LUFS-I {lufs_dry:.2} -> enabled {lufs_on:.2} (Δ{:+.2}); \
+         TP {tp_on:.2} dBTP; crest {crest_dry:.2} -> {crest_on:.2} dB; \
+         enabled sub-rel {sub_on:+.2} harsh-rel {harsh_on:+.2} dB",
+        lufs_on - lufs_dry
+    );
+
+    // (1) NOT quieter — the headline contract.
+    assert!(
+        lufs_on >= lufs_dry - 0.1,
+        "DEFAULT Master is QUIETER than bypass: {lufs_dry:.2} -> {lufs_on:.2} LUFS-I"
+    );
+    // (2) Meaningfully LOUDER (the maximizer earns its name — this is not a wash).
+    assert!(
+        lufs_on >= lufs_dry + 1.0,
+        "DEFAULT Master barely moved loudness: {lufs_dry:.2} -> {lufs_on:.2} LUFS-I"
+    );
+    // (3) True-peak ceiling honored post-drive (default ceiling −1 dBTP, small OS tolerance).
+    assert!(
+        tp_on <= -1.0 + 0.3,
+        "DEFAULT Master output {tp_on:.2} dBTP over the −1 dBTP ceiling"
+    );
+    // (4) Punch retained — not over-squashed (transparency beats loudness).
+    assert!(
+        crest_on >= 6.0,
+        "DEFAULT Master crushed the crest to {crest_on:.2} dB (< 6 dB)"
+    );
+    // (5) No NEW harshness: the dark mix's sub still dominates the 2–5 k region.
+    assert!(
+        sub_on > harsh_on,
+        "DEFAULT Master introduced harshness (harsh-rel {harsh_on:+.2} ≥ sub-rel {sub_on:+.2})"
+    );
+}
+
+/// DEFECT 1 companion: the maximizer drive must never breach the true-peak ceiling, even on a
+/// HOT input driven hard into the limiter (the drive is PRE-limiter by construction, so the
+/// deep-dive's 4x-OS ISP guarantee still holds at the output).
+#[test]
+fn default_master_honors_true_peak_ceiling_under_drive() {
+    // A hot mix (near full-scale) + extra drive → the limiter must still cap the output TP.
+    let kick = testsig::synth_kick_loop(130.0, 4, SR);
+    let secs = kick.len() as f32 / SR;
+    let reese = testsig::synth_reese(55.0, secs, SR);
+    let mix = mix_sum(&[&kick, &scale(&reese, 0.7)]);
+    let hot = scale(&mix, 0.95 / peak(&mix));
+
+    for &(drive, ceil) in &[(6.0f32, -1.0f32), (12.0, -1.0), (18.0, -2.0)] {
+        let mut s = MasterSettings::default();
+        s.drive_db = drive;
+        s.ceiling_db = ceil;
+        let (out, _lufs, tp) = master_loudness(&s, &hot);
+        // Independent 4x-OS true-peak on the actual output samples (not just the meter).
+        let tp_indep = db(true_peak(&out));
+        println!(
+            "TP-UNDER-DRIVE drive {drive:.0} dB, ceiling {ceil:.0}: meter {tp:.2}, indep {tp_indep:.2} dBTP"
+        );
+        assert!(
+            tp_indep <= ceil + 0.35,
+            "drive {drive} dB breached the {ceil} dBTP ceiling: independent TP {tp_indep:.2}"
+        );
+    }
 }

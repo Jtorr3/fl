@@ -137,6 +137,29 @@ impl MasterShared {
     }
 }
 
+/// First-order DC blocker (~4 Hz corner at 48 kHz, `R = 0.9995`). Applied to the WET path only
+/// (post-drive, pre-limiter), so a mastering chain never injects DC into the master bus while
+/// the sub bass is preserved and the `mix=0` dry null is untouched. The gentle-glue multiband
+/// makeup can otherwise amplify a program's tiny low-band DC above the audible/measurable floor.
+#[derive(Clone, Copy, Default)]
+struct DcBlock {
+    x1: f32,
+    y1: f32,
+}
+impl DcBlock {
+    #[inline]
+    fn process(&mut self, x: f32) -> f32 {
+        let y = x - self.x1 + 0.9995 * self.y1;
+        self.x1 = x;
+        self.y1 = y;
+        y
+    }
+    fn reset(&mut self) {
+        self.x1 = 0.0;
+        self.y1 = 0.0;
+    }
+}
+
 /// Control sub-block length for block-advanced smoothing of the EQ-gain, band-comp and
 /// ceiling coefficients (mix is smoothed per sample).
 const CTRL_CHUNK: usize = 32;
@@ -150,6 +173,10 @@ fn lin_to_db(x: f32) -> f32 {
     } else {
         20.0 * x.log10()
     }
+}
+#[inline]
+fn db_to_lin(db: f32) -> f32 {
+    10f32.powf(db / 20.0)
 }
 #[inline]
 fn store_f32(a: &AtomicU32, v: f32) {
@@ -209,6 +236,12 @@ pub struct MasterSettings {
     pub comp_knee: f32,
     pub comp_attack: f32,
     pub comp_release: f32,
+    /// Maximizer input drive (dB) applied to the wet signal *into* the limiter. This is the
+    /// loudness/gain-staging stage that makes enabling the Master net loudness-neutral-to-louder
+    /// instead of net-lossy: the drive lifts program level toward the ceiling and the limiter
+    /// (post-drive) clamps the true-peak, so louder AND ceiling-honored. 0 dB = no maximizing
+    /// (a NEUTRALIZED master nulls clean).
+    pub drive_db: f32,
     pub ceiling_db: f32,
     pub limiter_release: f32,
     pub mix: f32,
@@ -220,26 +253,32 @@ impl Default for MasterSettings {
             eq: EqSettings::default(),
             xo_low: 180.0,
             xo_high: 2500.0,
+            // Default multiband comp is GENTLE GLUE, not squash: higher thresholds (so a
+            // normal −16…−12 LUFS mix only kisses the comp on transients, ~1–2 dB GR) with a
+            // small threshold-neutral makeup per band. The net-loss that made enabling the
+            // Master quieter (old thresholds −24/−22/−20 with 0 makeup → several dB of pure
+            // loss) is gone; loudness is provided by the maximizer `drive_db` into the limiter.
             bands: [
                 BandComp {
-                    threshold: -24.0,
+                    threshold: -16.0,
                     ratio: 2.0,
-                    makeup: 0.0,
+                    makeup: 1.5,
                 },
                 BandComp {
-                    threshold: -22.0,
+                    threshold: -15.0,
                     ratio: 2.0,
-                    makeup: 0.0,
+                    makeup: 1.5,
                 },
                 BandComp {
-                    threshold: -20.0,
+                    threshold: -14.0,
                     ratio: 2.0,
-                    makeup: 0.0,
+                    makeup: 1.5,
                 },
             ],
             comp_knee: 6.0,
             comp_attack: 15.0,
             comp_release: 160.0,
+            drive_db: 6.0,
             ceiling_db: -1.0,
             limiter_release: 100.0,
             mix: 1.0,
@@ -253,6 +292,7 @@ pub struct MasterCore {
     eq: [FourBandEq; 2],
     mb: [MultibandComp; 2],
     limiter: Limiter,
+    dc: [DcBlock; 2], // wet-path DC blocker (post-drive, pre-limiter)
     lufs: LoudnessMeter,
     tp_os: [Oversampler4x; 2],
     // Latency-matched dry path for the null at mix=0.
@@ -273,6 +313,8 @@ pub struct MasterCore {
     // --- Param smoothing (MAJOR 3) --------------------------------------------------
     sm_mix: OnePole,      // per sample
     sm_ceiling: OnePole,  // per CTRL_CHUNK
+    sm_drive: OnePole,    // maximizer input drive (dB), per CTRL_CHUNK
+    drive_lin: f32,       // linear drive gain recomputed at each CTRL_CHUNK boundary
     sm_low_gain: OnePole, // EQ gains, per CTRL_CHUNK
     sm_b1_gain: OnePole,
     sm_b2_gain: OnePole,
@@ -298,6 +340,7 @@ impl MasterCore {
             eq: [FourBandEq::new(), FourBandEq::new()],
             mb: [MultibandComp::new(fs), MultibandComp::new(fs)],
             limiter,
+            dc: [DcBlock::default(), DcBlock::default()],
             lufs: LoudnessMeter::new(fs, 2),
             tp_os: [Oversampler4x::new(), Oversampler4x::new()],
             latency,
@@ -310,6 +353,8 @@ impl MasterCore {
             assist: AssistTargets::default(),
             sm_mix: sm(),
             sm_ceiling: sm(),
+            sm_drive: sm(),
+            drive_lin: 1.0,
             sm_low_gain: sm(),
             sm_b1_gain: sm(),
             sm_b2_gain: sm(),
@@ -333,6 +378,9 @@ impl MasterCore {
             m.reset();
         }
         self.limiter.reset();
+        for d in self.dc.iter_mut() {
+            d.reset();
+        }
         self.lufs.reset();
         for o in self.tp_os.iter_mut() {
             o.reset();
@@ -412,6 +460,8 @@ impl MasterCore {
     fn snap_smoothers(&mut self) {
         self.sm_mix.reset(self.tgt.mix.clamp(0.0, 1.0));
         self.sm_ceiling.reset(self.tgt.ceiling_db);
+        self.sm_drive.reset(self.tgt.drive_db);
+        self.drive_lin = db_to_lin(self.tgt.drive_db);
         self.sm_low_gain.reset(self.tgt.eq.low_gain);
         self.sm_b1_gain.reset(self.tgt.eq.b1_gain);
         self.sm_b2_gain.reset(self.tgt.eq.b2_gain);
@@ -479,6 +529,7 @@ impl MasterCore {
             }
         }
         self.limiter.set_ceiling_db(self.sm_ceiling.value());
+        self.drive_lin = db_to_lin(self.sm_drive.value());
     }
 
     /// Process a stereo block in place.
@@ -515,6 +566,7 @@ impl MasterCore {
                 // Per-sample mix smoothing; advance the coefficient smoothers per sample.
                 let mix = self.sm_mix.process(self.tgt.mix).clamp(0.0, 1.0);
                 self.sm_ceiling.process(self.tgt.ceiling_db);
+                self.sm_drive.process(self.tgt.drive_db);
                 self.sm_low_gain.process(self.tgt.eq.low_gain);
                 self.sm_b1_gain.process(self.tgt.eq.b1_gain);
                 self.sm_b2_gain.process(self.tgt.eq.b2_gain);
@@ -535,11 +587,13 @@ impl MasterCore {
                 self.dry_r[self.dpos] = in_r;
                 self.dpos = (self.dpos + 1) % dlen;
 
-                // Wet: EQ → multiband comp → limiter.
+                // Wet: EQ → multiband comp → maximizer drive → limiter. The drive lifts the
+                // program toward the ceiling (loudness); the limiter is AFTER it, so the
+                // true-peak ceiling is still guaranteed post-gain (measured on the output below).
                 let el = self.eq[0].process(in_l);
                 let er = self.eq[1].process(in_r);
-                let ml = self.mb[0].process(el);
-                let mr = self.mb[1].process(er);
+                let ml = self.dc[0].process(self.mb[0].process(el) * self.drive_lin);
+                let mr = self.dc[1].process(self.mb[1].process(er) * self.drive_lin);
                 let (ll, lr) = self.limiter.process(ml, mr);
 
                 let ol = mix * ll + (1.0 - mix) * dry_l;

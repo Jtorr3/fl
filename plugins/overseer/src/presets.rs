@@ -365,6 +365,7 @@ pub fn master_settings_from_preset(p: &Preset) -> MasterSettings {
         comp_knee: g("knee", d.comp_knee),
         comp_attack: g("attack", d.comp_attack),
         comp_release: g("release", d.comp_release),
+        drive_db: g("drive", d.drive_db),
         ceiling_db: g("ceiling", d.ceiling_db),
         limiter_release: g("lim_release", d.limiter_release),
         mix: g("mix", d.mix),
